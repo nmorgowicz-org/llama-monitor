@@ -84,7 +84,9 @@ export async function detectModelFamilyAsync(identityName, localPath, timeoutMs)
           });
           if (metaResp.ok) {
             const meta = await metaResp.json().catch(() => ({}));
-            const modelType = meta.model_type || meta.config?.model_type;
+            // /api/models/mlx-introspect nests the parsed config under data.config,
+            // not top-level — meta.model_type/meta.config were never populated.
+            const modelType = meta.data?.config?.model_type || meta.model_type;
             if (modelType) {
               const family = communityFamilyFromGgufArchitecture(modelType);
               if (family) return family;

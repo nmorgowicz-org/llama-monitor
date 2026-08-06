@@ -1031,6 +1031,56 @@ impl RapidMlxAdapter {
     }
 }
 
+/// Why a requested chat-template overlay was not applied at launch. A stable, matchable
+/// classification of the (currently string-based) overlay-failure warning, so the reason can
+/// eventually drive frontend copy (Phase 1, plan §2.2) instead of the caller parsing English text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChatTemplateDegradeReason {
+    /// The model was selected by alias — a bare string with no directory to overlay into.
+    AliasSource,
+    /// The resolved launch path does not exist on disk.
+    ModelPathMissing,
+    /// The resolved launch path exists but is not a directory.
+    ModelPathNotDirectory,
+    /// The requested template file could not be read.
+    TemplateUnreadable,
+    /// The overlay directory could not be written (symlinks or `chat_template.jinja`).
+    OverlayWriteFailed,
+}
+
+impl ChatTemplateDegradeReason {
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            Self::AliasSource => "alias_source",
+            Self::ModelPathMissing => "model_path_missing",
+            Self::ModelPathNotDirectory => "model_path_not_directory",
+            Self::TemplateUnreadable => "template_unreadable",
+            Self::OverlayWriteFailed => "overlay_write_failed",
+        }
+    }
+
+    /// Alias sources are classified from the model's origin, not the overlay error, because
+    /// `create_template_overlay` has no notion of `RapidMlxModelSource` — it only sees a path.
+    fn classify(
+        source: &model_resolver::RapidMlxModelSource,
+        err: &anyhow::Error,
+    ) -> Self {
+        if matches!(source, model_resolver::RapidMlxModelSource::Alias { .. }) {
+            return Self::AliasSource;
+        }
+        let msg = err.to_string();
+        if msg.contains("does not exist") {
+            Self::ModelPathMissing
+        } else if msg.contains("is not a directory") {
+            Self::ModelPathNotDirectory
+        } else if msg.contains("not readable") {
+            Self::TemplateUnreadable
+        } else {
+            Self::OverlayWriteFailed
+        }
+    }
+}
+
 /// Seeds a command builder with the non-Phase-7 launch settings.
 ///
 /// Split out of `build_launch` during the Phase 7A2 reconciliation. Together with
@@ -1065,8 +1115,11 @@ pub(crate) fn build_launch_argv(
                 // The launch will use the native template; this allows graceful degradation
                 // if the template file is missing or overlay creation fails. Also surfaced
                 // as a launch warning (Phase 9 B3) so this isn't silent to the operator.
+                let reason =
+                    ChatTemplateDegradeReason::classify(&adapter.resolved_model.original_input, &e);
                 let msg = format!(
-                    "Rapid-MLX chat template overlay failed ({e}, template: {ct_file}): using native model template"
+                    "Rapid-MLX chat template overlay failed [{}] ({e}, template: {ct_file}): using native model template",
+                    reason.code()
                 );
                 eprintln!("Warning: {msg}");
                 overlay_warning = Some(msg);

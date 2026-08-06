@@ -160,6 +160,7 @@ function hfSearchForWizard({ query, author, sort, limit }) {
         wizardState.model.modelBytes = Number(m.model_size_bytes) || 0;
         selectWizardEngine('rapid_mlx', true);
         updateSelectedModelDisplay();
+        autoInstallChatTemplate();
       } else {
         fetchHfFiles(m.id);
       }

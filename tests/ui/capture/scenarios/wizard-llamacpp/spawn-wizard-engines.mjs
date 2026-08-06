@@ -120,12 +120,18 @@ export default async function(ctx) {
     await page.evaluate(() => document.querySelector('#rapid-mlx-profile-hints input[type="checkbox"]')?.click());
     await sleep(500);
 
-    // Helper: scroll wizard-body to center an element in the viewport (absolute position).
+    // Helper: scroll the element's nearest scrollable ancestor to center it in the viewport.
+    // Not hardcoded to `.wizard-body` — Phase 0.2 re-parented `#rapid-hardware-panel` inside
+    // `.wizard-main`, which scrolls independently, so the right container depends on the target.
     const scrollToElement = (selector, yOffset = 0) =>
         page.evaluate((params) => {
             const el = document.querySelector(params.selector);
-            const body = document.querySelector('.wizard-body');
-            if (!el || !body) return;
+            if (!el) return;
+            let body = el.closest('.wizard-main') || el.closest('.wizard-body');
+            if (body && body.scrollHeight <= body.clientHeight) {
+                body = document.querySelector('.wizard-body');
+            }
+            if (!body) return;
             const rect = el.getBoundingClientRect();
             const elementTop = body.scrollTop + rect.top;
             const viewportCenter = body.clientHeight / 2;

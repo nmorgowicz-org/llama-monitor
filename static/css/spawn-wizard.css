@@ -351,6 +351,15 @@
   gap: var(--gap-sm);
   padding: 14px 14px 10px;
   border-radius: var(--radius-base);
+  /* Sticks in place while .wizard-main scrolls independently, so memory
+     feedback stays visible next to long control lists (e.g. MLX step 2). */
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: 100%;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-accent) 25%, transparent) transparent;
   background:
     radial-gradient(circle at top left, var(--acc-08), transparent 36%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01)),
@@ -6844,8 +6853,10 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
 .engine-rapid-mlx #wizard-step-1 > .wizard-sidebar { display:none; }
 /* The MLX fit rail (hw-vram-sidebar) stays visible here — the server estimate is
    calculated for Rapid-MLX the same as llama.cpp, and hiding it was a defect, not
-   a design choice. Only the llama.cpp-specific wizard-main column is hidden. */
-.engine-rapid-mlx #wizard-step-2 > .wizard-main { display:none; }
+   a design choice. Only the llama.cpp-specific wizard-main children are hidden;
+   rapid-hardware-panel now lives inside .wizard-main (Phase 0.2 re-parent) so it
+   must be excluded from this rule instead of the whole column being hidden. */
+.engine-rapid-mlx #wizard-step-2 > .wizard-main > :not(.rapid-hardware-panel) { display:none; }
 .engine-rapid-mlx .rapid-hardware-panel { width:auto; margin:0; }
 
 [data-theme="light"] .wizard-engine-section { background:linear-gradient(145deg,#f5f8ff,#fff); }

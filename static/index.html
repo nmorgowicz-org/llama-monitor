@@ -3938,6 +3938,7 @@
 
             <!-- Step 3: Hardware -->
             <div class="wizard-step" id="wizard-step-2" tabindex="-1">
+                <div class="wizard-main">
                 <div class="rapid-hardware-panel" id="rapid-hardware-panel" hidden>
                     <div class="rapid-hardware-orb">R</div>
                     <div class="rapid-hardware-content">
@@ -3963,7 +3964,7 @@
                                          <option value="int8">int8 — recommended (tool calling)</option>
                                          <option value="bf16">bf16 — highest precision</option>
                                      </select>
-                                      <div class="field-hint">Memory vs precision tradeoff; int8 recommended for tool calling. int4 is blocked when Reasoning mode is enabled (pins to int8).</div>
+                                      <div class="field-hint">This build always launches with int8 active KV, regardless of this selection — Rapid-MLX's <code>--reasoning</code> flag pins it unconditionally. This control is not yet wired to the launch; it is kept visible so a future runtime that respects it doesn't require new UI.</div>
                                  </div>
                                  <div class="hardware-field">
                                      <label for="spawn-rapid-cache-mode" title="Auto tracks the measured single-user coding-agent recommendation (8 GiB, 16 entries) even if it changes later. Off disables the retained cache. Custom uses the Retained cache selector below as configured.">Prompt cache mode</label>
@@ -3990,7 +3991,7 @@
                                          <option value="glm4">glm4</option><option value="minimax_m2">minimax_m2</option>
                                          <option value="gpt_oss">gpt_oss</option>
                                      </select>
-                                     <div class="field-hint">Detected: <span id="spawn-rapid-tool-parser-detected">unknown</span>. An explicit choice overrides Rapid auto-detection.</div>
+                                     <div class="field-hint">Detected: <span id="spawn-rapid-tool-parser-detected">Not reported by this model</span>. An explicit choice overrides Rapid auto-detection.</div>
                                  </div>
                                  <div class="hardware-field">
                                      <label for="spawn-rapid-reasoning-parser">Reasoning parser</label>
@@ -4003,7 +4004,7 @@
                                          <option value="harmony">harmony</option><option value="minimax">minimax</option>
                                          <option value="ui_tars">ui_tars</option>
                                      </select>
-                                     <div class="field-hint">Detected: <span id="spawn-rapid-reasoning-parser-detected">unknown</span>. Auto preserves the model profile.</div>
+                                     <div class="field-hint">Detected: <span id="spawn-rapid-reasoning-parser-detected">Not reported by this model</span>. Auto preserves the model profile.</div>
                                  </div>
                                  <div class="hardware-field">
                                      <label for="spawn-rapid-hybrid-mode">Hybrid architecture</label>
@@ -4091,7 +4092,7 @@
                                           <option value="k8v4">TurboQuant K8V4 — Advanced trial</option>
                                           <option value="v4">TurboQuant V-only — Expert legacy</option>
                                       </select>
-                                      <div class="field-hint">Retained-prefix compression only. Does not save active KV or weights. K8V4 showed 40–100% slower TTFT in Phase 6 benchmarks; requires re-validation post rapid-mlx v0.11.0.</div>
+                                      <div class="field-hint">TurboQuant (K8V4 / V-only) is <strong>requested but not applied at launch</strong> — the server always starts with standard int4 retained storage until a per-model qualification receipt exists. K8V4 also showed 40–100% slower TTFT in Phase 6 benchmarks. The selection is preserved so a future qualified receipt can turn it on without re-configuring.</div>
                                  </div>
                                  <!-- Throughput / memory (Phase 7 fields, previously backend-only) -->
                                  <div class="hardware-field">
@@ -4133,7 +4134,7 @@
                                          <option value="auto">Auto — runtime decides</option>
                                          <option value="on">On — force PFlash</option>
                                      </select>
-                                     <div class="field-hint">On bypasses TurboQuant, so it cannot be combined with a TurboQuant reusable-prompt-storage mode.</div>
+                                     <div class="field-hint"><strong>Auto and On are not recommended:</strong> a 2026-07-24 benchmark measured recall collapsing to 0.0–0.4 (vs 1.0 with PFlash off) at long context, while throughput rose ~4x — the compressed region is being dropped, not lossily retained. In an agentic coding loop this is a silent failure mode. On also bypasses TurboQuant, so it cannot be combined with a TurboQuant reusable-prompt-storage mode.</div>
                                  </div>
                                  <div class="hardware-field" id="spawn-rapid-hybrid-cache-entries-wrap">
                                      <label for="spawn-rapid-hybrid-cache-entries" title="Caps retained hybrid prompt snapshots. Only takes effect while the retained cache is on; the separate memory ceiling still applies.">Retained prefix entries</label>
@@ -4202,7 +4203,6 @@
                          </div>
                      </div>
                  </div>
-                <div class="wizard-main">
                     <div>
                         <div class="wizard-section-title">Configure hardware</div>
                         <div class="wizard-section-desc">

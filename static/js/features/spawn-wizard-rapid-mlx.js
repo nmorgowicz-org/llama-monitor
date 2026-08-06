@@ -589,12 +589,34 @@ function _applyUnifiedProfileRecommendations() {
   _renderUnifiedProfileWarnings(unified);
 }
 
+// "Detected:" spans are tri-state, not just profile.field || 'unknown':
+// - 'Detecting…' while a profile fetch is in flight
+// - 'Not reported by this model' when the fetch completed but the field is absent
+// - the literal API value otherwise (including a real 'unknown' if rapid-mlx ever sends one)
+function _setDetectedText(elId, state, value) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (state === 'detecting') {
+    el.textContent = 'Detecting…';
+  } else {
+    el.textContent = value || 'Not reported by this model';
+  }
+}
+
+export function markRapidMlxDetectionInFlight() {
+  _setDetectedText('spawn-rapid-tool-parser-detected', 'detecting');
+  _setDetectedText('spawn-rapid-reasoning-parser-detected', 'detecting');
+}
+
 // Render contextual hints from the live Rapid-MLX profile.
 // Only renders when on the Rapid-MLX hardware panel and a profile is available.
 function _renderRapidMlxProfileHints() {
+  const profile = wizardState.model.rapidMlxProfile;
+  _setDetectedText('spawn-rapid-tool-parser-detected', 'done', profile?.tool_format);
+  _setDetectedText('spawn-rapid-reasoning-parser-detected', 'done', profile?.reasoning_parser);
+
   const hintsEl = document.getElementById('rapid-mlx-profile-hints');
   if (!hintsEl) return;
-  const profile = wizardState.model.rapidMlxProfile;
   if (!profile) {
     hintsEl.style.display = 'none';
     return;
@@ -604,10 +626,6 @@ function _renderRapidMlxProfileHints() {
 
   const hasVision = profile.extras && (profile.extras.vision || profile.extras.has_vision_tower);
   const hasEmbeddings = profile.extras && profile.extras.embeddings;
-  const toolDetected = document.getElementById('spawn-rapid-tool-parser-detected');
-  const reasoningDetected = document.getElementById('spawn-rapid-reasoning-parser-detected');
-  if (toolDetected) toolDetected.textContent = profile.tool_format || 'unknown';
-  if (reasoningDetected) reasoningDetected.textContent = profile.reasoning_parser || 'unknown';
   if (profile.reasoning_parser && wizardState.hardware.rapidReasoningMode == null) {
     wizardState.hardware.rapidReasoningMode = 'on';
     if (dom.reasoningModeCheck) dom.reasoningModeCheck.checked = true;
@@ -777,11 +795,15 @@ async function _fetchRapidMlxModelProfile(modelId) {
   } catch {
     wizardState.model.rapidMlxProfile = null;
     wizardState.model.rapidMlxUnifiedProfile = null;
+    _renderRapidMlxProfileHints();
   }
 }
 
 // Debounced wrapper: schedule a profile fetch after model selection stabilizes.
 export function scheduleRapidMlxProfileFetch(modelId) {
+  if (modelId && modelId.trim().length >= 2 && wizardState.engine.selected === 'rapid_mlx') {
+    markRapidMlxDetectionInFlight();
+  }
   clearTimeout(_rapidMlxProfileTimer);
   _rapidMlxProfileTimer = setTimeout(() => {
     _fetchRapidMlxModelProfile(modelId);

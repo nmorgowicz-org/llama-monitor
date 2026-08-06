@@ -1796,12 +1796,15 @@ pub(crate) fn create_template_overlay(
 
     let model_path = Path::new(model_dir);
 
-    // Validate model directory exists and is a directory
+    // Validate the model directory exists, and separately that it's a directory. These are
+    // distinct failure modes (a bare `Alias` launch_argument hits the first; a launch_argument
+    // that resolved to a file would hit the second) and callers classify the resulting launch
+    // warning by matching on the message text, so keep the two reasons apart.
+    if !model_path.exists() {
+        bail!("Model directory does not exist: {}", model_dir);
+    }
     if !model_path.is_dir() {
-        bail!(
-            "Model directory does not exist or is not a directory: {}",
-            model_dir
-        );
+        bail!("Model path is not a directory: {}", model_dir);
     }
 
     // Validate template file exists and is readable
