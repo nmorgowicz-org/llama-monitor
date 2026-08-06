@@ -31,6 +31,7 @@ import scenarioSpawnWizard from './scenarios/wizard-llamacpp/spawn-wizard.mjs';
 import scenarioSpawnWizardEngines from './scenarios/wizard-llamacpp/spawn-wizard-engines.mjs';
 import scenarioSpawnWizardGif from './scenarios/wizard-llamacpp/spawn-wizard-gif.mjs';
 import scenarioSpawnWizardHfDownload from './scenarios/wizard-llamacpp/spawn-wizard-hf-download.mjs';
+import scenarioSpawnWizardTierMatrix from './scenarios/wizard-llamacpp/spawn-wizard-tier-matrix.mjs';
 import scenarioSpawnWizardRapidMlxGif from './scenarios/wizard-rapidmlx/spawn-wizard-rapid-mlx-gif.mjs';
 import scenarioRapidMlxRuntime from './scenarios/wizard-rapidmlx/rapid-mlx-runtime.mjs';
 import scenarioRapidMlxLive from './scenarios/wizard-rapidmlx/rapid-mlx-live.mjs';
@@ -122,6 +123,7 @@ Scenarios:
      spawn-wizard-gif          Animated GIF walking through all setup wizard steps (llama.cpp path)
      spawn-wizard-rapid-mlx-gif  Animated GIF: Rapid-MLX engine, hardware controls, profile hints, spawn
      spawn-wizard-hf-download  HF download panel: idle options and simulated progress
+     spawn-wizard-tier-matrix  Hardware step at Quick/Balanced/Advanced tiers (registry disclosure)
      discussions             Chat template Discussions: Qwen (froggeric) and Gemma4 (google) feeds,
                             Create fix modal, and Lifecycle modal Discussions section
 
@@ -202,6 +204,7 @@ const SCENARIOS = {
     'spawn-wizard-gif': { run: scenarioSpawnWizardGif, category: 'wizard-llamacpp', runtime: 'llamacpp-local' },
     'spawn-wizard-rapid-mlx-gif': { run: scenarioSpawnWizardRapidMlxGif, category: 'wizard-rapidmlx', runtime: 'rapidmlx-local' },
     'spawn-wizard-hf-download': { run: scenarioSpawnWizardHfDownload, category: 'wizard-llamacpp', runtime: 'llamacpp-local' },
+    'spawn-wizard-tier-matrix': { run: scenarioSpawnWizardTierMatrix, category: 'wizard-llamacpp', runtime: 'llamacpp-local' },
     'discussions': { run: scenarioDiscussions, setup: () => { seedRapidMlxCapturePreset(); }, category: 'presets', runtime: 'neutral' },
     'tune-panel': { run: scenarioTunePanel, category: 'features', runtime: 'neutral' },
     'benchmark-results': { run: scenarioBenchmarkResults, category: 'features', runtime: 'neutral' },
