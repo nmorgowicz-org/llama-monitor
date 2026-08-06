@@ -1,6 +1,10 @@
 # MLX Spawn Wizard Overhaul — Unified Loader Architecture
 
-Date: 2026-08-06 (rev 2) · Branch: `feat/rapid-mlx-integration` · Status: DISCUSSION, decision-ready
+Date: 2026-08-06 (rev 2) · Branch: `feat/rapid-mlx-integration` · Status: **EXECUTED — archived**
+
+Phases 1-5 (findings, unified registry, MLX group translation, capture-harness migration,
+reference documentation) are complete and committed. Phase 6 (MTPLX readiness check) is
+tracked separately going forward.
 
 Rev 2 supersedes the first pass. The grounded findings in §1 are carried forward and extended; the "Options A/B/C" menu is **removed** — there is one recommended architecture (§3), executed in phases (§5). Every open question from rev 1 is resolved in §2 from code and archive evidence.
 
