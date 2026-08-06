@@ -2165,6 +2165,11 @@ function renderEngineSelection() {
     if (selected === 'rapid_mlx') applyRapidMlxDefaults();
   }
   configureMlxWizardIA(dom.overlay, selected === 'rapid_mlx');
+  // §2.7: MLX repos are already a specific quant, so swap the llama.cpp quant
+  // advisor for the MLX sidebar body (repo-is / sibling-variants) instead.
+  const mlxSidebarBody = document.getElementById('mlx-sidebar-body');
+  if (mlxSidebarBody) mlxSidebarBody.style.display = selected === 'rapid_mlx' && wizardState.model.paramB > 0 ? '' : 'none';
+  if (selected === 'rapid_mlx' && dom.quantAdvisor) dom.quantAdvisor.style.display = 'none';
   if (dom.rapidMlxAdvancedSection) {
     dom.rapidMlxAdvancedSection.style.display = selected === 'rapid_mlx' ? '' : 'none';
     if (selected === 'rapid_mlx') ensureEscapeHatchRendered();

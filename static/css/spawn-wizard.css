@@ -4001,6 +4001,91 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
   gap: 8px 12px;
 }
 
+/* MLX sidebar body (§2.7): repo-is-already-a-quant info + real sibling variants,
+   replacing the synthetic quant ladder shown to llama.cpp users. */
+.mlx-sidebar-body {
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.02);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.mlx-sidebar-repo-info {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text-secondary, #cbd5e1);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.mlx-sidebar-repo-info .mlx-info-label {
+  color: var(--text-muted, #64748b);
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+
+.mlx-sidebar-variants {
+  padding: 8px 12px 10px;
+}
+
+.mlx-sidebar-variants-title {
+  font-size: 11px;
+  color: var(--text-muted, #64748b);
+  margin-bottom: 6px;
+}
+
+.mlx-variant-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 12px;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+
+.mlx-variant-row:first-of-type {
+  border-top: none;
+}
+
+.mlx-variant-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary, #e2e8f0);
+}
+
+.mlx-variant-size {
+  color: var(--text-muted, #64748b);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.mlx-variant-evidence-btn {
+  background: none;
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  line-height: 14px;
+  font-size: 10px;
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.mlx-variant-evidence-btn:hover {
+  color: var(--text-primary, #e2e8f0);
+  border-color: rgba(255,255,255,0.3);
+}
+
+[data-theme="light"] .mlx-sidebar-body {
+  border-color: rgba(0,0,0,0.1);
+  background: rgba(0,0,0,0.02);
+}
+
 .legend-item { display: flex; align-items: center; gap: 5px; }
 .legend-dot  { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
 .legend-fit  { background:var(--color-success); }

@@ -14,6 +14,7 @@ import {
   hfCreateScopeSelector,
   hfCreateSortSelector,
   HF_SORT,
+  openHfEvidence,
 } from './hf-browse.js';
 import {
   dom,
@@ -135,7 +136,10 @@ export function initHfBrowseWidgets() {
         dom.sidebarCtxPills.querySelectorAll('.vram-ctx-pill').forEach(p => p.classList.remove('active'));
         pill.classList.add('active');
         wizardState.hardware.contextSize = parseInt(pill.dataset.ctx, 10);
-        if (wizardState.model.paramB > 0) triggerQuantAdvisor();
+        if (wizardState.model.paramB > 0) {
+          if (wizardState.engine.selected === 'rapid_mlx') renderMlxSidebarVramBar();
+          else triggerQuantAdvisor();
+        }
       });
     }
 
@@ -194,7 +198,10 @@ function hfSearchForWizard({ query, author, sort, limit }) {
         fetchHfFiles(m.id);
       }
       refreshEngineRecommendation();
-      if (m.param_b > 0) triggerQuantAdvisor();
+      if (m.param_b > 0) {
+        if (m.format === 'mlx') triggerMlxSidebarBody(m.id);
+        else triggerQuantAdvisor();
+      }
       clearValidationError();
       refreshStepGuardrails();
       scheduleRapidMlxProfileFetch(m.id);
@@ -520,6 +527,162 @@ function renderSidebarVramBar(pick) {
   }, { force: true });
 }
 
+
+// ── MLX sidebar body (plan §2.7) ────────────────────────────────────────────
+// An MLX repo already *is* a specific quant — there's no ladder to advise on.
+// This replaces the quant advisor with: what the repo already is (bits/group +
+// size), ctx pills seeded from the repo's own native context, the existing
+// vram-bar fed by the real MLX estimate, and real sibling variants (not a
+// synthetic ladder).
+
+let mlxSidebarDebounce = null;
+
+function triggerMlxSidebarBody(repoId) {
+  if (mlxSidebarDebounce) clearTimeout(mlxSidebarDebounce);
+  mlxSidebarDebounce = setTimeout(() => loadMlxSidebarBody(repoId), 300);
+}
+
+async function loadMlxSidebarBody(repoId) {
+  const body = document.getElementById('mlx-sidebar-body');
+  const infoEl = document.getElementById('mlx-sidebar-repo-info');
+  const variantsEl = document.getElementById('mlx-sidebar-variants');
+  if (!body || !infoEl || !variantsEl) return;
+  if (dom.quantAdvisor) dom.quantAdvisor.style.display = 'none';
+  body.style.display = '';
+  infoEl.innerHTML = '<div class="mlx-info-label">What this repo is</div>Loading…';
+  variantsEl.innerHTML = '';
+
+  const headers = window.authHeaders
+    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+    : { 'Content-Type': 'application/json' };
+  const revision = wizardState.model.hfRevision || 'main';
+
+  const [introspectResp, derivativesResp, qualifyResp] = await Promise.allSettled([
+    fetch('/api/models/mlx-introspect', {
+      method: 'POST', headers, body: JSON.stringify({ repo_id: repoId, revision }),
+    }).then(r => r.ok ? r.json() : null),
+    fetch('/api/hf/mlx-derivatives', {
+      method: 'POST', headers, body: JSON.stringify({ repoId, revision }),
+    }).then(r => r.ok ? r.json() : null),
+    fetch('/api/hf/qualify', {
+      method: 'POST', headers, body: JSON.stringify({ repoId, revision, backend: 'rapid_mlx' }),
+    }).then(r => r.ok ? r.json() : null),
+  ]);
+
+  // "What this repo already is": bits/group size + resolved size.
+  const introspect = introspectResp.status === 'fulfilled' ? introspectResp.value : null;
+  const quant = introspect?.data?.config?.quantization;
+  const sizeBytes = introspect?.data?.recursive_size_bytes || wizardState.model.modelBytes || 0;
+  const quantLabel = quant?.bits ? `${quant.bits}-bit${quant.group_size ? `, group ${quant.group_size}` : ''}` : 'precision not reported';
+  infoEl.innerHTML = `<div class="mlx-info-label">What this repo is</div>${quantLabel} · ${sizeBytes ? formatGB(sizeBytes) : 'size unknown'}`;
+
+  // Ctx pills seeded from the repo's own native context rather than left at the static list.
+  const qualify = qualifyResp.status === 'fulfilled' ? qualifyResp.value : null;
+  const nativeCtx = qualify?.config?.contextLength;
+  if (nativeCtx && dom.sidebarCtxPills) {
+    dom.sidebarCtxPills.querySelectorAll('.vram-ctx-pill').forEach(p => {
+      const pillCtx = parseInt(p.dataset.ctx, 10);
+      p.style.display = pillCtx <= nativeCtx ? '' : 'none';
+    });
+  }
+
+  // Real sibling variants (this MLX's honest analogue of the quant ladder).
+  const derivatives = derivativesResp.status === 'fulfilled' ? derivativesResp.value : null;
+  const siblings = (derivatives?.native_mlx_derivatives || []).filter(d => d.repo_id !== repoId);
+  if (siblings.length === 0) {
+    variantsEl.innerHTML = '';
+  } else {
+    variantsEl.innerHTML = '<div class="mlx-sidebar-variants-title">Also published as</div>';
+    for (const sib of siblings) {
+      const row = document.createElement('div');
+      row.className = 'mlx-variant-row';
+      const bits = sib.quant?.bits ? `${sib.quant.bits}-bit` : sib.format;
+      const name = document.createElement('span');
+      name.className = 'mlx-variant-name';
+      name.textContent = `${bits} · ${sib.converter}`;
+      name.title = sib.repo_id;
+      const size = document.createElement('span');
+      size.className = 'mlx-variant-size';
+      size.textContent = sib.size ? formatGB(sib.size) : '?';
+      const evidenceBtn = document.createElement('button');
+      evidenceBtn.type = 'button';
+      evidenceBtn.className = 'mlx-variant-evidence-btn';
+      evidenceBtn.textContent = '?';
+      evidenceBtn.title = `Evidence for ${sib.repo_id}`;
+      evidenceBtn.addEventListener('click', () => openHfEvidence(sib.repo_id, sib.revision, 'rapid_mlx', evidenceBtn));
+      row.appendChild(name);
+      row.appendChild(size);
+      row.appendChild(evidenceBtn);
+      variantsEl.appendChild(row);
+    }
+  }
+
+  renderMlxSidebarVramBar();
+}
+
+// Memory estimate bar (§2.7 item 3): reuses the same #wizard-sidebar-vram-bar
+// markup as the llama.cpp quant advisor, fed by a real MLX estimate for the
+// currently-selected repo instead of a synthetic quant pick.
+function renderMlxSidebarVramBar() {
+  const availVram = effectiveAvailBytes();
+  if (!availVram || !wizardState.model.modelBytes) {
+    if (dom.sidebarVram) dom.sidebarVram.style.display = 'none';
+    if (dom.sidebarVramBar) dom.sidebarVramBar.style.display = 'none';
+    if (dom.sidebarVramLegend) dom.sidebarVramLegend.style.display = 'none';
+    return;
+  }
+  if (dom.sidebarVram) {
+    dom.sidebarVram.style.display = '';
+    if (dom.sidebarVramLabel) dom.sidebarVramLabel.textContent = 'Memory estimate';
+  }
+
+  scheduleEstimate(wizardState, (est) => {
+    if (!est || !est.total_bytes) {
+      if (dom.sidebarVramBar) dom.sidebarVramBar.style.display = 'none';
+      if (dom.sidebarVramLegend) dom.sidebarVramLegend.style.display = 'none';
+      return;
+    }
+    const weights = est.weights_bytes || 0;
+    const kv = est.kv_cache_bytes || 0;
+    const overhead = (est.overhead_bytes || 0) + (est.mtp_bytes || 0) + (est.linear_attn_state_bytes || 0);
+    const total = est.total_bytes || (weights + kv + overhead);
+    const free = Math.max(0, availVram - total);
+    const denom = availVram > 0 ? availVram : total;
+    if (denom <= 0) return;
+
+    if (dom.sidebarVramValue) {
+      dom.sidebarVramValue.textContent = `${(availVram / 1e9).toFixed(1)} GB available`;
+      dom.sidebarVramValue.className = `wizard-sidebar-vram-value ${total <= availVram ? 'fits' : 'nofit'}`;
+    }
+    if (dom.sidebarVramHint) {
+      dom.sidebarVramHint.textContent = total <= availVram
+        ? `Fits · ${formatGB(total)} of ${formatGB(availVram)}`
+        : `Over budget · ${formatGB(total)} needed, ${formatGB(availVram)} available`;
+    }
+
+    const setW = (el, frac) => {
+      if (!el) return;
+      const pct = Math.max(0, Math.min(1, frac)) * 100;
+      el.style.width = pct.toFixed(2) + '%';
+      el.style.display = pct < 0.3 ? 'none' : '';
+    };
+    setW(dom.sidebarVsegWeights, weights / denom);
+    setW(dom.sidebarVsegKv, kv / denom);
+    setW(dom.sidebarVsegOverhead, overhead / denom);
+    setW(dom.sidebarVsegFree, free / denom);
+
+    if (dom.sidebarVlegWeights) dom.sidebarVlegWeights.textContent = `Weights ${formatGB(weights)}`;
+    if (dom.sidebarVlegKv) dom.sidebarVlegKv.textContent = `KV ${formatGB(kv)}`;
+    if (dom.sidebarVlegOverhead) dom.sidebarVlegOverhead.textContent = `Overhead ${formatGB(overhead)}`;
+
+    if (dom.sidebarVramBar) {
+      dom.sidebarVramBar.style.display = '';
+      dom.sidebarVramBar.classList.toggle('tight', total / availVram >= 0.88 && total / availVram < 1.0);
+      dom.sidebarVramBar.classList.toggle('over', total / availVram >= 1.0);
+    }
+    if (dom.sidebarVramLegend) dom.sidebarVramLegend.style.display = '';
+  }, { force: true });
+}
 
 // ── HF discover categories: imported from hf-browse.js ────────────────────────
 
