@@ -894,6 +894,36 @@ instead of a GGUF header. See `src/inference/rapid_mlx/mlx_meta.rs`.
 
 ---
 
+## MLX context-fit cards
+
+Rapid-MLX's wizard hardware step does not offer KV-quantization-based context-fit
+cards the way llama.cpp does. That axis is inert for Rapid-MLX: the runtime's
+reasoning profile pins active KV to int8 on every launch regardless of the requested
+dtype, and TurboQuant/PFlash are withheld pending qualification — see
+[rapid-mlx-runtime.md](rapid-mlx-runtime.md#reasoning-profile-and-kv-cache-dtype) for
+why. A KV-quant card set would therefore be presenting three views of one fixed value.
+
+With KV dtype, TurboQuant, and PFlash all fixed, the levers that actually move
+Rapid-MLX unified-memory occupancy are context length (the dominant term at fixed int8
+KV), concurrency (`max_num_seqs` × `max_concurrent_requests`, which multiply active
+KV), the retained prompt-cache budget (`retained_cache_mib` + `hybrid_cache_entries`),
+and `gpu_memory_utilization` as the ceiling the others are measured against. The wizard
+instead offers three *workload-shaped* cards that vary concurrency and retained-cache
+budget at the user's chosen context, each requesting `/api/vram-estimate` with the same
+`buildEstimateBody()` plus a different MLX policy spread:
+
+| Card | `max_num_seqs` | Retained cache | Framing |
+|---|---|---|---|
+| **Single interactive user** *(default/recommended)* | 1 | measured coding-agent recommendation (8 GiB / 16 entries) | One conversation at a time, warm prompts reused. |
+| **Long single context** | 1 | 0 | Maximum room for one very long conversation; nothing retained between prompts. |
+| **Shared / multi-client** | 4 | 8 GiB | Several clients at once; each admitted request reserves its own active KV. |
+
+Alongside the cards, the fixed facts are rendered once, not per-card, since they do
+not vary by card: `KV: int8 (pinned by reasoning profile)`,
+`TurboQuant: off (awaiting receipt)`, `PFlash: off`.
+
+---
+
 ## Known Limitations and Calibration Notes
 
 | Issue | Scope | Status |

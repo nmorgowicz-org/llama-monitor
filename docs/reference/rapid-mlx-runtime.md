@@ -68,6 +68,79 @@ restart warm-start operation and is not offered as a memory-saving control.
 See [cache benchmark results](cache-benchmark-results.md) for the measured
 limits, runtime versions, and receipt locations.
 
+## Reasoning profile and KV cache dtype
+
+The installed `rapid-mlx serve --help` states this as upstream runtime behaviour, not
+a llama-monitor policy choice:
+
+> "Reasoning profile: pins `--kv-cache-dtype` to int8 regardless of the dtype flag"
+
+Llama Monitor always launches with the reasoning profile on — the launched
+`reasoning_mode` setting is unconditionally `"on"` (`src/web/api/rapid_mlx_runtime.rs:749`;
+a stored legacy `off` is converted to `--no-thinking` rather than disabling the profile).
+This means the **effective active-KV dtype is `int8` for every Rapid-MLX launch**, not
+only for models the user thinks of as "reasoning models" — `reasoning_mode` sets the KV
+policy, it does not mean "show thinking."
+
+Because of this, `#spawn-kv-cache-dtype` in the wizard and preset editor is a read-only
+"Effective: int8 (reasoning profile)" readout on Quick/Balanced. On Advanced it remains
+selectable, but any selection is immediately annotated with the requested→effective
+diff already computed by `build_requested_vs_effective()`
+(`src/web/api/rapid_mlx_runtime.rs:758`) — it must never look like a live knob when the
+runtime is going to override it. The VRAM estimator models this correctly
+(`reasoning_mode_overrides_kv_to_int8`, `rapid_mlx_runtime.rs:734`); the UI's job is to
+say the same thing the estimator already computes, not to re-derive it.
+
+An int8-vs-int4 KV comparison on this backend is not measurable with the current
+benchmark harness — this is a runtime-behaviour finding, not a missing test.
+
+## TurboQuant and PFlash
+
+Both are wired end-to-end in the launch config but deliberately withheld at launch time;
+neither is "in progress" or blocked on frontend work.
+
+**TurboQuant** cannot be combined with standard KV-cache quantization by design, and
+since the reasoning profile above pins standard KV to int8 on every launch, TurboQuant
+and the shipped default configuration are mutually exclusive by construction. The
+effective-policy mapper converts a requested `V4`/`K8V4` to `Off`
+(`rapid_mlx_runtime.rs:725-731`), and the launch-config builder passes
+`.turboquant_mode(None)` (`src/inference/rapid_mlx/mod.rs:1187`) — the requested value is
+persisted for display and presets, but omitted from the actual launch, pending a
+per-model/revision qualification receipt. It also would not measure what the wizard's
+context-fit cards need: TurboQuant affects the retained reusable prefix-cache snapshots,
+not cold active KV or model weights, so it is a retained-cache lever, not an active-KV
+one — a card set built on it would be measuring the wrong memory pool. Separately, the
+benchmark harness's recorded TurboQuant numbers have an unresolved provenance question:
+it is not confirmed whether they captured the *effective* or the *requested* setting,
+given the same V4/K8V4→Off silent-fallback class as the KV-dtype behaviour above.
+
+`#spawn-turboquant-mode` stays an Advanced-tier control with an explicit
+"Requested — not applied (awaiting model qualification receipt)" badge, and is excluded
+from every VRAM-estimate scenario axis.
+
+**PFlash** is more simply ruled out: at Rapid-MLX 0.11.0, `--pflash auto` measurably
+degrades quality — retrieval recall collapsed to 0.0/0.2/0.4/0.2 at 63k/131k/160k/200k
+context (vs. 1.0 with `pflash off`) while throughput rose roughly 4×, meaning the
+compressed region was being dropped rather than lossily retained. In an agentic coding
+loop this is a silent failure mode, not a speed/quality tradeoff a user can knowingly
+accept — default guidance stays `off`, and `#spawn-rapid-pflash-policy` carries a warning
+badge on `auto`/`always` citing this recall result. Do not re-enable `auto` as a default
+without a source-level fix upstream.
+
+## Context-fit scenario axes
+
+With KV dtype pinned to int8, TurboQuant force-Off, and PFlash steered to off, the
+levers that actually move Rapid-MLX unified-memory occupancy are context length
+(`n_ctx`, the dominant term at fixed int8 KV), concurrency (`max_num_seqs` ×
+`max_concurrent_requests`, which multiply active KV), the retained prompt-cache budget
+(`retained_cache_mib` + `hybrid_cache_entries`), and `gpu_memory_utilization` as the
+ceiling the other three are measured against
+(`build_effective_policy()`, `rapid_mlx_runtime.rs:738-756`).
+
+The wizard's context-fit cards vary concurrency and retained-cache budget at the user's
+chosen context on a fixed int8 KV, rather than varying KV quantization — see
+[vram-estimator.md](vram-estimator.md#mlx-context-fit-cards) for the card table.
+
 ## Chat request adaptation
 
 The shared chat UI expresses backend-neutral intent, while the active backend
