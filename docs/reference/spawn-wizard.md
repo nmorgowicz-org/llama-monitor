@@ -2,7 +2,7 @@
 
 The Spawn Wizard is the guided flow for creating a model server. It provides:
 
-- Profile selection (Speed / Balanced / Quality) and use-case selection (agentic / general / roleplay)
+- Profile selection (Quick / Balanced / Advanced) and use-case selection (agentic / general / roleplay)
 - Engine selection between llama.cpp and Rapid-MLX
 - Model source input (local GGUF, Hugging Face, or import)
 - Architecture-aware VRAM breakdown and context fit modes
@@ -136,7 +136,8 @@ runtimes, via different mechanisms:
 
 The wizard opens with a profile + use-case selection screen (wizard-step-0):
 
-- **Profile cards**: Speed, Balanced, Quality — influence the default hardware policy.
+- **Profile cards**: Quick, Balanced, Advanced — influence the default hardware policy and,
+  as of the control-tier registry (see below), which hardware-step groups start expanded.
 - **Use-case cards**: agentic, general, roleplay — maps to a `workload_scenario` string sent to the backend VRAM estimator (see below).
 
 The use-case selection drives the backend's memory policy:
@@ -165,6 +166,45 @@ For Rapid-MLX: a dedicated `rapid-hardware-panel` is shown with:
 - **TurboQuant mode**: None (standard), K8V4, V-only.
 - **Reasoning mode**: Toggle ON for reasoning models (pins KV to int8).
 - **Web UI availability**: Auto, On, Off.
+
+### Control-tier registry (Quick/Balanced/Advanced disclosure)
+
+Both engines' Step 2 controls are declared once, in `static/js/features/spawn-wizard-groups.js`,
+as a flat table of `{ id, loader, tier, quickValue }` rows keyed by DOM control id. This
+registry — not the DOM's own layout — is the source of truth for two independent behaviors:
+
+- **`applyProfileVisibility()`** (`spawn-wizard.js`) drives a Quick-tier disable loop: on the
+  Quick profile, every `tier: 'quick'` control for the active loader is set to its `quickValue`
+  and disabled; on Balanced/Advanced it is re-enabled. `quickValue` is mandatory for every
+  quick-tier control (enforced offline by `scripts/validate-wizard-groups.mjs` — see I2 below).
+- **`spawn-wizard-ia.js`**'s `createWizardIA()` factory relocates non-quick controls into
+  collapsible, tier-labelled `<details>` groups (grouped under supersections, e.g. "Advanced
+  tuning"), open by default at-or-above their own tier and collapsed below it. Each loader gets
+  its own `createWizardIA()` instance — `spawn-wizard-mlx-ia.js` for Rapid-MLX,
+  `spawn-wizard-llama-ia.js` for llama.cpp — so the two loaders' groups never cross-toggle each
+  other even though their `<details>` elements share the `mlx-wiz-group` class (each instance
+  scopes its `applyTierVisibility()` query to its own private container).
+
+  A group can either be built from scratch (a fresh `<details>` assembled from its listed
+  `controls[]`) or relocate an existing, already-wired element via `group.prebuiltId` — used
+  for llama.cpp's speculative-decoding block (`#spawn-spec-details`), which has its own internal
+  conditional-visibility logic (draft-KV rows, draft-model path) that the generic group-builder
+  doesn't need to re-derive.
+
+Three invariants govern the registry and hold regardless of which loader or UI surface reads it:
+
+- **I1 — tier never hides a control.** A control's tier only changes its *default* disclosure
+  (open/closed, or Quick-tier disabled/enabled) — every control remains reachable on every
+  profile. There is no tier that removes a control from the DOM or blocks a user from finding it.
+- **I2 — every Quick-tier control carries a `quickValue`.** Since Quick disables the control
+  and writes this value, an entry without one would silently leave the field at whatever
+  stale value it last held. `assertQuickValueCoverage()` in `spawn-wizard-groups.js` enforces
+  this at load time; `validate-wizard-groups.mjs` (npm script `validate-wizard-groups`) enforces
+  it offline in CI.
+- **I3 — Advanced tier means "needs a reason."** A control is `tier: 'advanced'`, not
+  `'balanced'`, only when changing it away from its default requires understanding a real
+  tradeoff (e.g. MoE CPU-offload placement, prompt-cache RAM bounds) — not merely because it's
+  less commonly touched.
 
 ### Step 3: Settings
 
