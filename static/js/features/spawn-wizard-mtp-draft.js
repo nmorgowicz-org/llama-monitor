@@ -375,4 +375,24 @@ export function renderMtpSection() {
   if (depthRow) {
     depthRow.style.display = mtpEffectivelyEnabled ? '' : 'none';
   }
+
+  // MTP requires parallel=1 (buildSpawnPayload forces this at spawn time,
+  // spawn-wizard-spawn.js:446) — mirror it visibly here so the field never
+  // silently diverges from what's actually launched (plan §6.1).
+  const slotsInput = document.getElementById('spawn-parallel-slots');
+  const slotsHint = document.getElementById('spawn-parallel-slots-mtp-hint');
+  if (slotsInput) {
+    if (mtpEffectivelyEnabled) {
+      if (!slotsInput.dataset.mtpForcedPrev) {
+        slotsInput.dataset.mtpForcedPrev = slotsInput.value || '1';
+      }
+      slotsInput.value = '1';
+      slotsInput.disabled = true;
+    } else if (slotsInput.dataset.mtpForcedPrev) {
+      slotsInput.value = slotsInput.dataset.mtpForcedPrev;
+      slotsInput.disabled = false;
+      delete slotsInput.dataset.mtpForcedPrev;
+    }
+  }
+  if (slotsHint) slotsHint.style.display = mtpEffectivelyEnabled ? '' : 'none';
 }

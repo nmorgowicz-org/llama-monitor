@@ -4393,6 +4393,7 @@
                            <div class="hardware-field">
                                  <label for="spawn-parallel-slots" title="Concurrent inference sessions. Each slot reserves context_size tokens of KV cache VRAM. If you have multiple API clients, raise this. Otherwise leave at 1.">Parallel slots</label>
                                  <input type="number" id="spawn-parallel-slots" min="1" value="1">
+                                 <div id="spawn-parallel-slots-mtp-hint" class="field-hint" style="display:none;">Forced to 1 while MTP speculative decoding is enabled — multi-slot batching is incompatible with MTP's draft sequencing.</div>
                              </div>
                             <div class="hardware-field">
                                 <label for="spawn-ubatch-size" title="GPU micro-batch size for prompt processing (-ub). Usually same as batch size or smaller. Reducing saves a small amount of VRAM.">Ubatch size (-ub)</label>
