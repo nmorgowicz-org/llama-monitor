@@ -680,17 +680,50 @@ fn api_vram_quant_compare(
                 // called after introspection.
                 let arch = build_arch_from_body(&body, &model_name, param_b);
 
-                let table = crate::llama::vram_estimator::quant_comparison_table(
-                    param_b,
-                    &arch,
-                    &model_name,
-                    available_vram_bytes,
-                    use_case,
-                    workload_scenario,
-                    parallel_slots,
-                    is_unified_memory,
-                    backend,
-                );
+                // When the caller has already resolved the HF repo's file listing (real
+                // quant names + sizes), use those instead of the synthetic standard-quant
+                // set — repos with non-standard naming (imatrix IQ variants, custom
+                // mixed-precision schemes like APEX) get an advisor table that matches
+                // what's actually downloadable.
+                let available_files: Vec<(String, u64)> = body["available_files"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|f| {
+                                let name = f["name"].as_str()?.to_string();
+                                let size = f["size_bytes"].as_u64()?;
+                                Some((name, size))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                let table = if available_files.is_empty() {
+                    crate::llama::vram_estimator::quant_comparison_table(
+                        param_b,
+                        &arch,
+                        &model_name,
+                        available_vram_bytes,
+                        use_case,
+                        workload_scenario,
+                        parallel_slots,
+                        is_unified_memory,
+                        backend,
+                    )
+                } else {
+                    crate::llama::vram_estimator::quant_comparison_table_from_files(
+                        param_b,
+                        &arch,
+                        &model_name,
+                        &available_files,
+                        available_vram_bytes,
+                        use_case,
+                        workload_scenario,
+                        parallel_slots,
+                        is_unified_memory,
+                        backend,
+                    )
+                };
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({ "ok": true, "quants": table }),

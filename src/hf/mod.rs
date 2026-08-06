@@ -2059,12 +2059,60 @@ pub fn infer_quant_label(filename: &str) -> String {
         return "F32".into();
     }
 
-    // Compact/APEX/etc. Unsloth special naming
-    if lower.contains("compact") || lower.contains("apex") {
-        return "UD (custom)".into();
+    // Community mixed-precision schemes (e.g. this repo's own MTP/APEX quants) —
+    // these aren't Unsloth's UD scheme, so keep the uploader's own naming rather
+    // than mislabeling them "UD (custom)". Uploaders append arbitrary suffixes to
+    // these (e.g. "APEX-MTP-I-Quality", "APEX-MTP-Balanced", "APEX-Compact") that
+    // we can't enumerate in advance, so capture from the first "mtp"/"apex"
+    // token through the end of the filename verbatim rather than hardcoding a
+    // fixed piece list — that keeps distinct variants distinguishable in the table.
+    if lower.contains("apex") || lower.contains("mtp") {
+        let stem_end = filename
+            .rfind(".gguf")
+            .or_else(|| filename.rfind(".GGUF"))
+            .unwrap_or(filename.len());
+        let start = lower.find("apex").into_iter().chain(lower.find("mtp")).min();
+        if let Some(start) = start {
+            return format!("{} (custom)", &filename[start..stem_end]);
+        }
+    }
+
+    // Last resort: pull out anything that looks like a quant token (e.g. a
+    // non-standard K-quant variant like "Q8_K_P") rather than collapsing it
+    // to "Unknown" — an unrecognized-but-real name is more useful than none.
+    if let Some(token) = extract_quant_like_token(filename) {
+        return token;
     }
 
     "Unknown".into()
+}
+
+/// Scans a filename for a `Q`/`IQ`-prefixed token (e.g. "Q8_K_P", "IQ3_XYZ")
+/// that didn't match any of the known presets above, and returns it verbatim
+/// (uppercased) instead of discarding it as "Unknown".
+fn extract_quant_like_token(filename: &str) -> Option<String> {
+    let stem = filename
+        .rsplit('/')
+        .next()
+        .unwrap_or(filename)
+        .trim_end_matches(".gguf")
+        .trim_end_matches(".GGUF");
+    for segment in stem.split(['-', '_', '.']) {
+        let seg_lower = segment.to_ascii_lowercase();
+        let is_q = seg_lower.starts_with('q') && seg_lower[1..].starts_with(|c: char| c.is_ascii_digit());
+        let is_iq = seg_lower.starts_with("iq") && seg_lower[2..].starts_with(|c: char| c.is_ascii_digit());
+        if is_q || is_iq {
+            // Reattach any immediately-following underscore-joined suffix segments
+            // (e.g. "K", "P" in "Q8_K_P") that got split apart above.
+            let start = stem.to_ascii_lowercase().find(&seg_lower)?;
+            let rest = &stem[start..];
+            let end = rest
+                .find(|c: char| c == '-' || c == '.')
+                .unwrap_or(rest.len());
+            return Some(rest[..end].to_ascii_uppercase());
+        }
+    }
+    None
 }
 
 // ── Token management ──────────────────────────────────────────────────────────
@@ -3179,6 +3227,39 @@ mod tests {
         assert_eq!(infer_quant_label("Qwen3.6-27B-UD-Q4_K_M.gguf"), "Q4_K_M");
         assert_eq!(infer_quant_label("model-Q5_K_XL.gguf"), "Q5_K_XL");
         assert_eq!(infer_quant_label("model-IQ2_XXS.gguf"), "IQ2_XXS");
+        // Non-standard but real quant names should be preserved, not collapsed to "Unknown".
+        assert_eq!(
+            infer_quant_label("Hermes3.6-35B-A3B-Genesis-V7-Q8_K_P.gguf"),
+            "Q8_K_P"
+        );
+        // APEX/MTP/Compact are this uploader's own custom scheme, not Unsloth's UD —
+        // don't mislabel them "UD (custom)".
+        assert_eq!(
+            infer_quant_label("Hermes3.6-35B-A3B-Genesis-V7-MTP-APEX.gguf"),
+            "MTP-APEX (custom)"
+        );
+        assert_eq!(
+            infer_quant_label("Hermes3.6-35B-A3B-Genesis-V7-APEX.gguf"),
+            "APEX (custom)"
+        );
+        assert_eq!(
+            infer_quant_label("Hermes3.6-35B-A3B-Genesis-V7-MTP-APEX-Compact.gguf"),
+            "MTP-APEX-Compact (custom)"
+        );
+        assert_eq!(
+            infer_quant_label("Hermes3.6-35B-A3B-Genesis-V7-APEX-Compact.gguf"),
+            "APEX-Compact (custom)"
+        );
+        // Arbitrary uploader suffixes (Quality, I-Quality, Balanced, ...) can't be
+        // enumerated in advance — must be preserved verbatim, not collapsed.
+        assert_eq!(
+            infer_quant_label("Qwen3.6-35B-A3B-APEX-MTP-I-Quality.gguf"),
+            "APEX-MTP-I-Quality (custom)"
+        );
+        assert_eq!(
+            infer_quant_label("model-APEX-MTP-Balanced.gguf"),
+            "APEX-MTP-Balanced (custom)"
+        );
     }
 
     #[test]

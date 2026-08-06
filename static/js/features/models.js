@@ -2590,6 +2590,7 @@ async function initHfDownloadTab() {
                 onOpenCardPanel: openCardPanel,
                 onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
                 quantsOnly: hfState.discoveryQuantsOnly,
+                vramGb: cachedVram > 0 ? cachedVram / (1024 ** 3) : 0,
             });
         },
     });
@@ -2615,6 +2616,7 @@ async function initHfDownloadTab() {
                 onOpenCardPanel: openCardPanel,
                 onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
                 quantsOnly: hfState.discoveryQuantsOnly,
+                vramGb: cachedVram > 0 ? cachedVram / (1024 ** 3) : 0,
             });
         },
     });
@@ -2639,6 +2641,7 @@ async function initHfDownloadTab() {
             onOpenCardPanel: openCardPanel,
             onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
             quantsOnly: hfState.discoveryQuantsOnly,
+            vramGb: cachedVram > 0 ? cachedVram / (1024 ** 3) : 0,
         });
     };
 
@@ -2714,6 +2717,10 @@ async function initHfDownloadTab() {
             pill.classList.add('active');
             const newCtx = parseInt(pill.dataset.ctx, 10);
             hfState.previewCtx = newCtx;
+            // Item 14: a context change invalidates the quant comparison too — the
+            // advisor persists after a file is picked (it's a comparison tool),
+            // so it must not go stale either way.
+            if (hfState.paramB > 0) triggerQuantAdvisor();
             // Update VRAM for both GGUF files and MLX models
             const isMlx = hfState.modelFormat === 'mlx';
             if (hfState.selectedFile) {
@@ -2769,6 +2776,11 @@ async function onHfModelSelected(model, filelistContainer, downloadPanel) {
 
     // Show selected model info
     showSelectedModel(repoId, model);
+
+    // Quant advisor stays useful even after a specific quant is picked — it's a
+    // comparison tool, not just a pre-download prompt — so trigger it here,
+    // before any format/file-specific branching below early-returns.
+    if (paramB > 0) triggerQuantAdvisor();
 
     // If clicked from inline file list, _file is set
     if (model._file) {
@@ -2857,7 +2869,7 @@ async function onHfModelSelected(model, filelistContainer, downloadPanel) {
         return;
     }
 
-    // GGUF repos: list files
+    // GGUF repos: list files (quant advisor already triggered above).
     await hfListFiles({
         repoId,
         container: filelistContainer,
@@ -2883,8 +2895,8 @@ async function onHfFileSelected(file, repoId, downloadPanel) {
         metaEl.textContent = parts.join(' · ');
     }
 
-    // Hide quant advisor — VRAM panel will show the precise estimate
-    hideQuantAdvisor();
+    // Quant advisor stays visible after a file is picked — it remains a useful
+    // comparison against the other available quants, not just a pre-selection aid.
 
     // Show download panel
     await hfShowDownloadPanel(downloadPanel, file.path || file.name || '');
@@ -3027,10 +3039,17 @@ async function loadQuantAdvisor() {
             ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
             : { 'Content-Type': 'application/json' };
 
+        // Item 9/14: pass backend/unified-memory/concurrency so the comparison
+        // reflects what will actually launch, not a generic llama.cpp/8k guess.
+        const isMlx = hfState.modelFormat === 'mlx';
         const body = {
             param_b: paramB,
             model_name: hfState.selectedRepoId || '',
             available_vram_bytes: availVram,
+            backend: isMlx ? 'rapid_mlx' : 'llama_cpp',
+            is_unified_memory: isMlx || cachedUnified,
+            use_case: 'general',
+            parallel_slots: 1,
         };
 
         const resp = await fetch('/api/vram/quant-compare', { method: 'POST', headers, body: JSON.stringify(body) });
@@ -3066,14 +3085,26 @@ function renderQuantAdvisor(quants, availVram) {
     if (!availableQuants || availableQuants.length === 0) { panel.style.display = 'none'; return; }
 
     const availGb = Math.round(availVram / (1024 ** 3));
-    if (subtitleEl) subtitleEl.textContent = `Estimated VRAM available: ${availGb} GB`;
+    // Item 14: recompute against the same context target the VRAM panel uses,
+    // instead of a hard-coded 16k/q8 assumption baked into the table copy.
+    const desiredCtx = hfState.previewCtx || 0;
+    const annotateCtx = desiredCtx > 8192;
+    const qualityRecQuant = availableQuants.find(q => q.recommended && q.fits_vram);
+    const qualityRecFitsCtx = !annotateCtx || (qualityRecQuant && qualityRecQuant.max_ctx_q8 >= desiredCtx);
+    const ctxFitQuant = annotateCtx
+        ? availableQuants.find(q => q.fits_vram && q.max_ctx_q8 >= desiredCtx)
+        : null;
+
+    let subtitle = `Estimated VRAM available: ${availGb} GB`;
+    if (annotateCtx) subtitle += ` \u00b7 Context target: ${formatCtx(desiredCtx)}`;
+    if (subtitleEl) subtitleEl.textContent = subtitle;
 
     const table = document.createElement('table');
     table.className = 'qa-table';
 
     const thead = table.createTHead();
     const hrow = thead.insertRow();
-    ['', 'Quant', 'Size', 'Max ctx (q8_0)', 'Max ctx (q4_0)', 'Quality'].forEach(h => {
+    ['', 'Quant', 'Size', 'Max ctx (q8_0 KV)', 'Max ctx (q4_0 KV)', 'Quality'].forEach(h => {
         const th = document.createElement('th');
         th.textContent = h;
         hrow.appendChild(th);
@@ -3100,9 +3131,16 @@ function renderQuantAdvisor(quants, availVram) {
         if (q.recommended) {
             const badge = document.createElement('span');
             badge.className = 'qa-badge-rec';
-            badge.textContent = '\u2605 Rec';
+            badge.textContent = (annotateCtx && !qualityRecFitsCtx) ? '\u2605 Quality' : '\u2605 Rec';
             badge.style.marginLeft = '6px';
             nameTd.appendChild(badge);
+        }
+        if (annotateCtx && ctxFitQuant && q.label === ctxFitQuant.label && !qualityRecFitsCtx) {
+            const ctxBadge = document.createElement('span');
+            ctxBadge.className = 'qa-badge-ctx';
+            ctxBadge.textContent = `\u2713 fits ${formatCtx(desiredCtx)}`;
+            ctxBadge.style.marginLeft = '6px';
+            nameTd.appendChild(ctxBadge);
         }
         if (q.is_imatrix) {
             const im = document.createElement('span');
@@ -3116,12 +3154,14 @@ function renderQuantAdvisor(quants, availVram) {
         sizeTd.textContent = q.model_size_gb.toFixed(1) + ' GB';
         sizeTd.style.color = 'var(--color-text-muted)';
 
-        // Max ctx q8_0
+        // Max ctx q8_0 \u2014 warn if below context target
         const ctxQ8Td = tr.insertCell();
         ctxQ8Td.className = 'qa-ctx';
         if (q.max_ctx_q8 > 0) {
             ctxQ8Td.textContent = formatCtx(q.max_ctx_q8);
-            ctxQ8Td.classList.add('qa-ctx-q8');
+            const underTarget = annotateCtx && q.max_ctx_q8 < desiredCtx;
+            ctxQ8Td.classList.add(underTarget ? 'qa-ctx-under' : 'qa-ctx-q8');
+            if (underTarget) ctxQ8Td.title = `Max ${formatCtx(q.max_ctx_q8)} \u2014 below your ${formatCtx(desiredCtx)} target`;
         } else {
             ctxQ8Td.textContent = '\u2014'; ctxQ8Td.classList.add('qa-ctx-na');
         }

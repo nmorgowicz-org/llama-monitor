@@ -1477,120 +1477,294 @@ pub fn quant_comparison_table(
         "iq3_m", "iq3_xs", "q2_k", "iq2_xxs", "iq2_xs", "iq1_m",
     ];
 
+    let ctx = QuantTableCtx::new(
+        param_b,
+        arch,
+        model_name,
+        available_vram_bytes,
+        use_case,
+        workload_scenario,
+        parallel_slots,
+        is_unified_memory,
+        backend,
+    );
+
     let mut options: Vec<QuantOption> = Vec::new();
     let mut best_quant: Option<String> = None;
     let mut best_score = 0u64;
-    let headroom = compute_headroom(available_vram_bytes, is_unified_memory);
-    let lower_name = model_name.to_ascii_lowercase();
-    let is_gemma4_qat = (lower_name.contains("gemma-4") || lower_name.contains("gemma4"))
-        && lower_name.contains("qat");
-
-    // Builder item 11: use workload scenario parameters if provided, otherwise fall back to
-    // generic 8k context baseline. Unsloth values are preserved for agentic/coding modes.
-    let scenario_params = workload_scenario
-        .as_ref()
-        .map(|s| s.to_estimator_params(super::workload_scenarios::ClientType::App));
-
-    // Minimum context tokens for fit check: scenario-based or generic 8k fallback.
-    // Agentic/coding scenarios use higher minimums to ensure tool-calling coherence.
-    let min_fit_context_tokens = match use_case {
-        UseCase::Agentic => {
-            // Unsloth-recommended minimum for agentic workloads: 32K tokens
-            // Ensures enough room for tool-call context and reasoning.
-            scenario_params
-                .map(|p| p.planning_context_tokens.max(32_000))
-                .unwrap_or(32_000)
-        }
-        UseCase::General => scenario_params
-            .map(|p| p.planning_context_tokens.max(16_000))
-            .unwrap_or(8_192),
-        UseCase::Roleplay => {
-            // Roleplay needs long context for continuity, but lower precision is OK.
-            scenario_params
-                .map(|p| p.planning_context_tokens.max(32_000))
-                .unwrap_or(16_000)
-        }
-    };
-
-    // Effective parallel slots: scenario may override.
-    let effective_parallel_slots = scenario_params
-        .map(|p| p.parallel_slots)
-        .unwrap_or(parallel_slots.max(1));
 
     for &q_name in &show_quants {
         let qi = match find_quant(q_name) {
             Some(qi) => qi,
             None => continue,
         };
-        let quality = if is_gemma4_qat && q_name == "q4_0" {
-            QuantQuality::Excellent
-        } else {
-            qi.quality
-        };
-
         // Skip large-MoE-only quants for dense or small models
         if qi.large_moe_only && param_b < 70.0 && !arch.is_moe() {
             continue;
         }
-
+        let quality = if ctx.is_gemma4_qat && q_name == "q4_0" {
+            QuantQuality::Excellent
+        } else {
+            qi.quality
+        };
         let model_bytes = estimate_model_size_bytes(param_b, q_name);
-        let model_gb = model_bytes as f64 / 1e9;
-        // Builder item 11: use scenario-based minimum context instead of generic 8k.
-        // For agentic: 32K minimum ensures tool-calling coherence budget.
-        let min_kv = kv_cache_bytes(
+
+        let (opt, score) = ctx.build_option(
+            q_name.to_string(),
+            qi.label.to_string(),
+            model_bytes,
+            quality,
+            qi.is_imatrix,
+            qi.large_moe_only,
+            ctx.is_gemma4_qat && q_name == "q4_0",
+        );
+        if score > best_score {
+            best_score = score;
+            best_quant = Some(q_name.to_string());
+        }
+        options.push(opt);
+    }
+
+    // Gemma 4 QAT is explicitly trained for Q4_0. Prefer that target whenever it
+    // fits instead of allowing a generic higher-bit option to win a tied score.
+    if ctx.is_gemma4_qat
+        && options
+            .iter()
+            .any(|opt| opt.quant == "q4_0" && opt.fits_vram)
+    {
+        best_quant = Some("q4_0".into());
+    }
+
+    mark_recommended(&mut options, best_quant);
+    options
+}
+
+/// Build a quant comparison table from the repo's *actual* GGUF files instead
+/// of a synthetic standard-quant list. Used when the HF repo has already been
+/// resolved and its file listing (name + size) is known — this way repos that
+/// use non-standard quant naming (imatrix "IQ4_XXS", custom mixed-precision
+/// schemes like "APEX-MTP-Balanced", etc.) get an advisor table that matches
+/// what's actually downloadable, with real sizes instead of estimates.
+///
+/// Quality/is_imatrix/large_moe_only can't be looked up by name for
+/// non-standard labels, so they're approximated from the file's measured
+/// bits-per-weight against the nearest standard quant (see
+/// `nearest_quant_for_bpw`) — the actual file size is still exact and drives
+/// every fit/context number, so the estimate is only ever "how big is this",
+/// not "how precise is this".
+#[allow(clippy::too_many_arguments)]
+pub fn quant_comparison_table_from_files(
+    param_b: f64,
+    arch: &ModelArch,
+    model_name: &str,
+    files: &[(String, u64)],
+    available_vram_bytes: u64,
+    use_case: UseCase,
+    workload_scenario: Option<super::workload_scenarios::WorkloadScenario>,
+    parallel_slots: u32,
+    is_unified_memory: bool,
+    backend: Backend,
+) -> Vec<QuantOption> {
+    let ctx = QuantTableCtx::new(
+        param_b,
+        arch,
+        model_name,
+        available_vram_bytes,
+        use_case,
+        workload_scenario,
+        parallel_slots,
+        is_unified_memory,
+        backend,
+    );
+
+    let mut options: Vec<QuantOption> = Vec::new();
+    let mut best_quant: Option<String> = None;
+    let mut best_score = 0u64;
+
+    for (label, size_bytes) in files {
+        if *size_bytes == 0 {
+            continue;
+        }
+        let measured_bpw = (*size_bytes as f64 * 8.0) / (param_b * 1e9);
+        let exact_match = find_quant(label);
+        let nearest = exact_match.unwrap_or_else(|| nearest_quant_for_bpw(measured_bpw));
+        let quality = if ctx.is_gemma4_qat && nearest.name == "q4_0" {
+            QuantQuality::Excellent
+        } else {
+            nearest.quality
+        };
+
+        let (mut opt, score) = ctx.build_option(
+            label.clone(),
+            label.clone(),
+            *size_bytes,
+            quality,
+            nearest.is_imatrix,
+            nearest.large_moe_only,
+            false,
+        );
+        if exact_match.is_none() {
+            opt.notes.push(
+                "Quality estimated from file size (non-standard quant name) — check the repo's own benchmarks for actual quality".into(),
+            );
+        }
+        if score > best_score {
+            best_score = score;
+            best_quant = Some(label.clone());
+        }
+        options.push(opt);
+    }
+
+    mark_recommended(&mut options, best_quant);
+    options
+}
+
+fn mark_recommended(options: &mut [QuantOption], best_quant: Option<String>) {
+    if let Some(best) = best_quant {
+        for opt in options.iter_mut() {
+            if opt.quant == best {
+                opt.recommended = true;
+            }
+        }
+    }
+}
+
+/// Shared per-request context (headroom, scenario params, gemma4-qat detection)
+/// used to build each row of a quant comparison table, regardless of whether
+/// the candidate list comes from the synthetic standard-quant set or a repo's
+/// real file listing.
+struct QuantTableCtx<'a> {
+    arch: &'a ModelArch,
+    available_vram_bytes: u64,
+    is_unified_memory: bool,
+    backend: Backend,
+    headroom: f64,
+    is_gemma4_qat: bool,
+    min_fit_context_tokens: u64,
+    effective_parallel_slots: u32,
+}
+
+impl<'a> QuantTableCtx<'a> {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        _param_b: f64,
+        arch: &'a ModelArch,
+        model_name: &str,
+        available_vram_bytes: u64,
+        use_case: UseCase,
+        workload_scenario: Option<super::workload_scenarios::WorkloadScenario>,
+        parallel_slots: u32,
+        is_unified_memory: bool,
+        backend: Backend,
+    ) -> Self {
+        let headroom = compute_headroom(available_vram_bytes, is_unified_memory);
+        let lower_name = model_name.to_ascii_lowercase();
+        let is_gemma4_qat = (lower_name.contains("gemma-4") || lower_name.contains("gemma4"))
+            && lower_name.contains("qat");
+
+        // Builder item 11: use workload scenario parameters if provided, otherwise fall back to
+        // generic 8k context baseline. Unsloth values are preserved for agentic/coding modes.
+        let scenario_params = workload_scenario
+            .as_ref()
+            .map(|s| s.to_estimator_params(super::workload_scenarios::ClientType::App));
+
+        // Minimum context tokens for fit check: scenario-based or generic 8k fallback.
+        // Agentic/coding scenarios use higher minimums to ensure tool-calling coherence.
+        let min_fit_context_tokens = match use_case {
+            UseCase::Agentic => scenario_params
+                .map(|p| p.planning_context_tokens.max(32_000))
+                .unwrap_or(32_000),
+            UseCase::General => scenario_params
+                .map(|p| p.planning_context_tokens.max(16_000))
+                .unwrap_or(8_192),
+            UseCase::Roleplay => scenario_params
+                .map(|p| p.planning_context_tokens.max(32_000))
+                .unwrap_or(16_000),
+        };
+
+        let effective_parallel_slots = scenario_params
+            .map(|p| p.parallel_slots)
+            .unwrap_or(parallel_slots.max(1));
+
+        Self {
             arch,
+            available_vram_bytes,
+            is_unified_memory,
+            backend,
+            headroom,
+            is_gemma4_qat,
             min_fit_context_tokens,
             effective_parallel_slots,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build_option(
+        &self,
+        quant_key: String,
+        label: String,
+        model_bytes: u64,
+        quality: QuantQuality,
+        is_imatrix: bool,
+        large_moe_only: bool,
+        is_gemma4_qat_target: bool,
+    ) -> (QuantOption, u64) {
+        let model_gb = model_bytes as f64 / 1e9;
+        let min_kv = kv_cache_bytes(
+            self.arch,
+            self.min_fit_context_tokens,
+            self.effective_parallel_slots,
             "q8_0",
             "q8_0",
         );
-        let oh = match backend {
-            Backend::RapidMlx => mlx_overhead_base_bytes(arch, 512),
-            Backend::LlamaCpp if is_unified_memory => metal_overhead_base_bytes(arch, 512),
-            Backend::LlamaCpp => discrete_overhead_base_bytes(arch, 512),
+        let oh = match self.backend {
+            Backend::RapidMlx => mlx_overhead_base_bytes(self.arch, 512),
+            Backend::LlamaCpp if self.is_unified_memory => {
+                metal_overhead_base_bytes(self.arch, 512)
+            }
+            Backend::LlamaCpp => discrete_overhead_base_bytes(self.arch, 512),
         };
-        let fits = model_bytes + oh + min_kv < available_vram_bytes;
+        let fits = model_bytes + oh + min_kv < self.available_vram_bytes;
 
-        // Use scenario-aware parallel slots for max context computation.
         let max_q8 = max_context(
             model_bytes,
-            arch,
+            self.arch,
             "q8_0",
             "q8_0",
-            effective_parallel_slots,
+            self.effective_parallel_slots,
             512,
             0,
-            available_vram_bytes,
+            self.available_vram_bytes,
             1024,
-            headroom,
+            self.headroom,
             None, // pre-download advisor: VRAM-limited maxes only
-            is_unified_memory,
-            backend,
+            self.is_unified_memory,
+            self.backend,
         );
         let max_q4 = max_context(
             model_bytes,
-            arch,
+            self.arch,
             "q4_0",
             "q4_0",
-            effective_parallel_slots,
+            self.effective_parallel_slots,
             512,
             0,
-            available_vram_bytes,
+            self.available_vram_bytes,
             1024,
-            headroom,
+            self.headroom,
             None, // pre-download advisor: VRAM-limited maxes only
-            is_unified_memory,
-            backend,
+            self.is_unified_memory,
+            self.backend,
         );
 
         let mut notes = Vec::new();
-        if qi.is_imatrix {
+        if is_imatrix {
             notes.push("Requires imatrix calibration for best quality".into());
         }
-        if qi.large_moe_only {
+        if large_moe_only {
             notes.push("Designed for large MoE models; poor for dense".into());
         }
-        if is_gemma4_qat && q_name == "q4_0" {
+        if is_gemma4_qat_target {
             notes.push(
                 "Official Gemma 4 QAT target; preserves near-BF16 quality at 4-bit weights".into(),
             );
@@ -1598,7 +1772,7 @@ pub fn quant_comparison_table(
         match quality {
             QuantQuality::Reference => notes.push("Bit-accurate reference quality".into()),
             QuantQuality::Excellent => {
-                if !(is_gemma4_qat && q_name == "q4_0") {
+                if !is_gemma4_qat_target {
                     notes
                         .push("Near-lossless; essentially equivalent to F16 for most tasks".into());
                 }
@@ -1624,47 +1798,25 @@ pub fn quant_comparison_table(
         } else {
             0
         };
-        if score > best_score {
-            best_score = score;
-            best_quant = Some(q_name.to_string());
-        }
 
-        options.push(QuantOption {
-            quant: q_name.to_string(),
-            label: qi.label.to_string(),
-            model_size_gb: model_gb,
-            fits_vram: fits,
-            max_ctx_q8: max_q8,
-            max_ctx_q4: max_q4,
-            quality,
-            is_imatrix: qi.is_imatrix,
-            large_moe_only: qi.large_moe_only,
-            recommended: false, // filled in below
-            quality_label: quality_label(quality),
-            notes,
-        });
+        (
+            QuantOption {
+                quant: quant_key,
+                label,
+                model_size_gb: model_gb,
+                fits_vram: fits,
+                max_ctx_q8: max_q8,
+                max_ctx_q4: max_q4,
+                quality,
+                is_imatrix,
+                large_moe_only,
+                recommended: false, // filled in by mark_recommended
+                quality_label: quality_label(quality),
+                notes,
+            },
+            score,
+        )
     }
-
-    // Gemma 4 QAT is explicitly trained for Q4_0. Prefer that target whenever it
-    // fits instead of allowing a generic higher-bit option to win a tied score.
-    if is_gemma4_qat
-        && options
-            .iter()
-            .any(|opt| opt.quant == "q4_0" && opt.fits_vram)
-    {
-        best_quant = Some("q4_0".into());
-    }
-
-    // Mark recommended
-    if let Some(ref best) = best_quant {
-        for opt in &mut options {
-            if &opt.quant == best {
-                opt.recommended = true;
-            }
-        }
-    }
-
-    options
 }
 
 fn quality_weight(q: QuantQuality) -> u64 {
