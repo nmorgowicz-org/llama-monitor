@@ -66,6 +66,7 @@ import {
   loadCommunityPicks,
   triggerQuantAdvisor,
   triggerHfFileFetch,
+  _applyScopeDefaultForEngine,
 } from './spawn-wizard-hf-browse.js';
 import { bindHfDownloadPanel } from './spawn-wizard-hf-download.js';
 import {
@@ -2086,6 +2087,7 @@ export function selectWizardEngine(engine, explicit) {
     updateModelInputVisibility();
   }
   renderEngineSelection();
+  _applyScopeDefaultForEngine(engine);
   clearValidationError();
   refreshStepGuardrails();
   _checkBinaryPrereq();

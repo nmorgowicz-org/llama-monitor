@@ -5878,6 +5878,7 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
 .ct-status.ct-installing { background: color-mix(in srgb, var(--color-warning) 8%, transparent); color: var(--color-warning); }
 .ct-status.ct-error { background: color-mix(in srgb, var(--color-error) 15%, transparent); color: var(--color-error); }
 .ct-status.ct-neutral { background: rgba(148,163,184,0.12); color: #94a3b8; }
+.ct-status.ct-warning { background: color-mix(in srgb, var(--color-warning) 15%, transparent); color: var(--color-warning); }
 .ct-body {
   font-size: 12px;
   color: var(--color-text-muted, #94a3b8);
@@ -5899,6 +5900,7 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
 .ct-hf-link:hover { text-decoration: underline; }
 .ct-retry-btn { margin-left: 8px; font-size: 11px; padding: 2px 8px; }
 .ct-error-msg { color: var(--color-error); }
+.ct-warning-msg { color: var(--color-warning); }
 
 [data-theme="light"] .chat-template-section {
   background: color-mix(in srgb, var(--color-accent) 4%, transparent);
@@ -6170,6 +6172,18 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+.wizard-review-warning {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 30%, transparent);
+}
+.wizard-review-warning-text {
+  font-size: 12px;
+  color: var(--color-warning);
+  line-height: 1.4;
 }
 .spawn-command-preview-header {
   display: flex;

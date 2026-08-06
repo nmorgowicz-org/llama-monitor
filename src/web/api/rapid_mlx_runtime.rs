@@ -677,10 +677,8 @@ async fn build_command_preview(
     // One correspondence the preview cannot reproduce: `build_launch` re-resolves `hybrid_mode`
     // from the model's own config, so a model whose metadata forces hybrid may launch with a
     // switch the preview does not show. The preview reports the configured value.
-    let builder = crate::inference::rapid_mlx::apply_phase7_adapter_config(
-        crate::inference::rapid_mlx::build_launch_argv(&adapter).0,
-        &adapter,
-    );
+    let (argv_builder, overlay_warning) = crate::inference::rapid_mlx::build_launch_argv(&adapter);
+    let builder = crate::inference::rapid_mlx::apply_phase7_adapter_config(argv_builder, &adapter);
 
     let launch = match builder.build(binary_path, &capabilities) {
         Ok(l) => l,
@@ -700,6 +698,7 @@ async fn build_command_preview(
 
     let mut reasons = Vec::new();
     check_setting_warnings(&config, &mut reasons);
+    reasons.extend(overlay_warning);
 
     // Build effective_policy snapshot from config fields that were actually applied
     let effective_policy = build_effective_policy(&config);

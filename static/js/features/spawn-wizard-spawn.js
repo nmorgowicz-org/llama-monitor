@@ -14,6 +14,12 @@ import { openEvidenceDrawer, evidenceFromCommandPreview } from './evidence-drawe
 import { setTuneConfig, showTunePanel } from './tune-panel.js';
 import { setHeaderMode } from './attach-detach.js';
 import { showToast } from './toast.js';
+import { applyChatTemplateDegradeFromReasons } from './spawn-wizard-chat-template.js';
+
+// Reasons from the most recent command-preview fetch (step 6). The spawn endpoint itself does
+// not currently return launch warnings, so this is the freshest signal available at click time
+// for surfacing the chat-template-degraded toast (plan §2.2, step-5 surface).
+let _lastPreviewReasons = [];
 
 // ── Spawn config preview card (step 6) ────────────────────────────────────────
 
@@ -68,6 +74,19 @@ async function _renderCommandPreview(host) {
 
   host.innerHTML = '';
 
+  _lastPreviewReasons = Array.isArray(data.reasons) ? data.reasons : [];
+  applyChatTemplateDegradeFromReasons(_lastPreviewReasons);
+  const aliasReason = _lastPreviewReasons.find(r => typeof r === 'string' && r.includes('[alias_source]'));
+  if (aliasReason) {
+    const warnBlock = mk('div', 'wizard-review-warning');
+    warnBlock.appendChild(mk(
+      'div',
+      'wizard-review-warning-text',
+      'Chat template: not applied (alias source). The model\'s built-in template will be used.',
+    ));
+    host.appendChild(warnBlock);
+  }
+
   const hdr = mk('div', 'spawn-command-preview-header');
   hdr.appendChild(mk('span', 'spawn-command-preview-title', 'Launch command'));
   const copyBtn = mk('button', 'spawn-command-preview-copy', 'Copy');
@@ -120,9 +139,10 @@ async function _renderCommandPreview(host) {
     host.appendChild(box);
   }
 
-  if (Array.isArray(data.reasons) && data.reasons.length > 0) {
+  const otherReasons = _lastPreviewReasons.filter(r => !(typeof r === 'string' && r.includes('[alias_source]')));
+  if (otherReasons.length > 0) {
     const list = mk('ul', 'spawn-command-preview-reasons');
-    data.reasons.forEach((reason) => list.appendChild(mk('li', null, reason)));
+    otherReasons.forEach((reason) => list.appendChild(mk('li', null, reason)));
     host.appendChild(list);
   }
 }
@@ -308,6 +328,14 @@ export async function spawnServer() {
     setProgress(100); setStatusText('Server started.');
     showSuccessText('Server is running.');
     showToast('Server started', 'success', '', { duration: 8000 });
+    if (_lastPreviewReasons.some(r => typeof r === 'string' && r.includes('[alias_source]'))) {
+      showToast(
+        'Chat template not applied',
+        'warning',
+        "This model was selected by alias — the server is using the model's built-in template.",
+        { duration: 8000 },
+      );
+    }
     if (supportsTunePanelForPayload(payload)) setTuneConfig(payload);
     setTimeout(() => {
       closeSpawnWizard();

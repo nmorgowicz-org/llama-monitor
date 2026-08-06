@@ -600,5 +600,36 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
       bodyEl.appendChild(document.createTextNode(' '));
       bodyEl.appendChild(retryBtn);
     }
+    return;
   }
+
+  // Plan §2.2: the requested template resolved, but the launcher will not be able to apply it
+  // (alias sources have no directory to overlay into). Distinct from 'error' — this is not a
+  // download failure, it's a structural mismatch discovered from the launch/preview warning.
+  if (state === 'degraded') {
+    if (statusEl) { statusEl.textContent = '⚠ Not applied'; statusEl.className = 'ct-status ct-warning'; }
+    if (bodyEl) {
+      bodyEl.textContent = '';
+      const nameEl = tpl ? _templateDisplayName(tpl, family) : (data?.templateName || 'the selected template');
+      const msg = document.createElement('span');
+      msg.className = 'ct-warning-msg';
+      msg.textContent = `This model was selected by alias, so llama-monitor cannot install a chat template for it. `
+        + `The server will use the template built into the model. To use ${nameEl}, select the same model by `
+        + `HuggingFace repo or local folder instead.`;
+      bodyEl.appendChild(msg);
+    }
+    return;
+  }
+}
+
+// Sets the 'degraded' status if `reasons` (from a launch or command-preview response) contains
+// the ChatTemplateDegradeReason::AliasSource code. No-op otherwise — callers that already know
+// the launch is clean should not clear a status set by autoInstallChatTemplate.
+export function applyChatTemplateDegradeFromReasons(reasons) {
+  const hit = (reasons || []).find(r => typeof r === 'string' && r.includes('[alias_source]'));
+  if (!hit) return false;
+  const family = wizardState.model.family || null;
+  const tpl = getDefaultTemplateForFamily(family);
+  _renderChatTemplateStatus('degraded', family, tpl, null);
+  return true;
 }

@@ -1583,6 +1583,28 @@ export function hfCreateScopeSelector({ container, onChange }) {
   wrap.dataset.hfScopeGguf = initialGguf ? '1' : '';
   wrap.dataset.hfScopeAll = initialAll ? '1' : '';
 
+  // Applies a scope state to dataset + button visuals, optionally notifying onChange. Shared by
+  // the click handler and the setScope() setter so a programmatic change can't drift from a
+  // user click's visual/dataset update logic.
+  function applyScope(mlxActive, ggufActive, allActive, { notify = true } = {}) {
+    wrap.dataset.hfScopeMlx = mlxActive ? '1' : '';
+    wrap.dataset.hfScopeGguf = ggufActive ? '1' : '';
+    wrap.dataset.hfScopeAll = allActive ? '1' : '';
+    container.dataset.hfScopeMlx = mlxActive ? '1' : '';
+    container.dataset.hfScopeGguf = ggufActive ? '1' : '';
+    container.dataset.hfScopeAll = allActive ? '1' : '';
+
+    wrap.querySelectorAll('.hf-scope-btn').forEach(b => {
+      const isActive = b.dataset.scopeKey === 'mlx' ? mlxActive
+        : b.dataset.scopeKey === 'gguf' ? ggufActive
+        : b.dataset.scopeKey === 'all' ? allActive
+        : false;
+      setScopeBtnState(b, isActive);
+    });
+
+    if (notify && onChange) onChange(mlxActive, ggufActive, allActive);
+  }
+
   for (const s of scopes) {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -1599,7 +1621,6 @@ export function hfCreateScopeSelector({ container, onChange }) {
       let mlxActive = wrap.dataset.hfScopeMlx === '1';
       let ggufActive = wrap.dataset.hfScopeGguf === '1';
       let allActive = wrap.dataset.hfScopeAll === '1';
-      console.log('[SCOPE-TOGGLE] before:', { key: s.key, mlxActive, ggufActive, allActive });
 
       if (s.key === 'all') {
         // All: toggle everything on/off (exclusive with individual toggles)
@@ -1616,26 +1637,7 @@ export function hfCreateScopeSelector({ container, onChange }) {
         allActive = false; // deselect All if user modifies individual toggles
       }
 
-      // Update datasets
-      wrap.dataset.hfScopeMlx = mlxActive ? '1' : '';
-      wrap.dataset.hfScopeGguf = ggufActive ? '1' : '';
-      wrap.dataset.hfScopeAll = allActive ? '1' : '';
-      container.dataset.hfScopeMlx = mlxActive ? '1' : '';
-      container.dataset.hfScopeGguf = ggufActive ? '1' : '';
-      container.dataset.hfScopeAll = allActive ? '1' : '';
-      console.log('[SCOPE-TOGGLE] after:', { key: s.key, mlxActive, ggufActive, allActive, containerMlx: container.dataset.hfScopeMlx, containerGguf: container.dataset.hfScopeGguf });
-
-      // Update button visuals
-      wrap.querySelectorAll('.hf-scope-btn').forEach(b => {
-        const isActive = b.dataset.scopeKey === 'mlx' ? mlxActive
-          : b.dataset.scopeKey === 'gguf' ? ggufActive
-          : b.dataset.scopeKey === 'all' ? allActive
-          : false;
-        setScopeBtnState(b, isActive);
-      });
-
-      // Notify caller
-      if (onChange) onChange(mlxActive, ggufActive, allActive);
+      applyScope(mlxActive, ggufActive, allActive);
     });
 
     // Set initial state
@@ -1648,7 +1650,16 @@ export function hfCreateScopeSelector({ container, onChange }) {
   }
 
   container.appendChild(wrap);
-  return wrap;
+
+  return {
+    el: wrap,
+    // Sets scope programmatically (e.g. engine-driven default). Does not fire onChange by
+    // default — callers that need a search re-fire opt in explicitly (plan §1.5/§5 Phase 1.2:
+    // "suppress search re-fire on programmatic scope change").
+    setScope(mlxActive, ggufActive, allActive, { notify = false } = {}) {
+      applyScope(mlxActive, ggufActive, allActive, { notify });
+    },
+  };
 }
 
 function setScopeBtnState(btn, active) {

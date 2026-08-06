@@ -42,6 +42,28 @@ export const hfBrowseState = {
   quantsOnly: false,
 };
 
+// Handle from hfCreateScopeSelector(), kept module-level so the engine-driven default (below)
+// can update the live selector without a teardown/rebuild.
+let _scopeSelectorHandle = null;
+// Set the moment the user clicks a scope button directly. Once true, engine switches stop
+// overriding their choice (plan §1.5: "engine-driven default is a pure narrowing", not something
+// that should fight a deliberate manual pick).
+let _userTouchedScope = false;
+
+// Narrows the HF scope toggle to the engine actually selected, replacing the old
+// platform-based (isMac) default. Additive resolveScope() means 'gguf'-only for llama.cpp and
+// 'mlx'-only for rapid_mlx is a pure narrowing of the previous always-both-on-Mac default, not a
+// semantic change (plan §1.5). No-op once the user has touched the selector directly.
+export function _applyScopeDefaultForEngine(engine) {
+  if (_userTouchedScope || !_scopeSelectorHandle) return;
+  const mlxActive = engine === 'rapid_mlx';
+  const ggufActive = engine !== 'rapid_mlx';
+  hfBrowseState.mlxActive = mlxActive;
+  hfBrowseState.ggufActive = ggufActive;
+  hfBrowseState.allActive = false;
+  _scopeSelectorHandle.setScope(mlxActive, ggufActive, false);
+}
+
 
 export function initHfBrowseWidgets() {
      // HF discover pills
@@ -68,15 +90,22 @@ export function initHfBrowseWidgets() {
       },
     });
 
-    const isMac = navigator.platform?.includes('Mac');
-    hfBrowseState.mlxActive = !!isMac;
+    // Engine-driven default (plan §1.5): mlx-only for rapid_mlx, gguf-only for llama.cpp,
+    // replacing the old platform-based (isMac) default. _applyScopeDefaultForEngine below
+    // needs the handle, so seed dataset attrs from the current engine before creating it.
+    const initialEngine = wizardState.engine.selected;
+    const initialMlx = initialEngine === 'rapid_mlx';
+    const initialGguf = initialEngine !== 'rapid_mlx';
+    hfBrowseState.mlxActive = initialMlx;
+    hfBrowseState.ggufActive = initialGguf;
     const scopeContainer = document.getElementById('spawn-hf-scope-container');
-    scopeContainer?.setAttribute('data-hf-scope-mlx', isMac ? '1' : '');
-    scopeContainer?.setAttribute('data-hf-scope-gguf', '1');
+    scopeContainer?.setAttribute('data-hf-scope-mlx', initialMlx ? '1' : '');
+    scopeContainer?.setAttribute('data-hf-scope-gguf', initialGguf ? '1' : '');
     scopeContainer?.setAttribute('data-hf-scope-all', '');
-    hfCreateScopeSelector({
+    _scopeSelectorHandle = hfCreateScopeSelector({
       container: scopeContainer,
       onChange: (mlxActive, ggufActive, allActive) => {
+        _userTouchedScope = true;
         hfBrowseState.mlxActive = mlxActive || allActive;
         hfBrowseState.ggufActive = ggufActive || allActive;
         hfBrowseState.allActive = allActive;
