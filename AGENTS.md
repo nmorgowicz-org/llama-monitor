@@ -49,7 +49,7 @@ For all UI/UX work (bars, cards, modals, layout changes, visual polish), use the
   - Confirm proposed designs in real UI.
   - Validate text, spacing, colors, and behavior.
 - Use whichever scenario matches the area being changed (e.g., welcome, chat, spawn-wizard, dashboard, settings, sidebar, panels, models-v2, etc.).
-- If new capabilities require new capture scenarios, add them under `tests/ui/capture/scenarios/` and register them in `tests/ui/capture/index.mjs`, then update usage docs.
+- If new capabilities require new capture scenarios, add them under `tests/ui/capture/scenarios/<group>/` (group = functional area, e.g. `wizard-llamacpp`, `presets`) and register them in `tests/ui/capture/index.mjs`, then update usage docs. Groups also drive `cli-group.mjs` — see Screenshots Workflow below.
 - Never rely on screenshots from other environments or imagined renders.
 - Treat screenshots as the single source of truth for "what this will look like."
 
@@ -282,14 +282,18 @@ For PRs touching multiple files or adding features, run a sub-agent check for:
 ## Screenshots Workflow
 
 - **Capture** (for debugging, UI review): use artifacts/
-  - Run: `node tests/ui/capture/index.mjs --scenario <name>`
-  - Files go to: `docs/screenshots/artifacts/`
+  - Single scenario: `node tests/ui/capture/index.mjs --scenario <name>`
+  - Whole group (every scenario registered under `tests/ui/capture/scenarios/<group>/`, run sequentially):
+    `SCREENSHOT_PORT=<port> node tests/ui/capture/cli-group.mjs <group> --no-attach`
+    Groups: `config`, `core`, `features`, `models`, `presets`, `validation`, `wizard-llamacpp`, `wizard-rapidmlx`.
+  - Files go to: `docs/screenshots/artifacts/<group>/<scenario-filename>.png` (subfolder per group, not flat).
   - This folder is gitignored: keep it for UX reference, debugging, comparisons.
+  - NEVER run scenarios/groups in parallel (port conflicts) — one `SCREENSHOT_PORT` at a time.
 
 - **Promote** only when actually used in docs:
   - 1) Add image reference in README.md or docs/reference/*.md.
-  - 2) Copy from artifacts/ to docs/screenshots/: 
-       `cp docs/screenshots/artifacts/<name>.png docs/screenshots/<name>.png`
+  - 2) Copy from artifacts/<group>/ to docs/screenshots/ (flat, no subfolder):
+       `cp docs/screenshots/artifacts/<group>/<name>.png docs/screenshots/<name>.png`
   - 3) Commit both: your doc changes + the promoted screenshot.
 
 - **Check for unused screenshots** (before or after PR):

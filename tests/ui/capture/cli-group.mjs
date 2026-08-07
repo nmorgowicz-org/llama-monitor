@@ -8,6 +8,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { runCli } from './index.mjs';
+import { TEMP_APP_CONFIG_DIR } from './harness/paths.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCENARIOS_DIR = join(__dirname, 'scenarios');
@@ -50,6 +51,10 @@ async function main() {
     console.log(`[CAPTURE GROUP] Running ${scenarios.length} scenario(s) in group "${group}": ${scenarios.join(', ')}`);
     for (const scenario of scenarios) {
         console.log(`\n[CAPTURE GROUP] --- ${scenario} ---`);
+        // runCli()'s per-scenario teardown deletes TEMP_HOME (a module-level
+        // singleton), so it must be recreated before each scenario when reusing
+        // the same process across a whole group.
+        fs.mkdirSync(TEMP_APP_CONFIG_DIR, { recursive: true });
         await runCli({ scenario, argv: rest });
     }
 }
