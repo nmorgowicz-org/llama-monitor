@@ -37,25 +37,25 @@ const GROUPS = [
   {
     supersection: 'generation', id: 'thinking', title: 'Thinking & reasoning',
     description: 'Control model reasoning behavior independently from sampling.',
-    tier: 'quick',
+    tier: 'quick', critical: true, view: 'card',
     controls: ['spawn-rapid-reasoning-mode'],
   },
   {
     supersection: 'generation', id: 'protocol', title: 'Model protocol',
     description: 'Keep automatic detection unless a modified finetune requires an override.',
-    tier: 'balanced',
+    tier: 'balanced', critical: true, view: 'both',
     controls: ['spawn-rapid-tool-call-parser', 'spawn-rapid-reasoning-parser', 'spawn-rapid-hybrid-mode'],
   },
   {
     supersection: 'generation', id: 'sampling', title: 'Sampling defaults',
     description: 'Server-level sampling defaults; explicit client parameters always win.',
-    tier: 'balanced',
+    tier: 'balanced', critical: true, view: 'both',
     controls: ['spawn-sampling-mode'],
   },
   {
     supersection: 'cache-performance', id: 'active-memory', title: 'Active memory',
     description: 'Precision and prefill choices that affect live unified-memory pressure.',
-    tier: 'advanced',
+    tier: 'advanced', critical: false, view: 'both',
     controls: ['spawn-kv-cache-dtype', 'spawn-rapid-prefill-step-size', 'spawn-turboquant-mode'],
   },
   {
@@ -64,7 +64,7 @@ const GROUPS = [
     // Deliberate divergence from llama.cpp's -cram (Advanced): retained cache is
     // a §2.6 scenario axis the user picks alongside context, so it must be
     // reachable at Balanced.
-    tier: 'balanced',
+    tier: 'balanced', critical: true, view: 'both',
     controls: ['spawn-retained-cache-mib', 'spawn-rapid-hybrid-cache-entries'],
   },
   {
@@ -72,7 +72,7 @@ const GROUPS = [
     description: 'Advanced batching and admission limits; defaults suit one interactive user.',
     // spawn-rapid-max-num-seqs is also a §2.6 scenario axis (peer of
     // spawn-parallel-slots) — same Balanced reasoning as retained-cache above.
-    tier: 'balanced',
+    tier: 'balanced', critical: true, view: 'both',
     controls: [
       'spawn-rapid-gpu-memory-utilization', 'spawn-rapid-max-num-seqs',
       'spawn-rapid-max-concurrent-requests', 'spawn-rapid-pflash-policy',
@@ -82,14 +82,14 @@ const GROUPS = [
   {
     supersection: 'server-safety', id: 'tool-integration', title: 'Tool integration',
     description: 'Enable only for models with a compatible tool-call parser.',
-    tier: 'balanced',
+    tier: 'balanced', critical: true, view: 'both',
     controls: ['spawn-rapid-auto-tool-choice'],
   },
   {
     supersection: 'server-safety', id: 'companions', title: 'Companions & experimental acceleration',
     description: 'Only qualified local companions belong here; unsupported remote launches fail closed.',
     collapsible: true,
-    tier: 'advanced',
+    tier: 'advanced', critical: false, view: 'both',
     controls: [
       'spawn-rapid-speculative-enabled', 'spawn-rapid-speculative-mode-wrap',
       'spawn-rapid-speculative-sidecars-wrap', 'spawn-rapid-speculative-model-wrap',
