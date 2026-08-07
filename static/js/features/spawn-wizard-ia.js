@@ -9,11 +9,10 @@
 // This module only regroups a flat field dump into progressive, labelled
 // <details> sections at runtime.
 
-const TIER_RANK = { quick: 0, balanced: 1, advanced: 2 };
-const PROFILE_RANK = { quick: 0, balanced: 1, advanced: 2 };
-
-export function isOpenForProfile(groupTier, profile) {
-  return (PROFILE_RANK[profile] ?? 1) >= (TIER_RANK[groupTier] ?? 1);
+export function isOpenForProfile(critical, profile) {
+  // critical true = auto-open everywhere; critical false = open only at Advanced
+  if (critical) return true;
+  return (profile ?? 'balanced') === 'advanced';
 }
 
 function rowForControl(id) {
@@ -79,7 +78,8 @@ export function createWizardIA(config) {
     el.classList.add('mlx-wiz-group', rowClassName);
     el.dataset.mlxWizGroup = group.id;
     el.dataset.mlxWizTier = group.tier || 'balanced';
-    el.open = isOpenForProfile(group.tier, profile);
+    el.dataset.mlxWizCritical = String(group.critical ?? (group.tier !== 'advanced'));
+    el.open = isOpenForProfile(group.critical ?? (group.tier !== 'advanced'), profile);
     return el;
   }
 
@@ -89,7 +89,8 @@ export function createWizardIA(config) {
     container.className = `${groupClassName} mlx-wiz-group`;
     container.dataset.mlxWizGroup = group.id;
     container.dataset.mlxWizTier = group.tier || 'balanced';
-    container.open = isOpenForProfile(group.tier, profile);
+    container.dataset.mlxWizCritical = String(group.critical ?? (group.tier !== 'advanced'));
+    container.open = isOpenForProfile(group.critical ?? (group.tier !== 'advanced'), profile);
     const header = document.createElement('summary');
     header.className = 'mlx-native-group-header';
     const title = document.createElement('h4');
@@ -214,8 +215,9 @@ export function createWizardIA(config) {
   // the other loader's groups.
   function applyTierVisibility(root, profile) {
     if (!iaContainer) return;
-    iaContainer.querySelectorAll('.mlx-wiz-group[data-mlx-wiz-tier]').forEach(el => {
-      el.open = isOpenForProfile(el.dataset.mlxWizTier, profile);
+    iaContainer.querySelectorAll('.mlx-wiz-group[data-mlx-wiz-critical]').forEach(el => {
+      const critical = el.dataset.mlxWizCritical === 'true';
+      el.open = isOpenForProfile(critical, profile);
     });
   }
 
