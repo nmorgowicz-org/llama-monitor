@@ -25,8 +25,7 @@ import {
   refreshStepGuardrails,
   selectWizardEngine,
   updateSelectedModelDisplay,
-  inferParamBFromName,
-  detectMtpFromName,
+  introspectHfFileMetadata,
   buildHeuristicArch,
   effectiveAvailBytes,
   isUnifiedMemory,
@@ -1013,8 +1012,9 @@ export function triggerHfFileFetch() {
     wizardState.model.hfRepo = input;
     if (dom.hfSearchResults) dom.hfSearchResults.style.display = 'none';
     dom.hfQuickpicks?.querySelectorAll('.hf-qp-btn').forEach(b => b.classList.remove('active'));
-    const inferredP = inferParamBFromName(input);
-    if (inferredP > 0) wizardState.model.paramB = inferredP;
+    // No file is selected yet at this point, so there's nothing to introspect —
+    // paramB stays unset until a specific GGUF file is chosen below (Phase 10e:
+    // never guess from the typed repo-id text).
     fetchHfFiles(input);
   } else {
     const sort = hfBrowseState.sort;
@@ -1090,11 +1090,10 @@ async function fetchHfFiles(repo) {
       wizardState.model.path = '';
       if (file.size) wizardState.model.modelBytes = Number(file.size);
 
-      if (!wizardState.model.paramB) wizardState.model.paramB = inferParamBFromName(fname) || inferParamBFromName(repoId);
-
-      if (detectMtpFromName(fname) && !wizardState.arch.mtpDepth) {
-        wizardState.arch.mtpDepth = 1;
-      }
+      // Real GGUF-header introspection (Phase 10e) — no filename guessing. Fires a
+      // range-fetch against the real header so paramB/MoE/MTP/gguf_arch reflect the
+      // actual file, same as local doIntrospect() does for downloaded models.
+      introspectHfFileMetadata(repoId, fname, file.size ? Number(file.size) : 0);
 
       // Store file lists so hardware step can offer quant swap + mmproj
       wizardState.model.quantFiles = [];

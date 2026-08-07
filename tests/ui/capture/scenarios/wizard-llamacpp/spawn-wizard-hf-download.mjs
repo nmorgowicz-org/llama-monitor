@@ -82,7 +82,7 @@ export default async function(ctx, options) {
     await sleep(400);
 
     // 1) Capture idle HF download panel.
-    await captureShot(page, 'spawn-wizard-hf-download-idle.png', { fullPage: true });
+    await captureShot(page, 'spawn-wizard-hf-download-idle.png', { fullPage: true, expandSelector: '.wizard-body' });
 
     // 2) Simulate a progress state for a second shot.
     await page.evaluate(() => {
@@ -110,7 +110,7 @@ export default async function(ctx, options) {
     await sleep(400);
 
     // Capture simulated progress.
-    await captureShot(page, 'spawn-wizard-hf-download-progress.png', { fullPage: true });
+    await captureShot(page, 'spawn-wizard-hf-download-progress.png', { fullPage: true, expandSelector: '.wizard-body' });
 
     // Close wizard.
     await page.keyboard.press('Escape');

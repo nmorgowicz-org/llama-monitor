@@ -536,8 +536,10 @@ fn api_model_defaults(
                             .collect()
                     })
                     .unwrap_or_default();
-                let gguf_arch = body["gguf_arch"].as_str().unwrap_or("").to_string();
+                let mut gguf_arch = body["gguf_arch"].as_str().unwrap_or("").to_string();
                 let arch_family = body["arch_family"].as_str().unwrap_or("").to_string();
+                let hf_repo_id = body["hf_repo_id"].as_str().unwrap_or("").to_string();
+                let hf_file_path = body["hf_file_path"].as_str().unwrap_or("").to_string();
 
                 if name_or_repo.is_empty() {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -545,6 +547,34 @@ fn api_model_defaults(
                             "error": "Missing 'model_name_or_repo'."
                         })),
                     ));
+                }
+
+                // Introspection-only, never filename guessing (see Phase 10e): when the
+                // caller hasn't already resolved a real GGUF architecture (e.g. the model is
+                // HF-streamed and not yet downloaded, so local introspection never ran), fetch
+                // the real GGUF header directly from HF via a progressive range request. On
+                // failure (offline/gated/no range support) `gguf_arch` stays empty and
+                // `modes_for_model` falls through to the family-agnostic universal presets —
+                // never to a filename/repo-name substring guess.
+                let mut introspected_meta: Option<serde_json::Value> = None;
+                if gguf_arch.is_empty() && !hf_repo_id.is_empty() && !hf_file_path.is_empty() {
+                    if let Ok(meta) =
+                        crate::hf::fetch_gguf_header_metadata(&hf_repo_id, &hf_file_path).await
+                    {
+                        let model_meta = meta.to_model_metadata();
+                        if let Some(arch) = &model_meta.gguf_arch {
+                            gguf_arch = arch.clone();
+                        }
+                        introspected_meta = Some(serde_json::json!({
+                            "gguf_arch": model_meta.gguf_arch,
+                            "total_params_b": meta.param_b(),
+                            "active_params_b": model_meta.active_params_b,
+                            "n_experts": model_meta.n_experts,
+                            "n_experts_used": model_meta.n_experts_used,
+                            "mtp_depth": model_meta.mtp_depth,
+                            "n_ctx_train": model_meta.n_ctx_train,
+                        }));
+                    }
                 }
 
                 let backend = body["backend"]
@@ -581,6 +611,7 @@ fn api_model_defaults(
                         "reasoning_budget": defaults.reasoning_budget,
                         "reasoning_budget_message": defaults.reasoning_budget_message,
                         "modes": modes,
+                        "introspected": introspected_meta,
                     }),
                 )))
             }

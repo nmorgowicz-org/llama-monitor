@@ -64,6 +64,7 @@ export default async function(ctx) {
         await captureShot(page, `spawn-wizard-tier-matrix-${profile}.png`, {
             fullPage: true,
             runtimeTag: 'llamacpp-local',
+            expandSelector: '.wizard-body',
         });
     }
 

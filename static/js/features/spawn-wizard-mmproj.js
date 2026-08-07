@@ -77,6 +77,16 @@ export function _bestMmprojForModel(modelFilename, files) {
 export function renderMmprojSection() {
   const row = document.getElementById('hw-mmproj-row');
   if (!row) return;
+
+  // mmproj is a llama.cpp/GGUF concept — Rapid-MLX vision uses its own MLX-VLM
+  // component set (currently unqualified for release, see vision detection work),
+  // not a companion projector file. Showing this control under Rapid-MLX would
+  // offer a knob that does nothing for that backend.
+  if (wizardState.engine.selected === 'rapid_mlx') {
+    row.style.display = 'none';
+    return;
+  }
+
   const files = wizardState.model.mmprojFiles || [];
 
   // When no local mmproj files exist, show a "download from HuggingFace" option

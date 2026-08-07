@@ -117,13 +117,25 @@ export async function _fetchAndApplyModelSamplingDefaults() {
         size_bytes: m.modelBytes || 0,
         tags: [],
         gguf_arch: wizardState.arch.ggufArch || '',
-      arch_family: wizardState.model.family || '',
-      backend: wizardState.engine.selected || 'llama_cpp',
+        arch_family: wizardState.model.family || '',
+        backend: wizardState.engine.selected || 'llama_cpp',
+        // Streamed-but-not-yet-downloaded HF models never run local introspection
+        // (their model.path is intentionally empty). Send the HF coordinates so the
+        // server can fetch the real GGUF header via a range request instead of ever
+        // falling back to a filename/repo-name guess.
+        hf_repo_id: !wizardState.arch.ggufArch ? (m.hfRepo || '') : '',
+        hf_file_path: !wizardState.arch.ggufArch ? (m.hfFile || '') : '',
       }),
     });
     if (!res.ok) return;
     const data = await res.json();
     const defaults = data.defaults || data;
+    // Server-side introspection succeeded for a not-yet-downloaded HF model — persist
+    // the real architecture so later calls (and other UI reading wizardState.arch) don't
+    // need to re-fetch it, and never fall through to a filename heuristic.
+    if (data.introspected?.gguf_arch && !wizardState.arch.ggufArch) {
+      wizardState.arch.ggufArch = data.introspected.gguf_arch;
+    }
     const h = wizardState.hardware;
     const effectiveCoverage = wizardState.engine.selected === 'rapid_mlx'
       ? (data.modes?.[0]?.rapid_mlx_coverage || {})

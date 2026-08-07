@@ -118,7 +118,7 @@ Scenarios:
     dashboard-rapid-mlx  Deterministic Rapid-MLX telemetry cards (dark and light)
 
    Setup wizard
-     spawn-wizard           Steps 1–6: profiles, model, VRAM, parameters, summary, start/close
+     spawn-wizard           3-step wizard: model & profiles, hardware & VRAM, launch summary/spawn
      spawn-wizard-engines      llama.cpp/Rapid-MLX engine cards and Rapid-MLX hardware handoff
      spawn-wizard-gif          Animated GIF walking through all setup wizard steps (llama.cpp path)
      spawn-wizard-rapid-mlx-gif  Animated GIF: Rapid-MLX engine, hardware controls, profile hints, spawn

@@ -417,15 +417,23 @@ function updateContextRailSummary() {
 // styling: llama.cpp's cards vary the KV-quant axis at a fixed context, while MLX's cards vary
 // concurrency/retained-cache at a fixed KV dtype (int8, pinned by the reasoning profile — §2.6).
 // A shared "gate on modelBytes only" entry point keeps that divergence from leaking upward.
+// Both render*ScenarioCards() functions clear dom.vramScenarios synchronously,
+// then await network estimates before appending. If a second call starts
+// before the first's fetches resolve, the second call's clear wipes an
+// already-empty container and both calls go on to append their own set of
+// cards — doubling the grid. This token makes a stale call's append a no-op.
+let scenarioCardsRenderToken = 0;
+
 async function renderScenarioCards(modelBytes, arch, availVram) {
   if (!dom.vramScenarios || !availVram || !modelBytes) return;
+  const token = ++scenarioCardsRenderToken;
   if (wizardState.engine.selected === 'rapid_mlx') {
-    return renderMlxScenarioCards(modelBytes, arch, availVram);
+    return renderMlxScenarioCards(modelBytes, arch, availVram, token);
   }
-  return renderLlamaCppScenarioCards(modelBytes, arch, availVram);
+  return renderLlamaCppScenarioCards(modelBytes, arch, availVram, token);
 }
 
-async function renderLlamaCppScenarioCards(modelBytes, arch, availVram) {
+async function renderLlamaCppScenarioCards(modelBytes, arch, availVram, token) {
   const hw = wizardState.hardware;
   const uc = wizardState.useCase;
   const nCtxTrain = wizardState.model.nCtxTrain || 0;
@@ -502,6 +510,9 @@ async function renderLlamaCppScenarioCards(modelBytes, arch, availVram) {
       }
     }),
   );
+
+  if (token !== scenarioCardsRenderToken) return;
+  dom.vramScenarios.innerHTML = '';
 
   for (let i = 0; i < scenarios.length; i++) {
     const s = scenarios[i];
@@ -620,23 +631,11 @@ const MLX_SCENARIOS = [
   },
 ];
 
-async function renderMlxScenarioCards(modelBytes, arch, availVram) {
+async function renderMlxScenarioCards(modelBytes, arch, availVram, token) {
   const hw = wizardState.hardware;
   const currentCtx = hw.contextSize || 8192;
   const activeMaxNumSeqs = hw.parallelSlots || 1;
   const activeRetained = Number(hw.retainedCacheMib ?? 8192);
-
-  dom.vramScenarios.innerHTML = '';
-
-  // Fixed facts, rendered once — not per-card, since none of them vary across these cards.
-  const facts = document.createElement('div');
-  facts.className = 'vram-mlx-fixed-facts';
-  facts.textContent = 'KV: int8 (pinned by reasoning profile) · TurboQuant: off (awaiting receipt) · PFlash: off';
-  dom.vramScenarios.appendChild(facts);
-
-  const cardsWrap = document.createElement('div');
-  cardsWrap.className = 'vram-mlx-scenario-cards';
-  dom.vramScenarios.appendChild(cardsWrap);
 
   const hasLocalPath = !!wizardState.model.path;
   const estimates = await Promise.all(
@@ -675,6 +674,19 @@ async function renderMlxScenarioCards(modelBytes, arch, availVram) {
       }
     }),
   );
+
+  if (token !== scenarioCardsRenderToken) return;
+  dom.vramScenarios.innerHTML = '';
+
+  // Fixed facts, rendered once — not per-card, since none of them vary across these cards.
+  const facts = document.createElement('div');
+  facts.className = 'vram-mlx-fixed-facts';
+  facts.textContent = 'KV: int8 (pinned by reasoning profile) · TurboQuant: off (awaiting receipt) · PFlash: off';
+  dom.vramScenarios.appendChild(facts);
+
+  const cardsWrap = document.createElement('div');
+  cardsWrap.className = 'vram-mlx-scenario-cards';
+  dom.vramScenarios.appendChild(cardsWrap);
 
   for (let i = 0; i < MLX_SCENARIOS.length; i++) {
     const s = MLX_SCENARIOS[i];

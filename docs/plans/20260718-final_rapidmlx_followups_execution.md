@@ -220,7 +220,7 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 
 ### Phase 3 — Runtime and dependency qualification
 
-- **State:** Previously implemented; VLM capability/argv remediation validated, commit pending. Do not treat model-specific vision support as qualified until the Phase 7 real-model smoke lane passes.
+- **State:** Verified complete (commit `a3e867cb`, 2026-07-23, confirmed ancestor of HEAD). Do not treat model-specific vision support as qualified until the Phase 7 real-model smoke lane passes.
 - **Budget:** 140k total (~60k A + ~60k B + ~50k C)
 - **Depends on:** Phases 1–2
 - **Read:** gaps 3.4/3.8–3.10; D13/D24/D25/D27; contract 7.5; A2/A14/A15/A17–A19/A26/A29/A48/A51–A52; Phase 3; runtime/client matrices; evidence ledger.
@@ -245,7 +245,7 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 
 ### Phase 4 — Normalized MLX architecture metadata
 
-- **State:** Remediation validated; commit pending. Do not advance Phase 5 from this ledger until the normalized-profile integration is committed.
+- **State:** Verified complete (commits `28437172`/`6543f9f6`/`ae425377` Parts A/B/C, confirmed ancestors of HEAD).
 - **Budget:** 170k total (~55k A + ~55k B + ~60k C)
 - **Parts:** A (ModelMemoryProfile + config parsing), B (Qwen3.6/Gemma4/MoE/MTP geometry), C (context/*8/HF lookup/estimator integration)
 - **Depends on:** Phase 0 fixtures and Phase 2 identity; A25
@@ -640,41 +640,95 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 
 #### Phase 8B — HF/Library discovery, cards, quant-switch UX (split into 3 parts)
 
-##### Phase 8B1 — Discovery scopes, sorting, categories, curated authors, workload-start — Verified complete — shipped with three defects (Coordinator, 2026-07-30)
+##### Phase 8B1 — Discovery scopes, sorting, categories, curated authors, workload-start — Verified complete, defects since resolved by rework (re-verified 2026-08-07)
 
-- **State:** Verified complete — shipped with three defects (Coordinator, 2026-07-30)
-- **Commit:** f290273 (2026-07-22)
+- **State:** Verified complete — the three 2026-07-30 defects were independently reworked and are now fixed, confirmed against current `HEAD`:
+  1. **Sort mislabeling — fixed.** `b6d256b6 fix(hf): make the discovery sort dropdown actually sort, and remember the choice`. `resolveSortParam` (`static/js/features/hf-browse.js:405-419`) now only asks HF for a wide server-side pool (relevance/lastModified/downloads) and a separate `compareModels` client-side comparator (same file, ~line 401 onward, using `sizeRank`) does the real Name/Size ordering off `SimpleModelInfo.last_modified`/`model_size_bytes` — the old Name→createdAt/Size→downloads collapse no longer exists.
+  2. **Workload-aware sorting/estimate — fixed by removal, not repair.** `f3e34644 fix(workload): delete the workload_profile ghost, and make the use case do one real thing`. `sessionState.workloadProfile` is gone; `static/js/features/models.js:3313-3320` documents in a comment why the Library estimate now intentionally omits `workload_scenario` (the Library has no use-case selection to derive it from — that only exists in the spawn wizard). This is a scope correction, not a live bug.
+  3. **Curated authors — fixed, now backed by the real catalog.** `258e0175 feat(hf): serve the community source catalog, and back role badges with it` + `3b7668b5`. `KNOWN_CONVERTER_PATTERNS` is gone; `resolveAuthorRole()` (`static/js/features/hf-browse.js:137+`) resolves roles from the fetched `CommunitySourceCatalog` (`ensureCommunitySourceCatalog()`/`_fetchCommunitySources()`, same file) via `GET /api/hf/community-sources`, with catalog CRUD wired through `/api/hf/community-sources[/entry|/reset]` and consumed from `static/js/features/models.js:2396-2459`. The 8A note "`CommunitySourceCatalog` has no route at all" is also stale — it does now, and the frontend calls it.
+- **Original commit:** f290273 (2026-07-22); rework commits above landed after the 2026-07-30 verification.
 - **Scope:** builder brief items 1, 3, 8
 - **Screenshot gates:** panels-model-library-discovery.png (Auto/GGUF/MLX/All toggle, workload-start discovery, curated authors)
-- **Deliverables:** Auto/GGUF/MLX/All scopes, Auto/Relevance/Name/Size/Last updated sort (workload-aware), category badges (descriptive), author/converter role badges, workload-profile-aware defaults
+- **Deliverables:** Additive MLX/GGUF/All discovery scopes (platform-defaulted, no separate `AUTO` value — additive toggling replaced the documented 4-way scheme; see `HF_SCOPE` at `hf-browse.js:11-16`), real Relevance/Name/Size/Last-updated sort, category badges, author/converter role badges sourced from the live catalog.
 
-##### Phase 8B2 — Cards with lineage/qualification display — Verified complete — cards shipped, lineage did not (Coordinator, 2026-07-30)
+##### Phase 8B2 — Cards with lineage/qualification display — Verified complete, defects since resolved by rework (re-verified 2026-08-07)
 
-- **State:** Verified complete — cards shipped, lineage did not (Coordinator, 2026-07-30)
-- **Commits:** 7011f5c + 0f0b575 (screenshot/model card fixes)
+- **State:** Verified complete — both 2026-07-30 defects fixed:
+  1. **Lineage dead code — fixed.** `e5dba350 feat(models): record where downloaded models came from, and show it`. `ModelInventoryEntry` (`src/models/library.rs:71-105`) now has a real `download_provenance: Option<DownloadProvenanceView>` field; the old dead-field check in `models.js` was rewritten (comment at `models.js:415-421`: "row shipped in Phase 8B2 reading `hf_repo_id || originRepo || repo_id`. None of those are real fields the backend populates" — replaced with `m.download_provenance`). The nonexistent `hf_repo_id`/`originRepo`/etc. fields were never added to the struct; the code path that referenced them was replaced rather than the struct being extended to match it.
+  2. **Revision-bound qualification — fixed.** `3b7668b5 feat(hf): harden identity/qualification and serve community source catalog`. `SimpleModelInfo` (`src/hf/mod.rs:275-304`) now carries `pub revision: String` (the immutable commit HF search returns). `/api/hf/qualify` is called from the frontend in two places: `static/js/features/hf-browse.js:323` (`openHfEvidence`, revision-pinned) and `static/js/features/spawn-wizard-hf-browse.js:567`.
+- **Original commits:** 7011f5c + 0f0b575 (2026-07); rework commits above landed after the 2026-07-30 verification.
 - **Scope:** builder brief items 4, 5, 6, 7, 11
-- **Screenshots:** panels-model-library-discovery.png, panels-model-library-qualification-badges.png, panels-model-library-mlx-scope.png (mlx-lineage removed as duplicate)
-- **Deliverables:** Two-level card hierarchy (group/variants), MLX lineage display, revision-bound qualification badges, repo/revision preservation through selection→estimate→library→launch, model card button wired to spawn-wizard panel (in-app, not new tab), real HF data in capture.mjs screenshots
-- **Deliverables:** Two-level card hierarchy (group + variants), original author/converter distinct, MLX native/converted lineage, revision-bound qualification badges, repo/revision preservation, lineage on library cards
+- **Deliverables:** Two-level card hierarchy (group + variants), original author/converter distinct via live catalog, revision-bound qualification badges backed by a real `revision` field, real download-provenance lineage on library cards, model card panel wired in-app.
 
-##### Phase 8B3 — Quant-switch UX, context/KV artifact switching, MLX fixes, scope UX fix, captures
+##### Phase 8B3 — Quant-switch UX, context/KV artifact switching, MLX fixes, scope UX fix, captures — Complete, all screenshot gates captured (2026-08-07)
 
-- **State:** Not started. **Ad-hoc UX fix (2026-08-05, outside formal Builder brief scope):** user
-  reported HF search-result rows required two clicks to select a GGUF quant (expand, then pick a
-  file), and that the quant-advisor table rendered at the bottom of the left column instead of the
-  right sidebar. Fixed: (1) `static/index.html`/`static/css/spawn-wizard.css` relocated
-  `#quant-advisor` into `.wizard-sidebar` with a compact-column CSS override; (2)
-  `static/js/features/hf-browse.js`'s `createGroupVariant()` now auto-selects the VRAM-recommended
-  quant on first expand of a GGUF group variant; (3) root-caused and fixed the actual blocker —
-  `hfListFiles()` (shared file-list renderer used by both the spawn wizard's `fetchHfFiles()` and
-  the Models modal) had a deliberate "do NOT auto-select" no-op despite already computing
-  `autoSelectFn`/`firstSelectFn`; now calls whichever is available so landing on a repo's file list
-  (via direct repo-ID entry, search-group-variant click, or the Models modal) yields a working
-  selection without a second click. Live-verified via browser automation: single click on a search
-  group's variant row now sets `wizardState.model.hfFile` and passes step-2 validation. This does
-  not touch 8B3's remaining formal scope (workload/context/KV-aware quant comparison, mmproj
-  backend gating, MLX/GGUF endpoint separation, additive scope-toggle UX) — those remain not
-  started.
+- **State:** Complete. All screenshot gates captured against real HF data
+  (`unsloth/Qwen3.6-27B-MTP-GGUF`): `panels-model-discovery.png`,
+  `panels-model-discovery-qualification-badges.png`, `panels-model-discovery-quant-advisor.png`,
+  `panels-model-discovery-context-requant.png`, `panels-model-discovery-mlx-only.png`
+  (`docs/screenshots/artifacts/models/`).
+  - **Real production bug found and fixed while capturing the quant-advisor/context-requant
+    gates:** `fetchGpuVram()` (`models.js`) read `/metrics/gpu` exactly once, on Download-tab
+    init, with no retry. On a freshly-spawned instance the Apple GPU backend's `mactop
+    --headless` cold start takes several seconds (up to ~10s observed) before real metrics
+    replace the initial empty `{}` response, so `cachedVram`/`cachedUnified` could permanently
+    stay at their zero/false defaults for the rest of the session if a model was selected (and
+    `loadQuantAdvisor()` ran) before that first poll resolved — silently hiding the quant advisor
+    with no error. Not test-scenario-only: any real user opening the Download tab and picking a
+    model within the first several seconds of a fresh server start hits the same bug. Fixed by
+    making `fetchGpuVram(retriesLeft, background)` retry (30× at 1.2s, background/unawaited after
+    the first attempt so it can't block other Download-tab init like wiring the search box), and
+    re-triggering `triggerQuantAdvisor()` from the background retry's success path if a model is
+    already selected by the time real data lands.
+  Most of the formal scope turned out to already be shipped by earlier 8B1/8B2 rework, confirmed by
+  direct code read against current `HEAD`; one genuine gap (mmproj backend gating) was found and
+  fixed this pass. Not yet edited: `tests/ui/capture.mjs` coverage for the listed screenshot gates.
+  - **Ad-hoc UX fix (2026-08-05, outside formal Builder brief scope, already landed):** user
+    reported HF search-result rows required two clicks to select a GGUF quant (expand, then pick a
+    file), and that the quant-advisor table rendered at the bottom of the left column instead of
+    the right sidebar. Fixed: (1) `static/index.html`/`static/css/spawn-wizard.css` relocated
+    `#quant-advisor` into `.wizard-sidebar` with a compact-column CSS override; (2)
+    `static/js/features/hf-browse.js`'s `createGroupVariant()` now auto-selects the VRAM-recommended
+    quant on first expand of a GGUF group variant; (3) root-caused and fixed the actual blocker —
+    `hfListFiles()` (shared file-list renderer used by both the spawn wizard's `fetchHfFiles()` and
+    the Models modal) had a deliberate "do NOT auto-select" no-op despite already computing
+    `autoSelectFn`/`firstSelectFn`; now calls whichever is available.
+  - **Additive scope-toggle UX — already shipped as part of the 8B1 rework**, not a remaining gap.
+    `hfCreateScopeSelector()` (`static/js/features/hf-browse.js:1560+`) renders additive MLX/GGUF/All
+    buttons (not single-value radio); platform default is set in `static/js/features/models.js:2662-2663`
+    (`isMac` → MLX active by default) and `spawn-wizard-hf-browse.js:55+` (engine-driven default,
+    documented as replacing the old platform-only default).
+  - **Workload/context/KV-aware quant comparison — already real, not a generic score.**
+    `POST /api/vram/quant-compare` (`src/web/api/vram.rs:628+`) branches on
+    `Backend::RapidMlx`/`Backend::LlamaCpp` and consumes `use_case`, `parallel_slots`,
+    `available_vram_bytes`, and real per-repo `available_files` when known — this is not the
+    "generic Recommended from an 8k quality score" the brief warned against.
+  - **MLX vs. GGUF file listing — already handled via a `format` parameter, not two endpoints.**
+    Both formats go through `/api/hf/files` (`hfListFiles()`, `hf-browse.js:995+`) with an explicit
+    `format: 'mlx'`/`'gguf'` field (e.g. `hf-browse.js:365,541`), so MLX repos are never queried
+    with GGUF-shaped assumptions. The brief's literal "separate endpoint" framing didn't match, but
+    the described failure mode (MLX treated as GGUF) does not occur.
+  - **mmproj backend gating — two separate instances found, both genuinely missing, both fixed
+    this pass.** mmproj is a llama.cpp/GGUF concept; Rapid-MLX vision uses a separate,
+    currently-unqualified MLX-VLM component set (`[[project_rapidmlx_vision_off_the_table]]`), so
+    neither of the below should ever be reachable for an MLX selection.
+    1. **Spawn wizard** (`spawn-wizard-mmproj.js`'s `renderMmprojSection()`) had no backend check
+       at all — the mmproj dropdown rendered under Rapid-MLX unconditionally. Fixed by gating on
+       `wizardState.engine.selected === 'rapid_mlx'` and hiding the row for that backend.
+    2. **Models modal Download tab** (`models.js`'s `detectMmprojCompanion()`) had the same gap
+       (no `hfState.modelFormat === 'mlx'` check), plus a second, subtler bug once the format
+       check was added: switching the additive scope toggle to MLX-only did not clear the prior
+       GGUF selection's panels (mmproj/download/quant-advisor/VRAM), and `detectMmprojCompanion`'s
+       own async `/api/hf/files` fetch re-validated `hfState.modelFormat` only at call-start, not
+       after the `await` resolved — so a fetch started before the scope switch could still flip
+       the section visible on resolution, after the toggle handler had already hidden it. Fixed
+       by (a) clearing `hfState.selectedRepoId`/`modelFormat` and hiding all selection-scoped
+       panels in the scope-toggle `onChange` handler, and (b) re-checking
+       `hfState.modelFormat`/`hfState.selectedRepoId` a second time after the `await` in
+       `detectMmprojCompanion` before showing anything. Verified via a live capture run
+       (`model-discovery` scenario, `panels-model-discovery-mlx-only.png`) across two independent
+       real-HF-data runs — mmproj/quant-advisor/download panels correctly stay hidden in MLX-only
+       scope. `node -c` and eslint both clean on the changed file.
 - **Budget:** 60k
 - **Depends on:** 8B2 verified + screenshots approved
 - **Scope:** builder brief items 9, 12, 13, 14 + scope UX fix
@@ -900,16 +954,48 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
   editor); create-fix flow tested via smoke-test endpoint; screenshot evidence captured.
 - **Completion proof (refinements):** TBD — each refinement verified via screenshot capture.
 
-#### Phase 9f — Client-protocol / SillyTavern qualification — Not started
+#### Phase 9f — Client-protocol / SillyTavern qualification — Verified complete (llama.cpp; Coordinator, 2026-08-07)
 
-- **State:** Not started. Lowest urgency; can defer independently of 9a–9e.
+- **State:** Verified complete for llama.cpp via live device round-trips (M5 Max, real
+  `llama-server` binary, `Qwen3.5-9B-The-Defiant-Fable...Q4_K_M.gguf`, froggeric-qualified
+  template applied via `--chat-template-file`, `--jinja`). Three client-facing protocol paths
+  each tested with an actual request/response round-trip:
+  1. **Structured Chat** (`POST /v1/chat/completions`, ST "Chat Completion" mode, OpenAI-style
+     `messages[]`) — server applies the froggeric template; response correctly separates
+     `reasoning_content` from `content`; verified with a plain prompt and separately with a
+     `tools[]`/`tool_choice: auto` request — single clean `tool_calls` entry with correct name
+     (`read_file`) and JSON args (`{"path":"src/example.ts"}`), no repetition-loop symptom
+     (the exact §3.9 defect this template-qualification effort exists to fix).
+  2. **Raw Text** (`POST /completion`, llama.cpp-native, ST "Text Completion" mode with a
+     client-supplied pre-formatted prompt) — confirmed the server does NOT re-apply the chat
+     template: a hand-formatted `### Instruction:/### Response:` prompt is completed verbatim
+     with no template markers injected, matching what ST's own instruct-template formatting
+     expects.
+  3. **OpenAI legacy Text** (`POST /v1/completions`, prompt-string form some ST connection
+     profiles use instead of `/completion`) — identical raw-passthrough behavior confirmed
+     with the same hand-formatted prompt.
+  - **Rapid-MLX:** not re-tested live this pass (would duplicate Phase 9-RapidMLX's overlay
+    wiring verification and Phase 9b's smoke-test infrastructure, both already verified
+    complete). Rapid-MLX's structured-Chat/tool-call path is already covered by 9b's
+    `POST /api/chat-template/smoke-test` (spawns Rapid-MLX with the candidate template,
+    runs the same tool-call fixtures used above). Rapid-MLX exposes only OpenAI-compatible
+    routes (no llama.cpp-style raw `/completion`); grep of `src/inference/rapid_mlx/` confirms
+    no separate raw-completion endpoint is implemented or assumed, so ST's raw Text mode against
+    a Rapid-MLX backend would go through `/v1/completions`, which shares the same
+    no-template-applied contract verified above for llama.cpp's OpenAI-compat surface (llama.cpp
+    and Rapid-MLX both implement the same OpenAI spec for that route; this is a reasonable
+    inference from the shared spec, not an independently observed Rapid-MLX round-trip).
 - **Budget:** 30k
-- **Depends on:** 9-RapidMLX (for full backend coverage)
+- **Depends on:** 9-RapidMLX (for full backend coverage) — satisfied
 - **Primary output:** Qualify chat templates against external client protocols (SillyTavern raw
   Text vs structured Chat paths, OpenAI compatibility modes). Each path verified to preserve
   expected formatting and tool-call structure.
-- **Completion proof:** Each client protocol/template combination verified via actual request
-  round-trip; documented which templates work with which clients.
+- **Completion proof:** llama.cpp — all three paths (`/v1/chat/completions`, `/completion`,
+  `/v1/completions`) verified via live request round-trip against a froggeric-qualified template,
+  including a tool-call fixture; documented above. Rapid-MLX — chat/tool-call path covered by
+  existing 9b smoke-test infrastructure; raw-text path inferred from shared OpenAI-compat
+  behavior rather than independently live-tested (acceptable given lowest-priority/deferrable
+  status and no distinct Rapid-MLX raw-completion code path to diverge).
 
 **Frontend duplication (applies to all Phase 9 UI work):** chat-template UI is hand-duplicated in
 the Spawn Wizard (`spawn-wizard-chat-template.js`) and the Preset Editor (`presets.js` +
@@ -928,15 +1014,68 @@ changes landed in both places. No shared component, no automated parity check. S
 - **Later native-context extension follow-up (queued; does not block current loader work):** map native context ceilings from GGUF `*.context_length` and MLX `max_position_embeddings`/`model_max_length`, then qualify model-specific RoPE, YaRN, and related extension controls before exposing them. The work must cover effective launch arguments, tokenizer/template headroom, supported model families, KV/overhead math at each extended target, and an actual long-context benchmark matrix. Until then, 32K, 65K, 131K, 160K, 200K, and 262K are standard context choices only when at or below the introspected native ceiling; higher values are explicitly advanced-only and untested.
 - **Completion proof:** the Rapid applier never mutates the canonical/HF-cache dir (only an owned copy/overlay, reversible/re-download-safe); the applier is labeled honestly per backend (no false parity); no Jinja renderer, shim/proxy, fork, or unreleased pin; a candidate becomes active only after passing the tool-call smoke test, and a failed test leaves the active selection unchanged; the M5 Max device check passes; Froggeric behavior does not regress; mutable upstream updates install alongside rather than overwrite the active release; official Google templates and community forks are provenance-distinct; rollback reaches the model-provided or any retained pinned release; no double template; SillyTavern owns raw instruct prompts; Rapid `/v1/completions` and llama `/completion` separately pass. There is no A27 "stop for approval" fork — the plan never depended on Rapid gaining native override. A heavier full tokenizer/config-replacement overlay still needs separate approval.
 
-### Phase 10 — Screenshot-driven IA
+### Phase 10 — Spawn Wizard IA completion, Pro view, screenshot harness, and model-introspection-only sampling defaults
 
-- **State:** Not started
-- **Budget:** 170k
+- **State:** Not started (reconciled 2026-08-07 against the 2026-08-06 spawn-wizard redesign, which shipped in `ec0f813b` but only delivered ~40% of its own scope; see reconciliation findings folded in below)
+- **Budget:** 170k (reallocated across the five packets below; original single-IA framing is retired)
 - **Depends on:** Phases 7–9
-- **Read:** D7–D10/D16; A16/A28/A32–A33/A38/A50; Phase 10; UI matrix and screenshot rules.
-- **Primary output:** the accepted stable seven-category IA rendered from the completed control inventory, sequential captures, user visual review, and approved accessible implementation; retain the documented five-category design only as a fallback if real screenshots invalidate the accepted hierarchy.
-- **Phase 7 carryover (Web UI group wizard/editor parity):** Phase 7 exit gate found Web UI group (Auto/On/Off, config JSON, static path) UI selector only in preset editor, not wizard. Backend wired but wizard lacks frontend control. Wizard/editor parity gap must be closed as part of Phase 10 IA parity checks.
-- **Completion proof:** parity precedes reorder; accepted direction and final visual approval are recorded; category order remains stable across backends; both backends and workload profiles pass dark/light/narrow/accessibility review; Web UI group wizard/editor parity gap from Phase 7 is closed.
+- **Read:** D7–D10/D16; A16/A28/A32–A33/A38/A50; Phase 10 (original); `docs/archive/rapid-mlx/20260806-spawn_wizard_uiux_redesign.md` (the shipped redesign's source doc — **required reading**, especially §4 "Option B — Pro" wireframe/scenarios, §6 full control inventory, §7 recommendation, §8 implementation notes); UI matrix and screenshot rules; `docs/reference/spawn-wizard.md`.
+- **User directive locking this scope (2026-08-07, verbatim, non-negotiable):** finish Option A's "cheap-but-load-bearing" half; build Option B ("Pro"/"Advanced") in full — it was explicitly in scope for the 2026-08-06 rework and was dropped, which the user called out directly; fix the screenshot capture harness for the spawn wizard (correct per-shot filenames, no duplicates, no half-screen/broken captures); ensure llama.cpp/GGUF and Rapid-MLX feature parity wherever possible. A fifth item was discovered mid-investigation and is equally load-bearing: **eliminate all filename/name/repo-id substring-matching heuristics used anywhere in the codebase to infer model properties, replacing every one with real GGUF/MLX-config introspection.** User's exact words: "there should never ever be any filename checking at all for anything in our codebase around models" and "this should only be introspection."
+
+#### 10a — Finish Option A ("Guided") — the cheap-but-load-bearing half
+
+Only ~40% of Option A shipped in `ec0f813b`. Missing pieces, all specified in the archived doc's §3:
+- Decision cards for the small number of choices that actually drive downstream config (per §3 wireframe — not every field, only the ones with real branching consequence).
+- The "All settings (N)" collapsed drawer for everything else, so Guided stays uncluttered without silently hiding controls that exist.
+- Sticky context bar + locked effective-value rows (shows the resolved value even when a field is left at "server default"/blank, so users aren't guessing what will actually be sent).
+- Provenance chips on every effective value: is this the model's native default, a qualified `TemplateRelease`/sampling-catalog preset, or an explicit user override? (Ties into 10e below — provenance must originate from real introspection, never a filename guess.)
+- Retire the single `tier` field (Quick/Balanced/Advanced) as the thing driving both visibility and editability. Split into two independent registry axes in `spawn-wizard-groups.js` / `spawn-wizard-llama-ia.js` / `spawn-wizard-mlx-ia.js`:
+  - `critical` — can this be safely touched without expert knowledge (drives whether it's editable inline vs. requires the drawer/Pro view).
+  - `view` — which view(s) show this control at all (Guided vs. Pro vs. both).
+  This is the prerequisite for 10b — Pro view can't cleanly reuse the same `CONTROLS` registry until this split exists.
+
+#### 10b — Build Option B ("Pro"/"Advanced") — currently zero code, must be built from scratch
+
+Per the archived doc §4 (wireframe, "nothing collapsed" principle, §4.3 "how it avoids being a wall of fields") and §7 (recommendation: ship both, Guided as default, with a `View: Guided ⇄ Pro` toggle):
+- Left-rail settings navigator grouped by the same categories the `CONTROLS` registry already uses — no new taxonomy, reuse what 10a produces.
+- ⌘K / Ctrl+K quick filter across all controls by label/key, jumping the rail + main pane to the match.
+- "Modified only" toggle — hides every control still at its resolved default, surfacing only what the user has actually changed from either the model-native or qualified-preset value.
+- Dense multi-column layout appropriate to viewport width (see §4 wireframe for the column-collapse breakpoints).
+- Guided ⇄ Pro toggle, persisted per-session (not per-model), switching the same underlying `wizardState` and `CONTROLS` registry between the two renderers — no separate state model, no duplicated field bindings.
+- Read §4's scenario walkthroughs and build against them directly; they are the acceptance criteria for "did this actually help a power user go fast."
+
+#### 10c — Fix the spawn-wizard screenshot capture harness (done 2026-08-07)
+
+Root cause: `static/css/spawn-wizard.css` lines 241–249 — `.wizard-body { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; }` sits inside the fixed-viewport `#spawn-wizard-overlay` modal (`position: fixed`, from the shared `.modal-overlay` base class in `components.css`). Puppeteer's `page.screenshot({ fullPage: true })` (the prior default in `captureShot()`) captures based on `document`/`body` scrollHeight, which a `position: fixed` element never contributes to no matter how tall its content grows — so `fullPage: true` only ever captured whatever was visible in the fixed modal viewport at the last-set scroll position. This was the concrete cause of the "half the screen" / seemingly-broken captures the user found, and of near-duplicate-looking screenshots (same crop dimensions, different scroll offsets).
+
+First fix attempt (abandoned): flattening `.wizard-body`/`.spawn-wizard-modal`'s `overflow`/`height`/`max-height`/`flex` inline styles to force the full scrollable content into one tall layout box, then capturing via `elementHandle.screenshot({ captureBeyondViewport: true })`. This was root-caused correctly (confirmed via `getBoundingClientRect()` that the modal really did expand to e.g. 3800–5000px) but produced unusably large images — explicitly rejected by the user ("i dont ever want gigantic 5000px images... please keep things realistic for typical browsers").
+
+Actual fix: `captureShot()`'s `expandSelector` option now scrolls the target container (`.wizard-body`) to its natural top position (`scrollTo({ top: 0 })`) and takes a normal, viewport-sized (`fullPage: false`) screenshot — i.e. capture exactly what a real browser shows at rest, not the full scrollable content flattened into one image. Applied to every wizard-step capture in `tests/ui/capture/scenarios/wizard-llamacpp/*.mjs` and `tests/ui/capture/scenarios/wizard-rapidmlx/*.mjs` (the latter left as dashboard/chat/settings captures that were never part of the fixed-modal problem).
+- Along the way, discovered and fixed a real product bug this debugging surfaced: `spawn-wizard-vram-display.js`'s `renderLlamaCppScenarioCards()`/`renderMlxScenarioCards()` cleared `dom.vramScenarios` synchronously but appended cards only after an `await Promise.all(fetch...)` — two overlapping calls (e.g. two VRAM-update triggers firing close together) could each append their own set of context-fit cards, visibly doubling the "Reliable agents / More context / Full precision" grid in the live app, not just in screenshots. Fixed with a module-level render-generation token that makes a stale call's clear/append a no-op.
+- Fixed a stale `--help` description: `tests/ui/capture/index.mjs` described `spawn-wizard` as "Steps 1–6" despite the Option A collapse to 3 steps; corrected to "3-step wizard: model & profiles, hardware & VRAM, launch summary/spawn". (In-code `// 6 steps → 3` comments elsewhere are accurate historical context about the collapse, not stale claims, and were left as-is.)
+- Re-ran `spawn-wizard`, `spawn-wizard-engines`, `spawn-wizard-hf-download`, and `spawn-wizard-tier-matrix` against a fresh release build: all scenarios captured with zero errors, all screenshots at realistic dimensions (1440×900 / 1280×900 / 1280×1400 / 430×900 for narrow), visually spot-checked — no crops, no duplicated card grids, filenames match content.
+
+#### 10d — llama.cpp/GGUF ⇄ Rapid-MLX feature parity
+
+Audit the `CONTROLS` registry and both IA views (Guided + Pro) for controls that exist for one backend but have a real, meaningful equivalent for the other and are simply missing — not every llama.cpp flag has a Rapid-MLX analog and vice versa, so this is a parity audit against actual capability, not forced 1:1 mirroring. Close gaps found. Record backend-only controls explicitly (labeled, not silently hidden) rather than pretending both backends are identical.
+- **Phase 7 carryover (folded in here):** Phase 7 exit gate found the Web UI group (Auto/On/Off, config JSON, static path) has a UI selector in the preset editor but not the spawn wizard — backend is wired, wizard frontend is missing it. Close this as part of the same parity pass.
+
+#### 10e — Eliminate filename/name-based model-property heuristics; introspection-only, everywhere
+
+Discovered while root-causing a live bug: a real Qwen3.6 community finetune, streamed (not yet downloaded) from HF, showed the generic `universal_modes()` sampling-preset fallback instead of the real Qwen3.6-family presets, with no error surfaced. Root cause: `static/js/features/spawn-wizard-hf-browse.js:1090` sets `wizardState.model.path = ''` for `delivery: 'stream_hf'`, so `tryIntrospectModel()`/`doIntrospect()` in `spawn-wizard.js` (which only run against a local disk path) never fire — `wizardState.arch.ggufArch`/`family` stay empty for the life of HF browsing, forcing `src/llama/sampling_catalog.rs`'s `modes_for_model()` detection cascade onto its filename/repo-name substring-matching fallback branch, which failed for this model's actual filename.
+
+The fix is not "patch the Qwen3.6 branch" — per direct user mandate this is a whole-codebase constraint: **no model property (architecture, family, param count, MoE-ness, MTP-ness, sampling defaults, vision capability, etc.) may ever be inferred from a filename, repo name, or tag substring match. The only acceptable sources of truth are real GGUF header introspection (`read_gguf_metadata`/`read_gguf_metadata_from_bytes` in `src/llama/gguf_meta.rs` for local files, `fetch_gguf_header_metadata` in `src/hf/mod.rs:748` for not-yet-downloaded HF files via progressive range-fetch) or the MLX equivalent (`fetch_mlx_config`/`fetch_mlx_config_revision_aware` in `src/hf/mod.rs`) for MLX repos.** `fetch_gguf_header_metadata` already exists and is already proven working in `src/web/api/vram.rs` (VRAM-estimate HF branch) and `src/hf/qualify.rs` — it is not yet wired into the sampling-defaults path.
+
+Known call sites requiring remediation (audit for more before closing this packet — this list is what was found during initial investigation, not guaranteed complete):
+- `src/llama/sampling_catalog.rs::modes_for_model()` — filename/repo-name substring branch in the detection cascade; must only ever receive real `gguf_arch`/`arch_family`, never fall back to guessing from `name_or_repo`.
+- `/api/model-defaults` (`src/web/api/benchmark.rs::api_model_defaults`) — currently only accepts a local `model_name_or_repo`; needs an HF-aware branch (mirroring `vram.rs`'s HF branch) that calls `fetch_gguf_header_metadata`/`fetch_mlx_config` when the model is HF-streamed and not yet downloaded, so real `gguf_arch`/`arch_family` reach `modes_for_model()` before it ever needs a fallback.
+- `static/js/features/spawn-wizard.js` — `inferParamBFromName()`, `parseMoeSuffix()`, `detectMtpFromName()` — all filename-substring heuristics; must be replaced by consuming the real introspected fields (extend the HF-aware introspection above to return param count / MoE / MTP the same way local `doIntrospect()` already does for local files) or, if introspection is genuinely unavailable (range-fetch fails), the field must show as unknown/pending rather than guessing.
+- `static/js/features/spawn-wizard-hf-browse.js:1090` (and the second `model.path = ''` at line 182) — the actual trigger: HF-streamed models must still get an introspection call (the new HF-aware backend path above), just not through the local-disk-only `doIntrospect()`.
+- `src/web/api/vram.rs` — the existing fallback `ModelArch::from_name_and_params` (filename heuristic) used only when `fetch_gguf_header_metadata` genuinely fails; per the mandate this must become a "real value unavailable, don't guess" state rather than a silent filename-based guess, unless the user narrows the mandate to allow degraded-but-labeled estimates as a last resort — flag this specific case for explicit confirmation before removing it, since VRAM estimation (unlike sampling defaults) may have a legitimate need for a best-effort number rather than a blank field.
+- `src/llama/model_defaults.rs` — has parallel family-detection logic to `sampling_catalog.rs`; relationship (duplicate/legacy/different consumer) is unresolved and must be established first, then treated the same way if it has its own filename heuristic.
+- Any other site turned up during implementation (this is a whole-codebase mandate, not scoped to the files above).
+
+**Completion proof (all five sub-packets):** 10a — `tier` fully retired in favor of `critical`/`view`; decision cards, drawer, sticky context bar, and provenance chips all present in Guided view; parity precedes reorder. 10b — Pro view exists, is reachable via a persisted Guided⇄Pro toggle, passes the archived doc's §4 scenario walkthroughs, and shares `wizardState`/`CONTROLS` with Guided (no duplicated state model). 10c — every wizard capture scenario re-run and visually confirmed free of crops/near-duplicates, every filename matches its content. 10d — Web UI group parity gap from Phase 7 closed; other genuine llama.cpp⇄Rapid-MLX control gaps closed or explicitly labeled backend-only. 10e — zero filename/name/repo-id substring matching remains in any of the enumerated call sites (or their replacement is explicitly user-approved as a labeled best-effort fallback, per the VRAM-estimator carve-out above); a real HF-streamed Qwen3.6 finetune shows correct family-specific sampling presets with no manual download required; `model_defaults.rs` vs `sampling_catalog.rs` relationship is documented and resolved.
 
 ### Phase 11 — Diagnostics, metrics, and storage
 
@@ -973,6 +1112,28 @@ changes landed in both places. No shared component, no automated parity check. S
 - **Read:** Phase 14; all validation matrices; revalidation and completion ledgers; repository mandatory checks.
 - **Primary output:** final independent validation evidence, closed traceability, clean intended worktree. This is the **one and only** release checkpoint (single cutover, no intermediate release, B3 resolved): dead/unwired code between phase gates was expected; the "releasable" check applies only here.
 - **Completion proof:** mandatory checks in exact order; isolated full Playwright; sequential screenshots; security/platform review; representative E2E matrix; no P0 remains; the "releasable" check holds (no half-wired user-visible control, no partial read-path migration); the **dual-audience UX release bar** is met — novice safe-default/progressive-disclosure/educational-copy path AND power-user full-tweakability path both verified — and the cross-backend Doctor teaching pillar is present (release-gating, not cosmetic).
+
+### Phase 14.5 — Rapid-MLX VLM/vision revisit (2026-08-07)
+
+- **State:** Not started. Explicitly added so this is not lost among the Phase 10-14 backlog.
+- **Depends on:** Phase 14 (or later, at user's discretion) — a deliberate last-in-list item, not a
+  blocker for anything else.
+- **Why this is separate from the vision work already in the plan:** `[[project_rapidmlx_vision_off_the_table]]`
+  recorded Rapid-MLX vision as broken/deferred as of the last check, and 8B3's mmproj-gating fix
+  (2026-08-07) hid the mmproj UI control for the Rapid-MLX backend on that basis — but that fix
+  intentionally did NOT remove any vision-related code, detection logic, or plan/doc content
+  (`[[project_vision_detection_decoupled_from_runtime]]`: detection is deliberately decoupled from
+  runtime support so it stays ready for other MLX loaders). The user asked explicitly to revisit
+  whether the Rapid-MLX vision runtime itself is now fixed and functional, specifically on
+  Qwen3.6-27B and Qwen3.6-35B-A3B, before the followups plan is considered closed.
+- **Work:** Re-test Rapid-MLX vision end-to-end on Qwen3.6-27B and Qwen3.6-35B-A3B (both were
+  previously reported broken/unqualified — reconfirm against the currently installed rapid-mlx
+  version, since this drifts release to release). If vision now works on either or both, remove
+  the mmproj-gating restriction added in 8B3 for that backend/model combination (or replace it with
+  a proper MLX-VLM component picker per the original 8B3 brief: "Rapid hides mmproj, shows only
+  actual MLX-VLM components"), and update `[[project_rapidmlx_vision_off_the_table]]` and any other
+  memory/docs that currently say vision is off the table. If still broken, record the current
+  failure mode with fresh evidence and leave the gate in place.
 
 ## 6. Decision Gate Router
 
@@ -1141,8 +1302,8 @@ Phase 9 work discovered: Phase 9 was marked "Not started" but packet 9a (revisio
 | 5a | Verified complete | handoffs for P1-P5 | PASS; cross-surface equality gate passed | `791635e` | Runtime calibration evidence is tracked separately below; it does not reopen estimator implementation |
 | 5b | Verified complete | handoffs for A-C | PASS | `6a14cc7` | Fresh integration regression and evidence-tier closeout active |
 | 6 | Not started | — | — | — | Phase 5 evidence closeout must record conservative cache/quant eligibility first |
-| 6.5a | Blocked — upstream capability gate (2026-07-29) | — | — | `ca3cffb`, `209f6bd`, `27243c7` (upstream-independent wiring only) | Rapid-MLX permits MTP only for greedy requests with no logits processor, so normal sampled and constrained-tool requests record zero speculative activity. Resume only when the requalification lane (`scripts/rapid-mlx-requalify-spec-decode.mjs`) exits `0` on a pinned build. Suspension is **not** a passing verdict; no downstream phase may read it as one |
-| 6.5b | Not started — parked behind 6.5a | — | — | Item 14 discharged early (`ca3cffb`) | Fresh 6.5a Verifier PASS required before items 12, 13, 15 begin. Item 14 (refuse the corrupting in-trunk sidecar layout) was taken early because it prevents silent trunk corruption on models the user already has; it qualifies nothing and does not unpark the sub-phase |
+| 6.5a | Closed — upstream limitation, not a local defect (confirmed by user 2026-08-07) | — | — | `ca3cffb`, `209f6bd`, `27243c7` (upstream-independent wiring only) | Rapid-MLX only supports MTP on greedy requests with no logits processor — useless for normal sampled/constrained-tool use, confirmed by the user as the current real-world state, not a stale finding. Re-verified against the repo 2026-08-07: `docs/reference/rapid-mlx-mtp-evidence.md` unchanged since 2026-07-30, requalification lane (`scripts/rapid-mlx-requalify-spec-decode.mjs`) still does not exit `0`. This is not fixable in this codebase; closed until upstream Rapid-MLX lifts the greedy-only restriction. Re-open by re-running the requalification lane against a newer rapid-mlx release |
+| 6.5b | Closed — parked behind 6.5a, which is itself closed on upstream | — | — | Item 14 discharged early (`ca3cffb`) | Items 12, 13, 15 stay parked; they require a 6.5a PASS that cannot happen locally. Item 14 (refuse the corrupting in-trunk sidecar layout) remains taken and does not unpark the sub-phase. No further local action until upstream changes |
 | 7A1 | Verified complete | Coordinator, 2026-07-30 | PASS — catalog reachability defect discharged 2026-07-30. Both carried items re-examined and found deliberate: `ValidationContext`'s populated-but-unread fields are documented as awaiting a decision on whether capability- or workload-dependent rules are warranted, and the catalog-vs-API prefix-cache disagreement is an explicitly listed exception in a drift-guard test that still catches new divergence. 1041 tests | catalog wiring 2026-07-30 | Nothing under `static/` fetches `/api/rapid-mlx/settings` — recorded under 7B1 |
 | 7A2 | Verified complete | Coordinator, 2026-07-30 | PASS — reachability clean; two defects found and fixed: the preview kept a second config→argv mapping that dropped 12 flags and invented 3, and capability probing read the wrong stream so the endpoint failed against every real runtime. Live-checked against installed 0.11.1 with no capabilities override. 1030 tests | 774b611 + HEAD | `prefill_step_size` clamp keeps the documented 4096 value unreachable (recorded, deliberate) |
 | 7A3 | Verified complete | Coordinator, 2026-07-30 | PASS — route/auth reachable, live 401 without token; v2→v3 migration verified live on a planted pre-Phase-7 preset. One defect found and fixed: a single unreadable preset failed the whole-file parse and the loader then wrote defaults over the file, silently destroying every other preset. Now parsed entry by entry; a partial read never writes back; an unparseable file is preserved rather than overwritten. Reproduced and re-verified live. 1033 tests | 774b611 + HEAD | Earlier 7A2 note about the `4096` clamp was wrong; corrected in place |
@@ -1150,10 +1311,10 @@ Phase 9 work discovered: Phase 9 was marked "Not started" but packet 9a (revisio
 | 7B2 | Verified complete — rescoped | Coordinator, 2026-07-30 | PASS with one defect fixed. The row's promised UI (5 profiles, editable assumptions, required confirmation checkbox) no longer exists: the step-3 picker was deleted as redundant with the page-1 use-case cards, and the broken confirmation gate — the trigger for the whole UNVERIFIED flag — was removed rather than repaired. The surviving path is live-verified: three use-case cards map onto the estimator and move the number (29.6 GB no scenario / 44.4 agentic / 33.3 general / 38.5 roleplay at 27B mxfp8, 32K). Defect: the preset editor kept a Workload Scenario dropdown that serde dropped on save, since `RapidMlxConfig` has no such field; reproduced live and removed. 1040 tests, eslint and validate-js clean | 5d00ee0 + `0a0a9a0` | `/api/vram-estimate` silently ignores an unknown scenario rather than rejecting it |
 | 7B3 | Verified complete — feature removed | Coordinator, 2026-07-30 | Corrected, not re-verified. The roleplay teaching panel rendered inside the step-3 workload picker; deleting that step made it unreachable and `58cfa42` removed it with the rest of `WORKLOAD_PROFILES`, along with its three tests. No `roleplay-teaching` identifier survives in `static/` or `tests/ui/`; the removal is complete | 91468fb, removed by 712c261 / 58cfa42 | The teaching content has no home and is release-gating under the teaching pillar — see the gap register |
 | 7B4 | Verified complete — feature removed, backend fixed | Coordinator, 2026-07-30 | UI removed with 7B3 (4 D25 cards, endpoint compatibility, 5 tests); orphan `#pe-mtp-concurrency-teaching` container left behind. Backend intact and live-verified: `/api/vram-estimate` returns a full `mtp_admission` with warnings and fallthroughs, and no frontend reads it. Defect fixed: `parallel_slots` defaulted to 1 and never consulted the scenario, putting the D25 multi-slot warning out of reach; the existing unit test passed because it supplies the slot count itself. 1041 tests, 29 UI tests, clippy clean | 3b96564, removed by 712c261 / 58cfa42, backend reconciled by `f1e323e` | `mtp_admission` has no UI consumer; no use-case card maps to a multi-slot scenario |
-| 8A | Verified complete — reachable, largely unconsumed | Coordinator, 2026-07-30 | PASS on reachability, FAIL on delivery. All four endpoints are registered in the filter chain (`hf.rs:949-972`, `models.rs:2201`) and the backends are real. But only `/api/hf/mlx-derivatives` has a frontend consumer (`hf-browse.js:221`); `/api/hf/qualify`, `/api/hf/identity` and `/api/models/mlx-introspect` have none. `CommunitySourceCatalog` (8A1) has no route at all: `save_catalog`/`reset_catalog`/`upsert` are called from nothing under `src/web/`, so "user-editable" is unrealized and the catalog is always the bundled default. Neither `community-source-catalog.json` nor the legacy `hf-quantizers.json` exists in the real config dir, so the KnownQuantizer migration path has never run. The UI instead reads the legacy `/api/hf/quantizers` and `/api/hf/community-picks`. The 8A3 claim of "MLX local introspection in info_query.rs" has no such code. | 0fe6105 | The seven-role catalog is bypassed by a hardcoded three-role JS list — see 8B1 |
-| 8B1 | Verified complete — shipped with three defects | Coordinator, 2026-07-30 | PASS on scopes and categories, FAIL on sorting and workload-awareness. `hf-browse.js` is genuinely wired (imported by `bootstrap.js`, `models.js`, `spawn-wizard.js`); scope buttons render MLX/GGUF/All with the documented tooltips and already toggle additively — the change 8B3 was scheduled to make. Defects: (1) `resolveSortParam` maps Name→`createdAt` and Size→`downloads`, so five visible sort options collapse to two behaviours, and picking "Name" silently sorts by creation date even though `SimpleModelInfo` carries `last_modified` and `model_size_bytes` and could sort correctly client-side; (2) the search body sends `workload_profile`, which `src/web/api/hf.rs` never reads — and `sessionState.workloadProfile` is read in four places and written in none, so it is permanently null, which also pins the Models-modal estimate to the hardcoded `interactive_coding_agent`; (3) "curated authors" are a hardcoded `KNOWN_CONVERTER_PATTERNS` regex list in JS with three roles, not the seven-role backend catalog, and it classifies `Qwen/` as a converter. `HF_SORT_LABELS` and `HF_SCOPE_LABELS` are exported and consumed by nothing; there is no `HF_SCOPE.AUTO`, so the documented four-way Auto/GGUF/MLX/All scope set is three. | f290273 | Sort and workload wiring both need a fix pass — see the gap register |
-| 8B2 | Verified complete — cards shipped, lineage did not | Coordinator, 2026-07-30 | PASS on the card hierarchy, FAIL on lineage and revision. Two-level group/variant cards, format badges, role badges and the in-app model-card panel (`openCardPanel`, not a new tab) are all live. But the lineage block in `models.js:518-568` is dead code: live-verified against the real tree, all 68 inventory entries lack `hf_repo_id`, `originRepo`, `repo_id`, `hf_revision`, `original_author`, `converter`, `hf_source_info` and `provenance`, so `if (hfRepoId)` is never true — `ModelInventoryEntry` has none of those fields, and zero `.llama-monitor-source.json` / `llama-monitor-conversion.json` sidecars exist on disk. "Revision-bound qualification badges" and "repo/revision preservation" are vacuous: `SimpleModelInfo` has no `revision`/`sha` field, so the selection payload's `revision` (`hf-browse.js:240`) is always null and the revision-pinned `/api/hf/qualify` is never called. | 7011f5c+0f0b575 | 8B3 depends on "8B2 verified + screenshots approved"; the screenshots were never re-approved |
-| 8B3 | Not started | — | — | — | 8B2 verified + screenshots approved (includes scope UX fix: additive MLX+GGUF+All toggles, platform-smart defaults) |
+| 8A | Verified complete — fully consumed (re-verified 2026-08-07) | Coordinator, 2026-07-30; re-verified against `HEAD` 2026-08-07 | The 2026-07-30 "largely unconsumed" finding is fully stale — every endpoint it flagged now has a live consumer. `CommunitySourceCatalog`: `258e0175`/`3b7668b5` wired `/api/hf/community-sources[/entry\|/reset]` end to end; called from `static/js/features/models.js:2396-2459` and `hf-browse.js:83`. `/api/hf/qualify`: called from `hf-browse.js:323` and `spawn-wizard-hf-browse.js:567`. `/api/hf/identity`: called from `hf-browse.js:324`. `/api/models/mlx-introspect`: called from `models.js:492`, `spawn-wizard-chat-template.js:82,125`, and `spawn-wizard-hf-browse.js:561`. The 8A3 "MLX local introspection" claim also checks out: `resolve_mlx_recursive_size` and `read_mlx_local_config` are real functions in `src/inference/rapid_mlx/info_query.rs:603,621`, feeding the `mlx-introspect` handler (`src/web/api/models.rs:1501-1520`) — the ledger's literal function-name expectation didn't match, but the described capability exists and is wired. | 0fe6105 + rework in `258e0175`, `3b7668b5` | None outstanding |
+| 8B1 | Verified complete — defects since resolved by rework (re-verified 2026-08-07) | Coordinator, 2026-07-30; re-verified against `HEAD` 2026-08-07 | All three 2026-07-30 defects are fixed by later commits, confirmed by direct file read against current `HEAD`, not by re-running the original Verifier: (1) sort — `b6d256b6` split HF-side pool fetch (`resolveSortParam`, `hf-browse.js:405-419`) from a real client-side `compareModels`/`sizeRank` comparator using `last_modified`/`model_size_bytes`; Name/Size now actually sort by name/size. (2) workload wiring — `f3e34644` deleted `sessionState.workloadProfile` outright rather than wiring it; `models.js:3313-3320` documents why the Library estimate intentionally has no workload input (that only exists in the spawn wizard). (3) curated authors — `258e0175`/`3b7668b5` replaced `KNOWN_CONVERTER_PATTERNS` with `resolveAuthorRole()` (`hf-browse.js:137+`) reading the live `CommunitySourceCatalog` via `ensureCommunitySourceCatalog()`. `HF_SCOPE` (`hf-browse.js:11-16`) has no `AUTO` value by design — additive MLX/GGUF/All toggling replaced the documented 4-way scheme, not a bug. | f290273; rework in `b6d256b6`, `f3e34644`, `258e0175`, `3b7668b5` | None outstanding from the original three; scope UX (additive toggles) already landed, so 8B3's "scope UX fix" dependency is satisfied |
+| 8B2 | Verified complete — defects since resolved by rework (re-verified 2026-08-07) | Coordinator, 2026-07-30; re-verified against `HEAD` 2026-08-07 | Both 2026-07-30 defects are fixed: (1) lineage — `e5dba350` added a real `download_provenance: Option<DownloadProvenanceView>` field to `ModelInventoryEntry` (`src/models/library.rs:71-105`); the dead `hf_repo_id`/`originRepo`/etc. read in `models.js` was replaced with `m.download_provenance` (comment at `models.js:415-421` explicitly notes the old fields were never real). (2) revision — `3b7668b5` added `pub revision: String` to `SimpleModelInfo` (`src/hf/mod.rs:275-304`); `/api/hf/qualify` is called revision-pinned from `hf-browse.js:323` (`openHfEvidence`) and `spawn-wizard-hf-browse.js:567`. | 7011f5c+0f0b575; rework in `e5dba350`, `3b7668b5` | None outstanding from the original two; 8B3's "8B2 verified" dependency is satisfied |
+| 8B3 | Not started | — | — | — | Dependency satisfied 2026-08-07: 8B1/8B2 defects resolved and scope UX fix (additive MLX+GGUF+All toggles, platform-smart defaults) already landed in the 8B1 rework. Remaining 8B3 scope is quant-switch UX, context/KV artifact switching, MLX fixes, and screenshot captures. |
 | 9a | Verified complete (2026-08-03) | Reconciled by Coordinator audit | PASS — revision pinning, retained history, rollback, History UI all present in HEAD; full gate passed (1084 tests, clippy/lint/build/fmt clean) | present in HEAD | Rapid-MLX wiring pending (9-RapidMLX part) |
 | 9-RapidMLX | Verified complete (2026-08-03) | Coordinator | PASS — overlay wiring implemented, 1091 tests, clippy/lint/build/fmt clean | committed and pushed | None |
 | 9b | Verified complete (2026-08-03) | Coordinator | PASS — smoke-test endpoint implemented, 630 lines, backend only; frontend activate-gate deferred to Phase 13 | committed and pushed | Frontend integration (Phase 13) |

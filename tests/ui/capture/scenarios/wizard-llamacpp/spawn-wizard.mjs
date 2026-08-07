@@ -34,13 +34,13 @@ export default async function(ctx, options) {
             || document.querySelector('.usecase-card'))?.click();
     });
     await sleep(300);
-    await captureShot(page, 'spawn-wizard-model-profiles.png', { fullPage: true });
+    await captureShot(page, 'spawn-wizard-model-profiles.png', { fullPage: true, expandSelector: '.wizard-body' });
 
     // Profile/use-case and model selection are now on the same step (Option A
     // collapse: 6 steps → 3). No navigation click needed between them.
 
     // ── Step 1 (Model): model source cards — capture before selecting HF ─────
-    await captureShot(page, 'spawn-wizard-model-source-cards.png', { fullPage: true });
+    await captureShot(page, 'spawn-wizard-model-source-cards.png', { fullPage: true, expandSelector: '.wizard-body' });
 
     // Select HuggingFace source.
     await page.evaluate(() => {
@@ -49,7 +49,7 @@ export default async function(ctx, options) {
     await sleep(400);
 
     // Capture the base HF panel: discover pills + quickpick row, no search started.
-    await captureShot(page, 'spawn-wizard-model-hf-base.png', { fullPage: true });
+    await captureShot(page, 'spawn-wizard-model-hf-base.png', { fullPage: true, expandSelector: '.wizard-body' });
 
     // Helper: wait up to 20 s for real result cards; continues silently if none arrive.
     const waitForResults = () => page.waitForFunction(() => {
@@ -78,7 +78,7 @@ export default async function(ctx, options) {
         await sleep(400);
         await scrollToResults();
         await sleep(200);
-        await captureShot(page, 'spawn-wizard-model-discover-trending.png', { fullPage: true });
+        await captureShot(page, 'spawn-wizard-model-discover-trending.png', { fullPage: true, expandSelector: '.wizard-body' });
     }
 
     // ── Discover pill: Qwen3 ─────────────────────────────────────────────────
@@ -89,7 +89,7 @@ export default async function(ctx, options) {
         await sleep(400);
         await scrollToResults();
         await sleep(200);
-        await captureShot(page, 'spawn-wizard-model-discover-qwen3.png', { fullPage: true });
+        await captureShot(page, 'spawn-wizard-model-discover-qwen3.png', { fullPage: true, expandSelector: '.wizard-body' });
     }
 
     // ── Quantizer quick-pick: bartowski ──────────────────────────────────────
@@ -100,7 +100,7 @@ export default async function(ctx, options) {
         await sleep(400);
         await scrollToResults();
         await sleep(200);
-        await captureShot(page, 'spawn-wizard-model-quantizer-bartowski.png', { fullPage: true });
+        await captureShot(page, 'spawn-wizard-model-quantizer-bartowski.png', { fullPage: true, expandSelector: '.wizard-body' });
     }
 
     // ── Community picks panel ─────────────────────────────────────────────────
@@ -127,7 +127,7 @@ export default async function(ctx, options) {
             if (picks) picks.scrollIntoView({ behavior: 'instant', block: 'start' });
         });
         await sleep(300);
-        await captureShot(page, 'spawn-wizard-model-community-picks.png', { fullPage: true });
+        await captureShot(page, 'spawn-wizard-model-community-picks.png', { fullPage: true, expandSelector: '.wizard-body' });
 
         // Second tab (MoE / Offload picks) if present.
         await page.evaluate(() => {
@@ -135,7 +135,7 @@ export default async function(ctx, options) {
             if (tabs.length > 1) tabs[1].click();
         });
         await sleep(300);
-        await captureShot(page, 'spawn-wizard-model-community-picks-moe.png', { fullPage: true });
+        await captureShot(page, 'spawn-wizard-model-community-picks-moe.png', { fullPage: true, expandSelector: '.wizard-body' });
     }
 
     // ── Quant advisor: type a known repo so file list populates reliably ──────
@@ -157,7 +157,7 @@ export default async function(ctx, options) {
             return fl && fl.classList.contains('visible') && fl.querySelector('.hf-file-item') !== null;
         }, { timeout: 20000 }).catch(() => {});
         await sleep(500);
-        await captureShot(page, 'spawn-wizard-model-quant-advisor.png', { fullPage: true });
+        await captureShot(page, 'spawn-wizard-model-quant-advisor.png', { fullPage: true, expandSelector: '.wizard-body' });
 
         // Select Q4_K_M so validation passes on Next.
         await page.evaluate(() => {
@@ -211,7 +211,7 @@ export default async function(ctx, options) {
         { timeout: 6000 }
     ).catch(() => {});
     await sleep(500);
-    await captureShot(page, 'spawn-wizard-hardware-vram.png', { fullPage: true });
+    await captureShot(page, 'spawn-wizard-hardware-vram.png', { fullPage: true, expandSelector: '.wizard-body' });
 
     // ── Same step (Hardware & memory): sampling/review config list ───────────
     // Option A collapse merged the former Review/Summary step into this one's
@@ -221,7 +221,7 @@ export default async function(ctx, options) {
         if (list) list.scrollIntoView({ behavior: 'instant', block: 'start' });
     });
     await sleep(300);
-    await captureShot(page, 'spawn-wizard-hardware-parameters.png', { fullPage: true });
+    await captureShot(page, 'spawn-wizard-hardware-parameters.png', { fullPage: true, expandSelector: '.wizard-body' });
 
     // ── Step 3 (Launch): preset settings + spawn ──────────────────────────────
     await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
@@ -236,7 +236,7 @@ export default async function(ctx, options) {
         if (row) row.scrollIntoView({ behavior: 'instant', block: 'center' });
     });
     await sleep(300);
-    await captureShot(page, 'spawn-wizard-launch-summary.png', { fullPage: true });
+    await captureShot(page, 'spawn-wizard-launch-summary.png', { fullPage: true, expandSelector: '.wizard-body' });
 
     // Preset settings and Spawn are now on the same step (Option A collapse:
     // 6 steps → 3). No navigation click needed between them.
@@ -245,7 +245,7 @@ export default async function(ctx, options) {
         if (card) card.scrollIntoView({ behavior: 'instant', block: 'start' });
     });
     await sleep(300);
-    await captureShot(page, 'spawn-wizard-launch-spawn.png', { fullPage: true });
+    await captureShot(page, 'spawn-wizard-launch-spawn.png', { fullPage: true, expandSelector: '.wizard-body' });
 
     // Close wizard.
     await page.keyboard.press('Escape');

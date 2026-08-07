@@ -37,7 +37,7 @@ export async function cleanupScreenshotTabs(page, { keepOne = false } = {}) {
 
 export async function captureShot(page, rawFilename, options = {}) {
     const filename = tagFilename(rawFilename, options.runtimeTag);
-    const fullPage = options.fullPage ?? true;
+    const { fullPage = true, expandSelector, runtimeTag, ...screenshotOptions } = options;
 
     // Non-full-page captures are disabled by default.
     // To temporarily enable for debugging, change this guard or remove fullPage: false.
@@ -52,7 +52,27 @@ export async function captureShot(page, rawFilename, options = {}) {
     // in the screenshot. Park the mouse off any content before every shot.
     await page.mouse.move(0, 0).catch(() => {});
 
-    await page.screenshot({ path: join(currentArtifactsDir(), filename), ...options });
+    // The spawn wizard modal (`#spawn-wizard-overlay`) is `position: fixed`,
+    // so fullPage:true (which captures based on document/body scrollHeight)
+    // never sees it, and `.wizard-body` scrolls internally
+    // (`overflow-y: auto`) inside a modal that itself caps at
+    // `max-height: min(92vh, 940px)`. We deliberately do NOT flatten/expand
+    // any of that to capture the entire scrollable content in one giant
+    // image — that produces unrealistic 3000-5000px screenshots nobody's
+    // browser actually shows. Instead, scroll the target container to the
+    // top (its natural resting scroll position) and capture at normal
+    // viewport size, same as what a user actually sees.
+    if (expandSelector) {
+        await page.evaluate((sel) => {
+            document.querySelector(sel)?.scrollTo({ top: 0, behavior: 'instant' });
+        }, expandSelector);
+        await sleep(100);
+        await page.screenshot({ path: join(currentArtifactsDir(), filename), fullPage: false, ...screenshotOptions });
+        console.log(`[CAPTURE] Saved ${filename}`);
+        return;
+    }
+
+    await page.screenshot({ path: join(currentArtifactsDir(), filename), fullPage: true, ...screenshotOptions });
     console.log(`[CAPTURE] Saved ${filename}`);
 }
 

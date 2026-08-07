@@ -2442,36 +2442,10 @@ export function onModelPathChanged() {
 
   const path = wizardState.model.path;
   if (path) {
-    const name = path.split(/[/\\]/).pop() || path;
-
-    // Infer total param count
-    const inferredParams = inferParamBFromName(name);
-    if (inferredParams > 0) wizardState.model.paramB = inferredParams;
-
-    // Detect MoE from "NB-AMB" suffix (e.g. 35B-A3B, 26B-A4B, 122B-A10B)
-    const moeInfo = parseMoeSuffix(name);
-    if (moeInfo && !wizardState.arch.nExperts) {
-      // We don't know exact expert count without introspection, but we know it's MoE.
-      // Set a flag so the MoE panel + arch label show up; introspection fills exact counts.
-      wizardState.arch._isMoePending = true;
-      const totalB = moeInfo.total, activeB = moeInfo.active;
-      // The "A<n>B" suffix is the active-parameter budget in billions — record it so the
-      // architecture label can show "MoE • <total> (<active> active)" before introspection.
-      if (activeB > 0) wizardState.model.activeParamsB = activeB;
-      // Rough expert count guess for the MoE panel; introspection overrides it.
-      // (Active-expert *count* is unknown from the filename, so leave nExpertsUsed for
-      // introspection — it is an expert count, not the active-parameter billions.)
-      if (totalB > 20) {
-        wizardState.arch.nExperts = totalB > 100 ? 128 : (totalB > 30 ? 64 : 8);
-      }
-    }
-
-    // Detect MTP from filename
-    if (detectMtpFromName(name) && !wizardState.arch.mtpDepth) {
-      wizardState.arch.mtpDepth = 1; // conservative default; introspection will refine
-    }
-
-    // Try introspection (will refine all arch values)
+    // Param count, MoE-ness, and MTP depth are never inferred from the filename (Phase
+    // 10e: introspection-only for all model properties) — they stay unset until real GGUF
+    // introspection below resolves them. UI reading these fields must treat them as
+    // "pending" rather than substituting a guess.
     tryIntrospectModel(path);
   }
 
@@ -2480,6 +2454,52 @@ export function onModelPathChanged() {
   scheduleVramUpdate();
   autoInstallChatTemplate();
   refreshStepGuardrails();
+}
+
+// Real GGUF-header introspection for a not-yet-downloaded HF file (Phase 10e:
+// introspection-only, never a filename/repo-name guess). Reuses /api/model-defaults'
+// HF-aware branch, which range-fetches the real GGUF header server-side. Merges arch
+// state the same way local doIntrospect() does; on failure (offline/gated/no range
+// support) leaves fields unset rather than falling back to a guess.
+export async function introspectHfFileMetadata(repoId, fname, sizeBytes) {
+  if (!repoId || !fname) return false;
+  try {
+    const headers = window.authHeaders
+      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+      : { 'Content-Type': 'application/json' };
+    const resp = await fetch('/api/model-defaults', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model_name_or_repo: repoId,
+        size_bytes: sizeBytes || 0,
+        tags: [],
+        gguf_arch: '',
+        arch_family: '',
+        backend: wizardState.engine.selected || 'llama_cpp',
+        hf_repo_id: repoId,
+        hf_file_path: fname,
+      }),
+    });
+    if (!resp.ok) return false;
+    const data = await resp.json();
+    const m = data.introspected;
+    if (!m) return false;
+
+    if (m.gguf_arch) wizardState.arch.ggufArch = m.gguf_arch;
+    if (m.total_params_b != null && m.total_params_b > 0) wizardState.model.paramB = m.total_params_b;
+    if (m.active_params_b != null) wizardState.model.activeParamsB = m.active_params_b;
+    if (m.n_experts) wizardState.arch.nExperts = m.n_experts;
+    if (m.n_experts_used) wizardState.arch.nExpertsUsed = m.n_experts_used;
+    if (m.mtp_depth) wizardState.arch.mtpDepth = m.mtp_depth;
+
+    // The pill row / effective defaults were already rendered off the earlier,
+    // arch-less call — refresh now that a real gguf_arch is known.
+    if (m.gguf_arch) _fetchAndApplyModelSamplingDefaults();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function inferParamBFromName(name) {

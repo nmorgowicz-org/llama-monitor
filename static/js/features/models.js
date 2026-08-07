@@ -2680,6 +2680,20 @@ async function initHfDownloadTab() {
             onChange: (mlxActive, ggufActive, allActive) => {
                 hfState.discoveryScopeMlx = mlxActive || allActive;
                 hfState.discoveryScopeGguf = ggufActive || allActive;
+                // A prior selection's panels (mmproj, download, quant advisor, VRAM)
+                // can be stale once the scope no longer includes that model's format —
+                // re-searching doesn't re-select anything, so nothing else clears them.
+                // Also clear the selection itself so any in-flight async lookup for the
+                // old repo (e.g. detectMmprojCompanion's fetch) invalidates on resolve
+                // instead of re-showing UI for a model that's no longer selected.
+                hfState.selectedRepoId = '';
+                hfState.modelFormat = 'unknown';
+                hfHideDownloadPanel(downloadPanel);
+                hideQuantAdvisor();
+                hideMmprojSection();
+                hideVramPanel();
+                hideCtxTrainWarning();
+                hideHardwareInfoCard();
                 clearTimeout(searchTimer);
                 searchTimer = setTimeout(doSearch, 200);
             },
@@ -3204,7 +3218,7 @@ function hideVramPanel() {
     if (el) el.style.display = 'none';
 }
 
-async function fetchGpuVram() {
+async function fetchGpuVram(retriesLeft = 30, background = false) {
     try {
         const headers = window.authHeaders ? window.authHeaders() : {};
         const resp = await fetch('/metrics/gpu', { headers });
@@ -3212,6 +3226,20 @@ async function fetchGpuVram() {
         const data = await resp.json();
         let totalVram = 0;
         const gpus = Array.isArray(data) ? data : (data.gpus ? data.gpus : Object.values(data));
+        // The GPU metrics poller idles for power savings and is woken by this very
+        // request (see server-side "wake-on-activity"); the first call after a period
+        // of dormancy can race the poller's first tick and get an empty snapshot back.
+        // Retry a few times, but only the FIRST attempt is awaited by the caller —
+        // retries run in the background so a slow-to-wake poller doesn't hold up
+        // the rest of the Download tab's init (e.g. wiring the search box).
+        if (gpus.length === 0 && retriesLeft > 0) {
+            if (!background) {
+                fetchGpuVram(retriesLeft, true);
+                return;
+            }
+            await new Promise(r => setTimeout(r, 1200));
+            return fetchGpuVram(retriesLeft - 1, true);
+        }
         for (const g of gpus) {
             const t = g.vram_total_mb || g.total_mb || g.total_memory_mb || g.vram_total || 0;
             totalVram += t * 1024 * 1024;
@@ -3219,8 +3247,13 @@ async function fetchGpuVram() {
             if (/apple|metal/i.test(id) || g.metal_gpu_limit_mb != null) cachedUnified = true;
         }
         if (totalVram > 0 && !cachedUnified) cachedVram = totalVram;
+        // A background retry can resolve real GPU data after loadQuantAdvisor()
+        // already ran once and bailed on availVram === 0; give it a second chance.
+        if (background && gpus.length > 0 && hfState.paramB > 0) {
+            triggerQuantAdvisor();
+        }
     } catch {
-        // ignore
+        /* ignore */
     }
 }
 
@@ -3471,7 +3504,12 @@ async function detectMmprojCompanion(repoId) {
     const content = document.getElementById('mm-mmproj-content');
     if (!section || !content) return;
 
-    if (!repoId) {
+    // mmproj is a llama.cpp/GGUF concept. The selected repo's own files can carry an
+    // is_mmproj-flagged file even when the user is viewing it in MLX scope (some repos
+    // host both formats) — showing the toggle there would offer a control that does
+    // nothing for the MLX download path. See spawn-wizard-mmproj.js for the equivalent
+    // spawn-wizard gate.
+    if (!repoId || hfState.modelFormat === 'mlx') {
         section.style.display = 'none';
         return;
     }
@@ -3485,6 +3523,15 @@ async function detectMmprojCompanion(repoId) {
         });
         if (!resp.ok) { section.style.display = 'none'; return; }
         const data = await resp.json();
+
+        // The scope toggle or a newer selection may have fired while this fetch was in
+        // flight — re-check before showing anything so a stale response can't reveal the
+        // section for a repo the user is no longer viewing in GGUF scope.
+        if (hfState.modelFormat === 'mlx' || hfState.selectedRepoId !== repoId) {
+            section.style.display = 'none';
+            return;
+        }
+
         const files = data.files || [];
         const mmprojFiles = files.filter(f => f.is_mmproj);
 
