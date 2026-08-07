@@ -77,9 +77,8 @@ export function createWizardIA(config) {
     rememberPosition(el);
     el.classList.add('mlx-wiz-group', rowClassName);
     el.dataset.mlxWizGroup = group.id;
-    el.dataset.mlxWizTier = group.tier || 'balanced';
-    el.dataset.mlxWizCritical = String(group.critical ?? (group.tier !== 'advanced'));
-    el.open = isOpenForProfile(group.critical ?? (group.tier !== 'advanced'), profile);
+    el.dataset.mlxWizCritical = String(group.critical ?? true);
+    el.open = isOpenForProfile(group.critical ?? true, profile);
     return el;
   }
 
@@ -88,9 +87,8 @@ export function createWizardIA(config) {
     const container = document.createElement('details');
     container.className = `${groupClassName} mlx-wiz-group`;
     container.dataset.mlxWizGroup = group.id;
-    container.dataset.mlxWizTier = group.tier || 'balanced';
-    container.dataset.mlxWizCritical = String(group.critical ?? (group.tier !== 'advanced'));
-    container.open = isOpenForProfile(group.critical ?? (group.tier !== 'advanced'), profile);
+    container.dataset.mlxWizCritical = String(group.critical ?? true);
+    container.open = isOpenForProfile(group.critical ?? true, profile);
     const header = document.createElement('summary');
     header.className = 'mlx-native-group-header';
     const title = document.createElement('h4');
@@ -100,7 +98,7 @@ export function createWizardIA(config) {
     description.className = 'mlx-native-group-description';
     description.textContent = group.description;
     header.append(title, description);
-    if (group.tier === 'advanced') {
+    if (!group.critical) {
       const badge = document.createElement('span');
       badge.className = 'mlx-native-group-badge';
       badge.textContent = 'Advanced';

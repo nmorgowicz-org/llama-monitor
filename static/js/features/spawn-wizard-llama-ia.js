@@ -17,15 +17,11 @@ const SUPERSECTIONS = [
   },
 ];
 
-// tier mirrors spawn-wizard-groups.js's CONTROLS entries for these ids (plan
-// §2.8): a group's tier is its most notable member's tier, so Balanced-
-// promoted controls (spawn-parallel-slots) get their group open by default
-// one step earlier than the rest of Advanced tuning.
 const GROUPS = [
   {
     supersection: 'advanced-tuning', id: 'batching-threads', title: 'Batching & threads',
     description: 'Prompt/micro-batch sizing, flash attention, and CPU thread allocation.',
-    tier: 'balanced', critical: true, view: 'both',
+    critical: true, view: 'both',
     controls: [
       'spawn-batch-size', 'spawn-parallel-slots', 'spawn-ubatch-size', 'spawn-flash-attn',
       'spawn-prio', 'spawn-threads', 'spawn-threads-batch',
@@ -34,19 +30,19 @@ const GROUPS = [
   {
     supersection: 'advanced-tuning', id: 'moe-multigpu', title: 'MoE & multi-GPU',
     description: 'Mixture-of-Experts CPU offload and tensor-split placement across GPUs.',
-    tier: 'advanced', critical: false, view: 'both',
+    critical: false, view: 'both',
     controls: ['spawn-n-cpu-moe', 'spawn-tensor-split'],
   },
   {
     supersection: 'advanced-tuning', id: 'prompt-cache', title: 'Prompt cache',
     description: 'Persistent KV prefix-cache mode and size bound.',
-    tier: 'advanced', critical: false, view: 'both',
+    critical: false, view: 'both',
     controls: ['spawn-cache-mode', 'spawn-cache-ram'],
   },
   {
     supersection: 'advanced-tuning', id: 'fit-memory', title: 'Auto-fit & memory',
     description: 'Shrink context to fit a memory budget; pin the model in RAM.',
-    tier: 'advanced', critical: false, view: 'both',
+    critical: false, view: 'both',
     controls: ['spawn-fit-enable', 'spawn-fit-target', 'spawn-mlock'],
   },
   {
@@ -56,7 +52,7 @@ const GROUPS = [
     // re-derived.
     supersection: 'advanced-tuning', id: 'speculative-decoding', title: 'Speculative decoding',
     prebuiltId: 'spawn-spec-details',
-    tier: 'advanced', critical: false, view: 'both',
+    critical: false, view: 'both',
   },
 ];
 

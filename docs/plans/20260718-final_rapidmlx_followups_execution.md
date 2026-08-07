@@ -1016,7 +1016,7 @@ changes landed in both places. No shared component, no automated parity check. S
 
 ### Phase 10 — Spawn Wizard IA completion, Pro view, screenshot harness, and model-introspection-only sampling defaults
 
-- **State:** Not started (reconciled 2026-08-07 against the 2026-08-06 spawn-wizard redesign, which shipped in `ec0f813b` but only delivered ~40% of its own scope; see reconciliation findings folded in below)
+- **State:** In progress (reconciled 2026-08-07 against the 2026-08-06 spawn-wizard redesign, which shipped in `ec0f813b` but only delivered ~40% of its own scope; ledger updated 2026-08-07)
 - **Budget:** 170k (reallocated across the five packets below; original single-IA framing is retired)
 - **Depends on:** Phases 7–9
 - **Read:** D7–D10/D16; A16/A28/A32–A33/A38/A50; Phase 10 (original); `docs/archive/rapid-mlx/20260806-spawn_wizard_uiux_redesign.md` (the shipped redesign's source doc — **required reading**, especially §4 "Option B — Pro" wireframe/scenarios, §6 full control inventory, §7 recommendation, §8 implementation notes); UI matrix and screenshot rules; `docs/reference/spawn-wizard.md`.
@@ -1036,14 +1036,20 @@ Only ~40% of Option A shipped in `ec0f813b`. Missing pieces, all specified in th
 
 **Execution approach (added 2026-08-07):** `tier` is not just registry data — it's wired directly into the disclosure engine (`spawn-wizard-ia.js`'s `createWizardIA()`, `isOpenForProfile()`, `applyTierVisibility()`), both IA files' `GROUPS` arrays, and the profile-switch handler in `spawn-wizard.js`. Retiring it correctly is a real engine refactor, not a data-only change, so 10a proceeds as four checkpointed milestones rather than one pass — each verified (build + a live capture) before starting the next:
 1. **Registry split (done 2026-08-07)** — added `critical`/`view` to every `CONTROLS` entry in `spawn-wizard-groups.js`, additive alongside the still-present `tier` (not yet consumed by the engine). `critical: true` for old quick/balanced (safely editable without expert knowledge), `false` for old advanced. `view: 'card'` for the five controls backing the archived doc's §3 four always-open decision cards (`spawn-context-size`, `spawn-cache-type-k`, `spawn-cache-type-v`, `hw-mmproj-select`, `hw-use-mtp`, plus MLX's `spawn-rapid-reasoning-mode` for the "thinking" card), `'both'` for everything else — nothing is Guided-hidden per I1. Added a small `controlsForView(loader, view)` helper for Milestone 4's card/drawer wiring. Verified via `node -c` + a clean `cargo build --release`.
-2. **Engine refactor (not started)** — change `spawn-wizard-ia.js`'s open/closed and editability logic to read `critical`/`view` instead of `tier`/`profile`; update both `spawn-wizard-llama-ia.js` and `spawn-wizard-mlx-ia.js`'s `GROUPS` to the new axes; keep DOM ids/serialization untouched (I1/I2 invariants carry over unchanged).
+2. **Engine refactor — split into three checkpoints (M2-A/B/C, confirmed 2026-08-07)**: see execution approach below this section.
 
-   **Scoping note (added 2026-08-07, after starting this milestone):** there are three distinct `tier`-consumers, not one, and they operate at different granularities:
+    **Background (scoping note, 2026-08-07):** there are three distinct `tier`-consumers, not one, and they operate at different granularities:
    - `spawn-wizard-ia.js`'s `isOpenForProfile(groupTier, profile)` — keyed on **`GROUPS[].tier`** (group-level, one value per drawer section), decides a `<details>`'s default open/closed state. Group membership itself (which controls land in the drawer at all) is fixed by each group's hardcoded `controls: [...]` array, independent of any individual control's tier — e.g. `batching-threads` mixes `spawn-batch-size` (quick) and `spawn-n-cpu-moe` (advanced) in one group. So `critical`/`view`, defined per-`CONTROLS`-entry, don't map 1:1 onto this axis; **`GROUPS` needs its own `critical`/`view`-equivalent fields** (or the group's fields must be homogeneous enough to derive one), separate from Milestone 1's per-control split.
    - `spawn-wizard.js`'s `applyProfileVisibility()` (`static/js/features/spawn-wizard.js:1998-1999`) — keyed on **`CONTROLS[].tier === 'quick'`** directly (control-level), drives the Quick-profile disable-and-write-`quickValue` behavior (I2). This one maps cleanly onto Milestone 1's `critical` (quick was already folded into `critical:true`), so `control.tier !== 'quick'` → `!control.critical` is a safe, mechanical swap — but note `critical:true` is broader (includes old `balanced` too), so this line also needs a second check to isolate just the old-quick subset, or a dedicated `disableOnQuick` flag if quick's specific behavior must stay distinguishable from balanced's.
    - `wizardState.profile` (`quick`/`balanced`/`advanced`) is the wizard's existing three-way expertise selector — a different axis entirely from the Guided/Pro view toggle Milestone 4 introduces. Decide whether `view` should be derived from `wizardState.profile` (reuse the existing selector, no new UI toggle) or become fully independent (new toggle, doc's §7 recommendation) before writing Milestone 2 — this determines whether `isOpenForProfile`'s `profile` parameter is retired or just reinterpreted.
 
-   **Recommended approach for whoever resumes this:** don't attempt the full swap in one pass. First add a `critical`/`view`-equivalent to each `GROUPS` entry (mechanical, mirrors Milestone 1's derivation, in both `spawn-wizard-llama-ia.js` and `spawn-wizard-mlx-ia.js`) and verify with a build — no engine changes yet. Then, as a separate checkpoint, swap `isOpenForProfile`'s group-tier comparison and `applyProfileVisibility`'s control-tier check to read the new fields, resolving the `wizardState.profile`-vs-`view` question explicitly (comment the decision in code) before touching `spawn-wizard.js`. Keep `tier` in place on both `CONTROLS` and `GROUPS` until every read site is migrated and verified, then delete it in one final cleanup pass — safer than removing it mid-refactor.
+    **Execution approach (confirmed 2026-08-07):** Milestone 2 splits into three sequential Builder checkpoints. Each verified (build + live capture) before starting the next:
+
+    - **M2-Step A (~30k) — Add GROUPS-level fields:** mechanically add `critical`/`view` to every `GROUPS` entry in both `spawn-wizard-llama-ia.js` and `spawn-wizard-mlx-ia.js`. Derive from existing `tier`/group composition. Zero engine changes. Verify with `cargo build --release` + one capture.
+    - **M2-Step B (~50k) — Swap engine reads:** change `isOpenForProfile()` and `applyProfileVisibility()` to read the new fields. Resolve the `wizardState.profile`-vs-`view` question explicitly (comment decision in code). DOM ids/serialization untouched. Verify with build + captures across all profiles.
+    - **M2-Step C (~10k) — Delete `tier`:** mechanical pass removing `tier` from all `CONTROLS` and `GROUPS` entries after all reads are migrated.
+
+    This preserves a clean rollback point: if Step B breaks, Step A leaves data in place with the original engine intact.
 3. **Sticky context bar + provenance chips** — smaller UI addition; extends the existing `applyEffectiveLocks()`/chip pattern already shipped in `spawn-wizard-groups.js` rather than inventing a new mechanism.
 4. **Decision cards + "All settings (N)" drawer** — the largest net-new UI piece (context size, KV precision, vision, speed boost cards; drawer wraps every `view:'pro'`-or-drawer-only control per the archived doc's disclosure table in §3).
 
@@ -1333,7 +1339,11 @@ Phase 9 work discovered: Phase 9 was marked "Not started" but packet 9a (revisio
 | 9b | Verified complete (2026-08-03) | Coordinator | PASS — smoke-test endpoint implemented, 630 lines, backend only; frontend activate-gate deferred to Phase 13 | committed and pushed | Frontend integration (Phase 13) |
 | 9c | Verified complete (2026-08-03) | Coordinator | PASS — Google official template + provenance labeling; registry supports multiple candidates per family; UI shows provenance labels in force-family dropdown and installed status | committed and pushed | None |
 | 9d–9f | Not started | — | — | — | Depends on prior parts (9d requires user-supplied reference files) |
-| 10 | Not started | — | — | — | Phases 7–9 and user IA decision |
+| 10a | In progress | M1 done (`13ad57d5`); M2-A verified (`57c8462e`); M2-B verified (`3693af05`); M2-C not started | PASS all three | M1: `13ad57d5`; M2-A: `57c8462e`; M2-B: `3693af05` | Milestone 2-C (delete tier from CONTROLS/GROUPS) next; Milestones 3–4 pending |
+| 10b | Not started | — | — | — | Depends on 10a complete |
+| 10c | Verified complete | Coordinator, 2026-08-07 | PASS — fixed fixed-viewport capture, re-ran all wizard scenarios | committed in Phase 7/8 rework | None |
+| 10d | Not started | — | — | — | Depends on 10a+10b (Pro view must exist before parity audit) |
+| 10e | In progress | `276016ee` | — | `276016ee` | Continuing — introspection-only sampling defaults, eliminating filename heuristics |
 | 11 | Not started | — | — | — | Phases 3, 5–7 |
 | 12 | Not started | — | — | — | Phases 3, 8–11 |
 | 13 | Not started | — | — | — | Phases 5–12 |

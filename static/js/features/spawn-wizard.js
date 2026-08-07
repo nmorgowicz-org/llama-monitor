@@ -1996,7 +1996,7 @@ function applyProfileVisibility() {
   // references this function used to carry. I2 is enforced offline by
   // assertQuickValueCoverage() (spawn-wizard-groups.js), not on every call.
   controlsForLoader('llama_cpp').forEach(control => {
-    if (control.tier !== 'quick') return;
+    if (!control.disableOnQuick) return;
     const el = document.getElementById(control.id);
     if (!el) return;
     if (isQ) {
