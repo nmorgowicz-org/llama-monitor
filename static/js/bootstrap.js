@@ -40,6 +40,7 @@ import { deriveTelemetryGrade, gradeLabel, gradeStatusClass, gradeActionCopy } f
 import { initReplyPlanUpdates } from './features/chat-reply-plan.js';
 import { initCommandPalette } from './features/workspace-command-palette.js';
 import { initSpawnWizard, showSpawnRoute, closeSpawnWizard } from './features/spawn-wizard.js';
+import './features/spawn-wizard-sticky-vram.js';
 import { initTunePanel } from './features/tune-panel.js';
 import { initLlamaUpdater } from './features/llama-updater.js';
 import { initRapidMlxUpdater } from './features/rapid-mlx-updater.js';

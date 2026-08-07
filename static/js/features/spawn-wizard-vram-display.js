@@ -23,6 +23,10 @@ import { scheduleEstimate, buildEstimateBody, rapidEstimatePolicyFromWizardHardw
 import { openEstimateEvidenceDrawer } from './evidence-drawer.js';
 import { showToast } from './toast.js';
 import { lastSystemMetrics } from '../core/app-state.js';
+import { renderStickyVramBar, initStickyVramBar } from './spawn-wizard-sticky-vram.js';
+
+// Initialize sticky VRAM bar visibility
+initStickyVramBar();
 
 function updateMlockWarning(availBytes = 0, freeBytes = null) {
   const el = document.getElementById('spawn-mlock-warning');
@@ -186,6 +190,16 @@ export function updateVramDisplay() {
       dom.vramBar.classList.toggle('over', ratio >= 1.0);
       dom.vramBar.classList.toggle('has-data', total > 0);
     }
+
+    // Render sticky header inline VRAM bar (M3-A)
+    renderStickyVramBar({
+      vramTotal: availVram,
+      vramWeights: weightVram,
+      vramKv: hasKVSplit ? activeKV + retainedKV : kv,
+      vramMmproj: mmproj,
+      vramMtp: mtp,
+      vramOverhead: oh + tqTransient,
+    });
 
     // Update legend labels
     if (dom.vLegWeightsLabel) dom.vLegWeightsLabel.textContent = `Weights ${formatGB(weightVram)}`;

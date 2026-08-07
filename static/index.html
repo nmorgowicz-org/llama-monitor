@@ -4227,6 +4227,18 @@
                             <select id="hw-mmproj-select" class="hw-quant-select" style="flex:1 1 auto;" title="Vision projector file. Choose (none) for text-only inference."></select>
                             <button type="button" id="hw-mmproj-browse-btn" class="btn-wizard-tertiary" style="flex-shrink:0; font-size:10px; min-height:22px; padding:2px 7px;" title="Browse for an mmproj / projector file on this machine">Browse…</button>
                         </div>
+                        <div class="hw-vram-bar-row" id="hw-vram-bar-row" style="display:none;">
+                            <div class="hw-vram-bar" id="hw-vram-bar-mini">
+                                <div class="hw-vram-seg hw-vram-seg-weights" id="hw-vseg-weights" style="width:0%"></div>
+                                <div class="hw-vram-seg hw-vram-seg-kv" id="hw-vseg-kv" style="width:0%"></div>
+                                <div class="hw-vram-seg hw-vram-seg-mmproj" id="hw-vseg-mmproj" style="width:0%;display:none;"></div>
+                                <div class="hw-vram-seg hw-vram-seg-mtp" id="hw-vseg-mtp" style="width:0%;display:none;"></div>
+                                <div class="hw-vram-seg hw-vram-seg-overhead" id="hw-vseg-overhead" style="width:0%"></div>
+                                <div class="hw-vram-seg hw-vram-seg-free" id="hw-vseg-free" style="width:0%"></div>
+                            </div>
+                            <span class="hw-vram-total" id="hw-vram-total">— / — GB</span>
+                            <span class="hw-vram-status" id="hw-vram-status"></span>
+                        </div>
                         <div class="hw-context-chip-row" id="hw-context-chip-row"></div>
                     </div>
 

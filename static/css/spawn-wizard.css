@@ -5627,6 +5627,68 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
   color: var(--color-text);
   font-weight: 600;
 }
+/* Inline VRAM bar in sticky header */
+.hw-vram-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  margin-top: 4px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-bg-base, #0d1117) 70%, transparent);
+  font-size: 10px;
+}
+.hw-vram-bar {
+  flex: 1 1 auto;
+  min-width: 180px;
+  height: 8px;
+  display: flex;
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.06);
+}
+.hw-vram-seg {
+  height: 100%;
+  transition: width 0.25s ease;
+}
+.hw-vram-seg-weights { background: #4ade80; }
+.hw-vram-seg-kv { background: #22d3ee; }
+.hw-vram-seg-mmproj { background: #f472b6; }
+.hw-vram-seg-mtp { background: #a78bfa; }
+.hw-vram-seg-overhead { background: #6b7280; }
+.hw-vram-seg-free { background: rgba(255,255,255,0.12); }
+.hw-vram-total {
+  flex-shrink: 0;
+  color: var(--color-text-muted, #8b949e);
+  font-size: 9px;
+  white-space: nowrap;
+}
+.hw-vram-status {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.hw-vram-status.comfortable {
+  background: color-mix(in srgb, #4ade80 18%, transparent);
+  color: #4ade80;
+}
+.hw-vram-status.tight {
+  background: color-mix(in srgb, #fbbf24 18%, transparent);
+  color: #fbbf24;
+}
+.hw-vram-status.over {
+  background: color-mix(in srgb, #f87171 18%, transparent);
+  color: #f87171;
+}
+[data-theme="light"] .hw-vram-bar-row {
+  background: rgba(0,0,0,0.04);
+}
+[data-theme="light"] .hw-vram-bar {
+  background: rgba(0,0,0,0.06);
+}
 .hw-model-info {
   display: flex;
   flex-direction: column;
