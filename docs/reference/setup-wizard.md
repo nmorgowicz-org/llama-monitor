@@ -1,8 +1,10 @@
 # Setup Wizard Reference
 
-The Setup wizard is a 6-step guided flow for configuring and launching either a
-llama.cpp or Rapid-MLX local inference server. It handles engine recommendation,
-hardware detection, model acquisition, backend-owned settings, and runtime prerequisites.
+The Setup wizard is a 3-step guided flow (Model / Hardware / Launch) for configuring and
+launching either a llama.cpp or Rapid-MLX local inference server. It handles engine
+recommendation, hardware detection, model acquisition, backend-owned settings, and runtime
+prerequisites. This doc is the user-facing walkthrough plus the underlying HF/VRAM/chat-template
+API reference; for the frontend module architecture see [spawn-wizard.md](spawn-wizard.md).
 
 ## Welcome Screen
 
@@ -21,7 +23,13 @@ Entry points to the setup wizard: the **+ New model profile** button on the Loca
 
 ## Wizard Steps
 
-### Step 1 — Profile
+The wizard has three steps: **Model** (profile/use-case selection, engine selection, model
+source), **Hardware** (tuning, VRAM breakdown, and the pre-launch review), and **Launch**
+(network/security settings, spawn, and start-up monitoring). Screenshots below are pending
+re-capture against the collapsed 3-step UI — filenames/numbering reflect the prior 6-step
+layout and are being kept only until new captures land.
+
+### Step 0: Model — Profile & use case
 
 ![Step 1 — Profile selection](../screenshots/spawn-wizard-step1-profiles.png)
 
@@ -32,6 +40,13 @@ The user selects a **hardware profile** and a **use case**.
 Fit has three states in both the setup wizard and preset editor. **Default** passes no fit
 arguments, **On** passes `--fit on` with the selected target margin, and **Off** passes
 `--fit off`.
+
+> **Stale — needs a follow-up pass.** This table predates the current control-tier registry
+> (`static/js/features/spawn-wizard-groups.js`), which only recognizes three profiles
+> (`quick` / `balanced` / `advanced`, no separate "Workstation" tier) and derives each
+> Quick-tier control's forced value from its own `quickValue` entry rather than a single
+> fixed table like this one. Left here for the general "profile affects defaults" framing;
+> do not rely on the specific GPU Layers/Batch/Fit numbers below.
 
 | Profile | GPU Layers | Batch | Fit Granularity |
 |---------|-----------|-------|-----------------|
@@ -50,7 +65,7 @@ arguments, **On** passes `--fit on` with the selected target margin, and **Off**
 
 ---
 
-### Step 2 — Model
+### Step 0: Model — Engine & source
 
 The user first chooses an inference engine, then picks a compatible model source. The
 engine cards distinguish an automatic recommendation from an explicit user choice. A
@@ -117,15 +132,17 @@ override unset. The preset editor exposes the same lookup through its
 | Model family | Recommended template | Source |
 |---|---|---|
 | Qwen 3.5 / 3.6 | froggeric's Fixed Template | HuggingFace |
-| Gemma 4 | jscott3201's Gemma 4 Agentic Template | GitHub |
+| Gemma 4 | Google's official template | HuggingFace (`google/gemma-4-31B-it`) |
 
-The Gemma 4 recommendation improves thinking defaults, tool argument formatting,
-null handling, and multi-turn agentic histories. It is only offered when Gemma 4
-is detected; older Gemma families keep their embedded template.
+Google's official template is the priority default for Gemma 4 — it improves thinking
+defaults, tool argument formatting, null handling, and multi-turn agentic histories.
+jscott3201's community fork (GitHub) is kept as a fallback entry, offered only if the
+official template regresses tool-calling support in the future. It is only offered when
+Gemma 4 is detected; older Gemma families keep their embedded template.
 
 ---
 
-### Step 3 — Hardware & memory
+### Step 1: Hardware — Tuning & memory
 
 ![Step 3 — VRAM breakdown and hardware tuning](../screenshots/spawn-wizard-step3-vram.png)
 
@@ -240,11 +257,12 @@ This guidance is also shown in the preset editor.
 
 ---
 
-### Step 4 — Settings
+### Step 1: Hardware — Review & settings
 
 ![Step 4 — Parameters](../screenshots/spawn-wizard-step4-parameters.png)
 
-Shows a human-readable review of all selected parameters. Health checks:
+Merged into the Hardware step alongside the tuning controls above. Shows a human-readable
+review of all selected parameters. Health checks:
 - VRAM fit status
 - Context fit relative to training context (`n_ctx_train`); the hardware step highlights whether the current value is within model max, at model max, or extended beyond it, and warns when n_ctx > n_ctx_train with a YaRN suggestion
 - MoE CPU offload impact on generation speed
@@ -262,11 +280,13 @@ This step also includes:
 
 ---
 
-### Step 5 — Review settings
+### Step 1: Hardware — Save as preset
 
 ![Step 5 — Summary](../screenshots/spawn-wizard-step5-summary.png)
 
-Displays every flag that will be saved with the preset in a table format. The user can save the configuration as a named preset from this step before proceeding.
+Also part of the merged Hardware step. Displays every flag that will be saved with the preset
+in a table format. The user can save the configuration as a named preset before proceeding
+to Launch.
 
 - **Save as Preset** — stores all parameters for quick reuse from the setup screen
 - Presets can be saved for different models or configurations
@@ -280,7 +300,7 @@ Displays every flag that will be saved with the preset in a table format. The us
 
 ---
 
-### Step 6 — Start server
+### Step 2: Launch — Start server
 
 One-click launch. Shows engine-aware live status (starting → waiting for endpoint →
 running / error). On success the wizard closes and the new model profile appears in the
@@ -298,7 +318,7 @@ list.
 
 ## Structured Output (Grammar / JSON Schema)
 
-Available in Review settings of the setup wizard and the preset editor.
+Available in the Hardware step's review section of the setup wizard, and in the preset editor.
 
 Structured output forces the model to produce output matching a specific format instead of free-form text. The model cannot generate tokens that violate the rules — it's mechanically enforced at inference time, not just instructed via the prompt. This is useful for agent pipelines, data extraction, or any app that needs a guaranteed response shape.
 
@@ -366,7 +386,7 @@ Only one should be set at a time. If both are configured, the output mode settin
   - Curated community picks (including MoE models).
   - “Trending” and model-specific views (e.g., Qwen3).
   - Quantizer-focused listings (e.g., Bartowski) for easier selection.
-- The Step 2 wizard helper links directly to the Hugging Face token settings page and explains the `New token` → `Read` flow.
+- The Model-step wizard helper links directly to the Hugging Face token settings page and explains the `New token` → `Read` flow.
 
 #### POST /api/hf/search
 Search the HuggingFace Hub for GGUF model repos.
@@ -594,7 +614,7 @@ Remove the stored token. Requires `api-token`.
 
 ### Wizard-to-Settings Flow
 
-- The Hugging Face helper in Step 2 can open **Settings → Models** without closing the wizard.
+- The Hugging Face helper in the Model step can open **Settings → Models** without closing the wizard.
 - The binary prerequisite banner can open **Settings → Model profile** without discarding wizard progress.
 - After saving settings, the wizard refreshes its token/binary state in place.
 
@@ -1041,7 +1061,7 @@ Pre-download quant comparison table for a model. Shown in the wizard as the **Qu
 ```
 
 #### POST /api/model-defaults
-Returns model-family sampling recommendations for the Step 4 wizard review form and the preset editor.
+Returns model-family sampling recommendations for the Hardware-step review form and the preset editor.
 
 ```json
 // Request

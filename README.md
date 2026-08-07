@@ -93,7 +93,7 @@ See [TLS Architecture](docs/reference/tls-architecture.md) for full details.
 
 An integrated setup wizard for discovering, downloading, configuring, and launching a local inference server with llama.cpp or Rapid-MLX. No CLI flags required.
 
-- **Hardware profiles**: Quick / Balanced / Workstation / Advanced
+- **Hardware profiles**: Quick / Balanced / Advanced
 - **Model sources**:
   - HuggingFace search and curated community picks
   - Third-party import (Ollama, LM Studio, Jan, GPT4All, HF cache)

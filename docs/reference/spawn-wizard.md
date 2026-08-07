@@ -123,18 +123,20 @@ runtimes, via different mechanisms:
 
 ## Steps
 
-| Step | Purpose |
-|------|---------|
-| 0. Profile | Choose Speed / Balanced / Quality profile and use case (agentic / general / roleplay) |
-| 1. Model | Select engine, choose model source, set model-specific options |
-| 2. Hardware & memory | Tune context, offload, batching, speculative decoding, VRAM, Rapid-MLX controls |
-| 3. Settings | Review network, security, and advanced launch flags |
-| 4. Review | Summary of the configuration before launch |
-| 5. Start server | Launch and monitor start-up |
+The Guided redesign (plan: `docs/archive/rapid-mlx/20260806-spawn_wizard_uiux_redesign.md`,
+implemented and verified 2026-08-06) collapsed the wizard from six steps down to three.
+Each new step folds in the old steps it absorbed:
 
-### Step 0: Profile
+| Step | Purpose | Absorbs (old numbering) |
+|------|---------|--------------------------|
+| 0. Model | Profile + use-case selection, engine selection, model source input, model-specific options | old Step 0 (Profile), old Step 1 (Model) |
+| 1. Hardware | Context, offload, batching, speculative decoding, VRAM, Rapid-MLX controls, plus the full pre-launch review summary | old Step 2 (Hardware & Memory), old Step 4 (Review) |
+| 2. Launch | Network, security, and advanced launch flags; spawn submission and start-up monitoring; preset save/load | old Step 3 (Settings), old Step 5 (Start Server) |
 
-The wizard opens with a profile + use-case selection screen (wizard-step-0):
+### Step 0: Model
+
+Opens with a profile + use-case selection screen (wizard-step-0), then engine selection and
+model source input on the same step:
 
 - **Profile cards**: Quick, Balanced, Advanced — influence the default hardware policy and,
   as of the control-tier registry (see below), which hardware-step groups start expanded.
@@ -145,19 +147,19 @@ The use-case selection drives the backend's memory policy:
 - `general` → `general_chat` (standard chat, moderate context)
 - `roleplay` → `roleplay_storytelling` (long-context narrative)
 
-### Step 1: Model
+Engine selection, model source input, and model-specific options also live on this step. See
+[Engine selection](#engine-selection) below.
 
-Engine selection, model source input, and model-specific options. See [Engine selection](#engine-selection) below.
+### Step 1: Hardware
 
-### Step 2: Hardware & Memory
-
-Backend-specific hardware controls. The controls shown depend on the selected engine.
+Backend-specific hardware controls, plus the pre-launch review summary (merged in from the
+old standalone Review step). The controls shown depend on the selected engine.
 
 For llama.cpp: GPU layers, KV cache types, MoE offload, mlock, threads, speculative decoding, MTP, mmproj, flash attention, fit-to-memory, priority.
 
 For Rapid-MLX: a dedicated `rapid-hardware-panel` is shown with:
 
-- **KV cache dtype**: int4 / int8 / bf16 selection. When reasoning mode is ON, int4 is blocked and KV is pinned to int8 (effective "reasoning profile"). The review step (step 4) shows "INT4 → INT8 (reasoning profile)" to make the override visible.
+- **KV cache dtype**: int4 / int8 / bf16 selection. When reasoning mode is ON, int4 is blocked and KV is pinned to int8 (effective "reasoning profile"). The review summary (merged into the Hardware step) shows "INT4 → INT8 (reasoning profile)" to make the override visible.
 - **Retained cache**: 8 GiB (recommended), 16 GiB (retain branches), or Off.
 - **Tool-call parser**: Auto (Rapid alias profile) with explicit override options (qwen3, qwen3_xml, qwen3_coder, qwen3_coder_xml, gemma4, hermes, mistral, llama3, deepseek_v31, kimi_k2, glm4, minimax_m2, gpt_oss). Shows "Detected: <value>" hint when the Rapid-MLX profile auto-detects a parser.
 - **Reasoning parser**: Auto (Rapid alias profile) with explicit override options (qwen3, gemma4, hy_v3, hy3, deepseek_r1, vibethinker, glm4, gpt_oss, harmony, minimax, ui_tars). Shows "Detected: <value>" hint when the profile auto-detects a parser.
@@ -169,7 +171,7 @@ For Rapid-MLX: a dedicated `rapid-hardware-panel` is shown with:
 
 ### Control-tier registry (Quick/Balanced/Advanced disclosure)
 
-Both engines' Step 2 controls are declared once, in `static/js/features/spawn-wizard-groups.js`,
+Both engines' Hardware-step controls are declared once, in `static/js/features/spawn-wizard-groups.js`,
 as a flat table of `{ id, loader, tier, quickValue }` rows keyed by DOM control id. This
 registry — not the DOM's own layout — is the source of truth for two independent behaviors:
 
@@ -206,7 +208,7 @@ Three invariants govern the registry and hold regardless of which loader or UI s
   tradeoff (e.g. MoE CPU-offload placement, prompt-cache RAM bounds) — not merely because it's
   less commonly touched.
 
-### Step 2 UX: sticky header, locked rows, decision cards, changed-count badges
+### Step 1 UX: sticky header, locked rows, decision cards, changed-count badges
 
 The Guided redesign (plan: `docs/plans/20260806-spawn_wizard_uiux_redesign.md`) adds four
 presentation-layer behaviors on top of the control-tier registry above. None of these change
@@ -214,7 +216,7 @@ serialization — they are read-only views over the same DOM ids/state.
 
 - **Sticky context bar**: `#hw-model-header` is `position: sticky; top: 0` inside `.wizard-main`
   (which already scrolls independently of the VRAM sidebar), so the model/quant summary stays
-  visible while the rest of Step 2 scrolls. `renderContextChipRow()`
+  visible while the rest of the Hardware step scrolls. `renderContextChipRow()`
   (`spawn-wizard-hardware-model.js`) renders a compact chip row into
   `#hw-context-chip-row` inside that header — loader, context size, KV precision, and use-case —
   refreshed on every hardware-state change path (`onHardwareChange()`, `renderEngineSelection()`).
@@ -239,17 +241,15 @@ serialization — they are read-only views over the same DOM ids/state.
   bubbling through the IA container. Lets a user tell whether a collapsed advanced-tuning group
   hides any non-default setting without opening it.
 
-### Step 3: Settings
+The Hardware step's review summary shows the full configuration before launch, including
+Rapid-MLX advanced settings (KV dtype, prompt storage, workload scenario, sampling mode,
+reasoning mode, Web UI) when applicable. When reasoning mode is ON and requested KV dtype is
+not int8, the summary shows "INT4 → INT8 (reasoning profile)" to make the override visible.
 
-Network, security, and advanced launch flags.
+### Step 2: Launch
 
-### Step 4: Review
-
-Summary of the full configuration before launch. Shows Rapid-MLX advanced settings (KV dtype, prompt storage, workload scenario, sampling mode, reasoning mode, Web UI) when applicable. When reasoning mode is ON and requested KV dtype is not int8, the summary shows "INT4 → INT8 (reasoning profile)" to make the override visible.
-
-### Step 5: Start Server
-
-Launch and monitor start-up. Preset save/load options are available here.
+Network, security, and advanced launch flags, followed by spawn submission and start-up
+monitoring. Preset save/load options are available here.
 
 ## Engine selection
 
@@ -258,7 +258,7 @@ The wizard supports two inference backends:
 - llama.cpp — native for GGUF models
 - Rapid-MLX — optimized for MLX-ecosystem models on Apple Silicon
 
-Engine selection appears on Step 1 (Model) as two cards.
+Engine selection appears on Step 0 (Model) as two cards.
 
 ![Engine selection](../screenshots/spawn-wizard-engines-dark.png)
 
@@ -321,7 +321,7 @@ The classification is used both by the UI (to show appropriate hints) and by the
 
 ## Rapid-MLX wizard UX
 
-When Rapid-MLX is selected, the wizard adapts the Step 1 and Step 2 UI:
+When Rapid-MLX is selected, the wizard adapts the Model and Hardware step UI:
 
 - Model source description:
   - Switches to "Choose a validated MLX directory or a Rapid-MLX Hugging Face repository."
@@ -342,7 +342,7 @@ When Rapid-MLX is selected, the wizard adapts the Step 1 and Step 2 UI:
 
 ![Rapid-MLX hardware panel](../screenshots/spawn-wizard-rapid-mlx-hardware.png)
 - Launch guard:
-  - Step 1 validation:
+  - Model-step validation:
     - Blocks if Rapid-MLX is selected but not Apple Silicon.
     - Blocks if Rapid-MLX is recommended-ready but a GGUF was chosen under it;
       instructs switching engines or choosing a validated MLX source.
@@ -361,7 +361,7 @@ Wizard behavior tied to runtime state:
   - If Apple Silicon and runtime is active, the Rapid-MLX card shows "Runtime ready".
   - If Apple Silicon but runtime is missing, it shows "Runtime setup required".
   - On non-Apple Silicon, the card is marked "Local launch · Apple Silicon only".
-- Step 1 validation:
+- Model-step validation:
   - If Rapid-MLX is selected but runtime_required:
     - User cannot proceed; hint points to Settings → Rapid-MLX to install a version.
 - Engine badge:
@@ -432,7 +432,7 @@ but the underlying numbers differ because the `backend` field is respected serve
 
 ### MLX VRAM for Hugging Face downloads
 
-When browsing models on the HuggingFace tab (Step 1), the wizard shows VRAM estimates
+When browsing models on the HuggingFace tab (Step 0, Model), the wizard shows VRAM estimates
 for MLX models directly on each model card:
 
 - **VRAM bar**: Shows the estimated VRAM required to run the model, based on the
@@ -450,7 +450,7 @@ for MLX models directly on each model card:
 ## Hugging Face model search
 
 The Spawn Wizard integrates a full Hugging Face model search and discovery interface
-on the HF tab (Step 1). This replaces the simple repo ID input with a rich search
+on the HF tab (Step 0, Model). This replaces the simple repo ID input with a rich search
 experience:
 
 - **Discovery scopes**: Users can filter models by scope (e.g., MLX, GGUF, All).
