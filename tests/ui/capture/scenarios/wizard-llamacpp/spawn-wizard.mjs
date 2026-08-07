@@ -36,15 +36,10 @@ export default async function(ctx, options) {
     await sleep(300);
     await captureShot(page, 'spawn-wizard-step1-profiles.png', { fullPage: true });
 
-    // ── Advance to Step 1: Model ──────────────────────────────────────────────
-    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
-    await page.waitForFunction(
-        () => document.getElementById('wizard-step-1')?.classList.contains('active'),
-        { timeout: 5000 }
-    ).catch(() => {});
-    await sleep(500);
+    // Profile/use-case and model selection are now on the same step (Option A
+    // collapse: 6 steps → 3). No navigation click needed between them.
 
-    // ── Step 1: model source cards — capture before selecting HF ─────────────
+    // ── Step 0: model source cards — capture before selecting HF ─────────────
     await captureShot(page, 'spawn-wizard-step2-source-cards.png', { fullPage: true });
 
     // Select HuggingFace source.
@@ -194,7 +189,7 @@ export default async function(ctx, options) {
 
     await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
     await page.waitForFunction(
-        () => document.getElementById('wizard-step-2')?.classList.contains('active'),
+        () => document.getElementById('wizard-step-1')?.classList.contains('active'),
         { timeout: 8000 }
     ).catch(() => console.log('[CAPTURE] Step 2 (Hardware) wait timed out; continuing.'));
     await sleep(600);
@@ -218,14 +213,9 @@ export default async function(ctx, options) {
     await sleep(500);
     await captureShot(page, 'spawn-wizard-step3-vram.png', { fullPage: true });
 
-    // ── Step 4: Parameters ────────────────────────────────────────────────────
-    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
-    await page.waitForFunction(
-        () => document.getElementById('wizard-step-3')?.classList.contains('active'),
-        { timeout: 5000 }
-    ).catch(() => console.log('[CAPTURE] Step 4 (Parameters) wait timed out; continuing.'));
-    await sleep(800);
-    // Scroll to the config list — the most informative part of the parameters step.
+    // ── Same step (Hardware & memory): sampling/review config list ───────────
+    // Option A collapse merged the former Review/Summary step into this one's
+    // DOM, further down the page — no navigation needed to reach it.
     await page.evaluate(() => {
         const list = document.getElementById('spawn-summary-list');
         if (list) list.scrollIntoView({ behavior: 'instant', block: 'start' });
@@ -233,14 +223,14 @@ export default async function(ctx, options) {
     await sleep(300);
     await captureShot(page, 'spawn-wizard-step4-parameters.png', { fullPage: true });
 
-    // ── Step 5: Summary ───────────────────────────────────────────────────────
+    // ── Step 2: Launch (preset settings + spawn) ────────────────────────────────
     await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
     await page.waitForFunction(
-        () => document.getElementById('wizard-step-4')?.classList.contains('active'),
+        () => document.getElementById('wizard-step-2')?.classList.contains('active'),
         { timeout: 5000 }
-    ).catch(() => console.log('[CAPTURE] Step 5 (Summary) wait timed out; continuing.'));
+    ).catch(() => console.log('[CAPTURE] Step 3 (Launch) wait timed out; continuing.'));
     await sleep(600);
-    // Scroll to the Save Preset row at the bottom of the summary step.
+    // Scroll to the Save Preset row.
     await page.evaluate(() => {
         const row = document.getElementById('spawn-save-preset-row');
         if (row) row.scrollIntoView({ behavior: 'instant', block: 'center' });
@@ -248,13 +238,13 @@ export default async function(ctx, options) {
     await sleep(300);
     await captureShot(page, 'spawn-wizard-step5-summary.png', { fullPage: true });
 
-    // ── Step 6: Spawn ──────────────────────────────────────────────────────────
-    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
-    await page.waitForFunction(
-        () => document.getElementById('wizard-step-5')?.classList.contains('active'),
-        { timeout: 5000 }
-    ).catch(() => console.log('[CAPTURE] Step 6 (Spawn) wait timed out; continuing.'));
-    await sleep(600);
+    // Preset settings and Spawn are now on the same step (Option A collapse:
+    // 6 steps → 3). No navigation click needed between them.
+    await page.evaluate(() => {
+        const card = document.getElementById('spawn-config-card');
+        if (card) card.scrollIntoView({ behavior: 'instant', block: 'start' });
+    });
+    await sleep(300);
     await captureShot(page, 'spawn-wizard-step6-spawn.png', { fullPage: true });
 
     // Close wizard.

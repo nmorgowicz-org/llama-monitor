@@ -226,7 +226,8 @@ struct HfCommit {
 /// each commit and dedupe themselves (see `api_chat_template_upstream_history`).
 async fn fetch_hf_commits(repo: &str, revision: &str, limit: u32) -> Result<Vec<HfCommit>, String> {
     let repo_clean = repo.trim_end_matches('/');
-    let url = format!("https://huggingface.co/api/models/{repo_clean}/commits/{revision}?limit={limit}");
+    let url =
+        format!("https://huggingface.co/api/models/{repo_clean}/commits/{revision}?limit={limit}");
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
@@ -2148,7 +2149,8 @@ fn api_chat_template_transform(
                         // later regrets) the no-JSON fix can see and roll back that action
                         // specifically, per the two-track history model.
                         if let Ok(output_content) = std::fs::read(&output_path) {
-                            let base_meta = read_template_install_meta(&template_meta_path(input_path));
+                            let base_meta =
+                                read_template_install_meta(&template_meta_path(input_path));
                             let base_name = input_path
                                 .file_stem()
                                 .and_then(|s| s.to_str())
@@ -2238,71 +2240,79 @@ fn api_chat_template_upstream_history(
         .and(warp::get())
         .and(warp::header::optional::<String>("authorization"))
         .and(warp::query::<std::collections::HashMap<String, String>>())
-        .and_then(move |auth: Option<String>, q: std::collections::HashMap<String, String>| {
-            let cfg = app_config.clone();
-            async move {
-                if !check_api_token(&auth, &cfg) {
-                    return Ok(unauthorized_api_token());
-                }
-                let repo = q.get("repo").cloned().unwrap_or_default();
-                let file = q.get("file").cloned().unwrap_or_default();
-                if repo.is_empty() || file.is_empty() || repo.matches('/').count() != 1 {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&UpstreamHistoryResponse {
-                            ok: false,
-                            versions: vec![],
-                            error: Some("Missing or invalid repo/file".to_string()),
-                        }),
-                    ));
-                }
-
-                let commits = match fetch_hf_commits(&repo, "main", 20).await {
-                    Ok(c) => c,
-                    Err(e) => {
+        .and_then(
+            move |auth: Option<String>, q: std::collections::HashMap<String, String>| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let repo = q.get("repo").cloned().unwrap_or_default();
+                    let file = q.get("file").cloned().unwrap_or_default();
+                    if repo.is_empty() || file.is_empty() || repo.matches('/').count() != 1 {
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                             warp::reply::json(&UpstreamHistoryResponse {
                                 ok: false,
                                 versions: vec![],
-                                error: Some(e),
+                                error: Some("Missing or invalid repo/file".to_string()),
                             }),
                         ));
                     }
-                };
 
-                let fetches: Vec<_> = commits
-                    .iter()
-                    .map(|c| {
-                        let repo = repo.clone();
-                        let file = file.clone();
-                        let sha = c.id.clone();
-                        tokio::spawn(async move { fetch_hf_file_at_revision(&repo, &file, &sha).await })
-                    })
-                    .collect();
-
-                let mut versions = Vec::new();
-                let mut last_hash: Option<String> = None;
-                for (commit, fetch) in commits.into_iter().zip(fetches) {
-                    let Ok(Some(content)) = fetch.await else {
-                        continue;
+                    let commits = match fetch_hf_commits(&repo, "main", 20).await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&UpstreamHistoryResponse {
+                                    ok: false,
+                                    versions: vec![],
+                                    error: Some(e),
+                                }),
+                            ));
+                        }
                     };
-                    let hash = sha256_hex(&content);
-                    if last_hash.as_deref() == Some(hash.as_str()) {
-                        continue;
-                    }
-                    last_hash = Some(hash);
-                    versions.push(UpstreamVersion {
-                        sha: commit.id,
-                        date: commit.date,
-                        title: commit.title,
-                        template_version: extract_template_version(&content),
-                    });
-                }
 
-                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
-                    &UpstreamHistoryResponse { ok: true, versions, error: None },
-                )))
-            }
-        })
+                    let fetches: Vec<_> = commits
+                        .iter()
+                        .map(|c| {
+                            let repo = repo.clone();
+                            let file = file.clone();
+                            let sha = c.id.clone();
+                            tokio::spawn(async move {
+                                fetch_hf_file_at_revision(&repo, &file, &sha).await
+                            })
+                        })
+                        .collect();
+
+                    let mut versions = Vec::new();
+                    let mut last_hash: Option<String> = None;
+                    for (commit, fetch) in commits.into_iter().zip(fetches) {
+                        let Ok(Some(content)) = fetch.await else {
+                            continue;
+                        };
+                        let hash = sha256_hex(&content);
+                        if last_hash.as_deref() == Some(hash.as_str()) {
+                            continue;
+                        }
+                        last_hash = Some(hash);
+                        versions.push(UpstreamVersion {
+                            sha: commit.id,
+                            date: commit.date,
+                            title: commit.title,
+                            template_version: extract_template_version(&content),
+                        });
+                    }
+
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                        &UpstreamHistoryResponse {
+                            ok: true,
+                            versions,
+                            error: None,
+                        },
+                    )))
+                }
+            },
+        )
 }
 
 #[derive(serde::Serialize)]
@@ -2466,14 +2476,16 @@ async fn fetch_hf_discussion_template_content(
     if body["isPullRequest"].as_bool().unwrap_or(false) {
         let pr_ref = format!("refs%2Fpr%2F{discussion_id}");
         for candidate in ["chat_template.jinja", "chat_template.jinga"] {
-            let raw_url =
-                format!("https://huggingface.co/{repo_clean}/raw/{pr_ref}/{candidate}");
+            let raw_url = format!("https://huggingface.co/{repo_clean}/raw/{pr_ref}/{candidate}");
             if let Ok(resp) = client.get(&raw_url).send().await
                 && resp.status().is_success()
                 && let Ok(text) = resp.text().await
                 && (text.contains("{%") || text.contains("{{"))
             {
-                let author = body["author"]["name"].as_str().unwrap_or("unknown").to_string();
+                let author = body["author"]["name"]
+                    .as_str()
+                    .unwrap_or("unknown")
+                    .to_string();
                 return Ok(Some((text, author)));
             }
         }
@@ -2689,9 +2701,9 @@ fn api_chat_template_discussions(
                                 .map(|d| {
                                     let repo = repo.clone();
                                     let number = d.number;
-                                    tokio::spawn(
-                                        async move { fetch_hf_discussion_last_activity(&repo, number).await },
-                                    )
+                                    tokio::spawn(async move {
+                                        fetch_hf_discussion_last_activity(&repo, number).await
+                                    })
                                 })
                                 .collect();
                             for (d, check) in discussions.iter_mut().zip(checks) {
@@ -2984,7 +2996,10 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .boxed();
     r = r
-        .or(api_chat_template_upstream_history(state.clone(), config.clone()))
+        .or(api_chat_template_upstream_history(
+            state.clone(),
+            config.clone(),
+        ))
         .unify()
         .boxed();
     r = r

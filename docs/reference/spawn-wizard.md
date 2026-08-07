@@ -206,6 +206,39 @@ Three invariants govern the registry and hold regardless of which loader or UI s
   tradeoff (e.g. MoE CPU-offload placement, prompt-cache RAM bounds) — not merely because it's
   less commonly touched.
 
+### Step 2 UX: sticky header, locked rows, decision cards, changed-count badges
+
+The Guided redesign (plan: `docs/plans/20260806-spawn_wizard_uiux_redesign.md`) adds four
+presentation-layer behaviors on top of the control-tier registry above. None of these change
+serialization — they are read-only views over the same DOM ids/state.
+
+- **Sticky context bar**: `#hw-model-header` is `position: sticky; top: 0` inside `.wizard-main`
+  (which already scrolls independently of the VRAM sidebar), so the model/quant summary stays
+  visible while the rest of Step 2 scrolls. `renderContextChipRow()`
+  (`spawn-wizard-hardware-model.js`) renders a compact chip row into
+  `#hw-context-chip-row` inside that header — loader, context size, KV precision, and use-case —
+  refreshed on every hardware-state change path (`onHardwareChange()`, `renderEngineSelection()`).
+- **Locked effective-value rows (P4 fix)**: for `CONTROLS` entries carrying an `effective` tag
+  (a control whose UI selection is silently overridden by a runtime constraint — e.g. reasoning
+  mode pinning KV to int8), `applyEffectiveLocks()` (`spawn-wizard-groups.js`) adds
+  `.field-effective-locked` to the field, injects an "Effective: X" chip from the
+  `EFFECTIVE_COPY` map, and a "Why?" toggle that reveals the field's existing `.field-hint` text.
+  Called from `renderEngineSelection()` when Rapid-MLX is selected.
+- **Always-open decision cards**: KV cache precision and speculative decoding get static
+  `.mlx-native-group` card wrappers (same CSS pattern as the tier-gated accordion groups and the
+  preset editor) directly in `static/index.html`, rather than being registered in
+  `GROUPS`/`SUPERSECTIONS` — the accordion system auto-collapses by tier, and these two cards are
+  meant to stay open regardless of profile. Vision and context-size do not get separate cards:
+  vision is covered by the sticky header, and context-size already has its own always-open
+  quick-pick UI.
+- **"N changed from default" badges**: each `.mlx-wiz-supersection` built by
+  `createWizardIA()` (`spawn-wizard-ia.js`) gets a `.mlx-wiz-changed-badge` in its heading.
+  `captureDefaults()` snapshots each control's shipped default (`data-wiz-default`) the first
+  time the IA builds; `refreshChangedBadges()` compares live values against that snapshot and
+  shows "N changed from default" per supersection, recomputed on `input`/`change` events
+  bubbling through the IA container. Lets a user tell whether a collapsed advanced-tuning group
+  hides any non-default setting without opening it.
+
 ### Step 3: Settings
 
 Network, security, and advanced launch flags.

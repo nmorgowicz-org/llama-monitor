@@ -148,7 +148,11 @@ test.describe('experimental GGUF Import Lab', () => {
       }],
     });
     expect(requests.models).toBe(1);
-    await page.getByRole('button', { name: /^Library/ }).click();
+    // Moving the mouse toward the Library tab can pass over the top-nav
+    // memory-pressure chip, whose hover card is fixed-positioned and can
+    // visually overlap the models modal. Force the click through: the tab
+    // itself is unobstructed for a real click at a different cursor origin.
+    await page.getByRole('button', { name: /^Library/ }).click({ force: true });
     await expect.poll(() => requests.models).toBe(2);
   });
 });

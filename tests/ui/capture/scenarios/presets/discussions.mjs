@@ -35,12 +35,8 @@ export default async function(ctx, options) {
     });
     await sleep(300);
 
-    // Advance to Step 1: Model (where chat-template-section lives).
-    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
-    await page.waitForFunction(
-        () => document.getElementById('wizard-step-1')?.classList.contains('active'),
-        { timeout: 5000 }
-    ).catch(() => {});
+    // Profile/use-case and model selection (where chat-template-section lives) are
+    // on the same step (Option A collapse: 6 steps → 3). No navigation needed.
     await sleep(600);
 
     // ── Qwen workflow: force family → froggeric/Qwen-Fixed-Chat-Templates ─────

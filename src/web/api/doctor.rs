@@ -97,9 +97,8 @@ async fn collect_cache_findings(state: &crate::state::AppState) -> Vec<DoctorFin
 
     // Phase 6: resolve cache_mode before diagnosing — otherwise Auto/Off presets get findings
     // describing the stale raw fields instead of what actually launches.
-    let (resolved_prefix_cache_enabled, resolved_retained_cache_mib, _) = config
-        .cache_mode
-        .resolve(
+    let (resolved_prefix_cache_enabled, resolved_retained_cache_mib, _) =
+        config.cache_mode.resolve(
             config.prefix_cache_enabled,
             config.retained_cache_mib,
             config.hybrid_cache_entries,

@@ -90,16 +90,11 @@ export default async function(ctx, _options) {
     await sleep(200);
     await capture(1000);
 
-    // ── Step 0 → Step 1: Engine + Model ───────────────────────────────────────
-    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
-    await page.waitForFunction(
-        () => document.getElementById('wizard-step-1')?.classList.contains('active'),
-        { timeout: 5000 }
-    ).catch(() => console.log('[CAPTURE] Step 1 wait timed out; continuing.'));
-    await sleep(300);
+    // Profile and engine/model selection are on the same step (Option A collapse:
+    // 6 steps → 3). No navigation click needed between them.
     await capture(600);
 
-    // ── Step 1: Select Rapid-MLX engine ───────────────────────────────────────
+    // ── Step 0: Select Rapid-MLX engine ───────────────────────────────────────
     await page.evaluate(() => {
         document.querySelector('.wizard-engine-card[data-engine="rapid_mlx"]')?.click();
     });
@@ -143,12 +138,12 @@ export default async function(ctx, _options) {
     await sleep(400);
     await capture(1000);
 
-    // ── Step 1 → Step 2: Rapid-MLX Hardware ──────────────────────────────────
+    // ── Step 0 → Step 1: Rapid-MLX Hardware ──────────────────────────────────
     await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
     await page.waitForFunction(
-        () => document.getElementById('wizard-step-2')?.classList.contains('active'),
+        () => document.getElementById('wizard-step-1')?.classList.contains('active'),
         { timeout: 5000 }
-    ).catch(() => console.log('[CAPTURE] Step 2 wait timed out; continuing.'));
+    ).catch(() => console.log('[CAPTURE] Step 1 wait timed out; continuing.'));
     await sleep(400);
 
     // Ensure Rapid-MLX hardware panel and advanced fields are visible, and wait
@@ -258,19 +253,15 @@ export default async function(ctx, _options) {
     });
     await sleep(200);
 
-    // ── Step 2 → Step 3: Summary (reasoning ON → "INT4 → INT8" in summary) ──
+    // ── Same step (Hardware & memory): summary (reasoning ON → "INT4 → INT8") ─
     // Enable reasoning mode so the review summary shows "INT4 → INT8 (reasoning profile)".
+    // Option A collapse merged the former Summary step into this one's DOM,
+    // further down the page — no navigation needed to reach it.
     await page.evaluate(() => {
         const cb = document.getElementById('spawn-rapid-reasoning-mode');
         if (cb && !cb.checked) cb.click();
     });
     await sleep(400);
-    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
-    await page.waitForFunction(
-        () => document.getElementById('wizard-step-3')?.classList.contains('active'),
-        { timeout: 5000 }
-    ).catch(() => console.log('[CAPTURE] Step 3 wait timed out; continuing.'));
-    await sleep(800);
     await capture(1000);
 
     // Scroll to the config summary list.
@@ -278,19 +269,19 @@ export default async function(ctx, _options) {
         const list = document.getElementById('spawn-summary-list');
         if (list) list.scrollIntoView({ behavior: 'instant', block: 'start' });
         else {
-            const main = document.querySelector('#wizard-step-3 .wizard-main');
+            const main = document.querySelector('#wizard-step-1 .wizard-main');
             if (main) main.scrollTop = main.scrollHeight;
         }
     });
     await sleep(300);
     await capture(2500); // Hold on the summary list (Rapid-MLX config, KV cache dtype).
 
-    // ── Step 3 → Step 4: Preset Parameters ───────────────────────────────────
+    // ── Step 1 → Step 2: Launch (preset settings + spawn) ────────────────────
     await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
     await page.waitForFunction(
-        () => document.getElementById('wizard-step-4')?.classList.contains('active'),
+        () => document.getElementById('wizard-step-2')?.classList.contains('active'),
         { timeout: 5000 }
-    ).catch(() => console.log('[CAPTURE] Step 4 wait timed out; continuing.'));
+    ).catch(() => console.log('[CAPTURE] Step 2 wait timed out; continuing.'));
     await sleep(400);
     await capture(1500);
 
@@ -299,20 +290,20 @@ export default async function(ctx, _options) {
         const row = document.getElementById('spawn-save-preset-row');
         if (row) row.scrollIntoView({ behavior: 'instant', block: 'center' });
         else {
-            const main = document.querySelector('#wizard-step-4 .wizard-main');
+            const main = document.querySelector('#wizard-step-2 .wizard-main');
             if (main) main.scrollTop = main.scrollHeight;
         }
     });
     await sleep(250);
     await capture(2000);
 
-    // ── Step 4 → Step 5: Ready to Launch / Spawn ─────────────────────────────
-    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
-    await page.waitForFunction(
-        () => document.getElementById('wizard-step-5')?.classList.contains('active'),
-        { timeout: 5000 }
-    ).catch(() => console.log('[CAPTURE] Step 5 wait timed out; continuing.'));
-    await sleep(600);
+    // Preset settings and Spawn are now on the same step (Option A collapse:
+    // 6 steps → 3). No navigation click needed between them.
+    await page.evaluate(() => {
+        const card = document.getElementById('spawn-config-card');
+        if (card) card.scrollIntoView({ behavior: 'instant', block: 'start' });
+    });
+    await sleep(300);
     await capture(2500); // Hold on the Spawn step — Rapid-MLX config card + Spawn Server button.
 
     // ── Convert frames → GIF ──────────────────────────────────────────────────

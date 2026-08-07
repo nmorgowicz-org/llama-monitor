@@ -27,7 +27,7 @@ export default async function(ctx) {
     }, localFixture);
     await page.waitForSelector('#spawn-wizard-overlay.open', { timeout: 10000 });
     await page.waitForFunction(
-        () => document.getElementById('wizard-step-1')?.classList.contains('active'),
+        () => document.getElementById('wizard-step-0')?.classList.contains('active'),
         { timeout: 5000 }
     );
 
@@ -41,7 +41,7 @@ export default async function(ctx) {
 
     await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
     await page.waitForFunction(
-        () => document.getElementById('wizard-step-2')?.classList.contains('active'),
+        () => document.getElementById('wizard-step-1')?.classList.contains('active'),
         { timeout: 8000 }
     ).catch(() => console.log('[CAPTURE] Hardware step wait timed out; continuing.'));
     await sleep(400);

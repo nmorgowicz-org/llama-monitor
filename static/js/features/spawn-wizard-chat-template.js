@@ -664,7 +664,7 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
           // HF-repo-shaped string, so this seeds a search query rather than a resolved repo id.
           repoInput.value = wizardState.model.path || '';
         }
-        showStep(1);
+        showStep(0);
       });
       bodyEl.appendChild(document.createElement('br'));
       bodyEl.appendChild(switchBtn);

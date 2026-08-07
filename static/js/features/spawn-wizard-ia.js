@@ -158,6 +158,10 @@ export function createWizardIA(config) {
       const heading = document.createElement('h3');
       heading.className = 'mlx-wiz-supersection-title';
       heading.textContent = super_.title;
+      const badge = document.createElement('span');
+      badge.className = 'mlx-wiz-changed-badge';
+      badge.hidden = true;
+      heading.appendChild(badge);
       const desc = document.createElement('p');
       desc.className = 'mlx-wiz-supersection-desc';
       desc.textContent = super_.description;
@@ -166,6 +170,42 @@ export function createWizardIA(config) {
     });
 
     advancedFields.appendChild(iaContainer);
+    // "All settings (N changed)" (plan §3): count fields inside this
+    // supersection whose live value differs from its shipped default, so a
+    // user can tell at a glance whether the collapsed group hides anything
+    // non-default without opening it.
+    captureDefaults(iaContainer);
+    refreshChangedBadges(iaContainer);
+    iaContainer.addEventListener('input', () => refreshChangedBadges(iaContainer));
+    iaContainer.addEventListener('change', () => refreshChangedBadges(iaContainer));
+  }
+
+  function captureDefaults(container) {
+    container.querySelectorAll('select, input').forEach(el => {
+      if (el.dataset.wizDefaultCaptured) return;
+      el.dataset.wizDefaultCaptured = '1';
+      if (el.type === 'checkbox') el.dataset.wizDefault = el.defaultChecked ? '1' : '0';
+      else el.dataset.wizDefault = el.tagName === 'SELECT'
+        ? (Array.from(el.options).find(o => o.defaultSelected)?.value ?? el.options[0]?.value ?? '')
+        : el.defaultValue;
+    });
+  }
+
+  function isControlChanged(el) {
+    if (el.type === 'checkbox') return (el.checked ? '1' : '0') !== el.dataset.wizDefault;
+    return el.value !== el.dataset.wizDefault;
+  }
+
+  function refreshChangedBadges(container) {
+    container.querySelectorAll('.mlx-wiz-supersection').forEach(section => {
+      const n = section.querySelectorAll('select, input').length
+        ? Array.from(section.querySelectorAll('select, input')).filter(isControlChanged).length
+        : 0;
+      const badge = section.querySelector('.mlx-wiz-changed-badge');
+      if (!badge) return;
+      badge.hidden = n === 0;
+      badge.textContent = n === 0 ? '' : `${n} changed from default`;
+    });
   }
 
   // Scoped to this instance's own iaContainer only — llama.cpp and MLX each

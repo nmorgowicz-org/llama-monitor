@@ -922,6 +922,49 @@
   align-items: start;
 }
 
+/* Locked effective-value rows (plan §6/P4): control's selection is accepted
+   but a runtime constraint pins actual launch behavior regardless. */
+.field-effective-locked select,
+.field-effective-locked input {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.field-effective-locked .effective-chip {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warn, #e6a41c) 18%, transparent);
+  color: var(--warn, #e6a41c);
+  vertical-align: middle;
+  cursor: help;
+}
+
+.effective-why-btn {
+  font-size: 10px;
+  color: var(--color-accent);
+  background: none;
+  border: none;
+  padding: 0;
+  margin-top: 2px;
+  cursor: pointer;
+  text-decoration: underline;
+  display: block;
+}
+
+.field-effective-locked .field-hint {
+  display: none;
+}
+
+.field-effective-locked .field-hint.effective-why-open {
+  display: block;
+  color: var(--color-text);
+}
+
 /* Advanced-options section wrapper — content is relocated into registry-
    generated <details> groups by spawn-wizard-llama-ia.js, collapsed-but-
    reachable on Quick/Balanced profiles and expanded on Advanced. The
@@ -5551,11 +5594,38 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
   flex-direction: column;
   align-items: stretch;
   gap: 8px;
-  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
+  background: color-mix(in srgb, var(--color-bg-elevated, #1a1f28) 92%, var(--color-accent) 8%);
   border: 1px solid color-mix(in srgb, var(--color-accent) 18%, transparent);
   border-radius: 8px;
   padding: 10px 14px;
   margin-bottom: 12px;
+  /* Sticky context bar (plan §2): pins model/quant/loader/context summary
+     while the rest of step 2's fields scroll inside .wizard-main. */
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+}
+.hw-context-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 10px;
+}
+.hw-context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+.hw-context-chip strong {
+  color: var(--color-text);
+  font-weight: 600;
 }
 .hw-model-info {
   display: flex;
@@ -6947,6 +7017,20 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
 .mlx-wiz-ia { display:flex; flex-direction:column; gap:22px; margin-top:16px; }
 .mlx-wiz-supersection { display:flex; flex-direction:column; gap:12px; }
 .mlx-wiz-supersection-title { margin:0; font-size:13px; font-weight:750; letter-spacing:.01em; color:var(--text-primary); }
+/* "All settings (N changed)" badge (plan §3): surfaces how many fields inside
+   a collapsed supersection are non-default without opening it. */
+.mlx-wiz-changed-badge {
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  color: var(--color-accent);
+  vertical-align: middle;
+}
 .mlx-wiz-supersection-desc { margin:-6px 0 0; font-size:11.5px; line-height:1.5; color:var(--text-muted); }
 .mlx-wiz-group.mlx-native-group { margin:0; }
 .mlx-wiz-row.hardware-field { margin:0; }

@@ -1428,10 +1428,16 @@ fn mlx_config_to_json_obj(
         config_obj.insert("num_layers".into(), serde_json::json!(num_layers));
     }
     if let Some(num_attention_heads) = config.num_attention_heads {
-        config_obj.insert("num_attention_heads".into(), serde_json::json!(num_attention_heads));
+        config_obj.insert(
+            "num_attention_heads".into(),
+            serde_json::json!(num_attention_heads),
+        );
     }
     if let Some(num_key_value_heads) = config.num_key_value_heads {
-        config_obj.insert("num_key_value_heads".into(), serde_json::json!(num_key_value_heads));
+        config_obj.insert(
+            "num_key_value_heads".into(),
+            serde_json::json!(num_key_value_heads),
+        );
     }
     if let Some(head_dim) = config.head_dim {
         config_obj.insert("head_dim".into(), serde_json::json!(head_dim));
@@ -1443,13 +1449,19 @@ fn mlx_config_to_json_obj(
         config_obj.insert("num_experts".into(), serde_json::json!(num_experts));
     }
     if let Some(num_experts_per_tok) = config.num_experts_per_tok {
-        config_obj.insert("num_experts_per_tok".into(), serde_json::json!(num_experts_per_tok));
+        config_obj.insert(
+            "num_experts_per_tok".into(),
+            serde_json::json!(num_experts_per_tok),
+        );
     }
     if let Some(sliding_window) = config.sliding_window {
         config_obj.insert("sliding_window".into(), serde_json::json!(sliding_window));
     }
     if let Some(max_position_embeddings) = config.max_position_embeddings {
-        config_obj.insert("max_position_embeddings".into(), serde_json::json!(max_position_embeddings));
+        config_obj.insert(
+            "max_position_embeddings".into(),
+            serde_json::json!(max_position_embeddings),
+        );
     }
     if config.vision_config.is_some() {
         config_obj.insert("has_vision_config".into(), serde_json::json!(true));
@@ -1461,8 +1473,14 @@ fn mlx_config_to_json_obj(
             config_obj.insert("vision_confidence".into(), serde_json::json!("confirmed"));
         }
         None => {
-            config_obj.insert("vision_source".into(), serde_json::json!("no readable config.json or safetensors index"));
-            config_obj.insert("vision_confidence".into(), serde_json::json!("undetermined"));
+            config_obj.insert(
+                "vision_source".into(),
+                serde_json::json!("no readable config.json or safetensors index"),
+            );
+            config_obj.insert(
+                "vision_confidence".into(),
+                serde_json::json!("undetermined"),
+            );
         }
     }
     if let Some(quant) = config.quantization {

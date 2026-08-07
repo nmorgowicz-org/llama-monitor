@@ -2071,7 +2071,11 @@ pub fn infer_quant_label(filename: &str) -> String {
             .rfind(".gguf")
             .or_else(|| filename.rfind(".GGUF"))
             .unwrap_or(filename.len());
-        let start = lower.find("apex").into_iter().chain(lower.find("mtp")).min();
+        let start = lower
+            .find("apex")
+            .into_iter()
+            .chain(lower.find("mtp"))
+            .min();
         if let Some(start) = start {
             return format!("{} (custom)", &filename[start..stem_end]);
         }
@@ -2099,16 +2103,16 @@ fn extract_quant_like_token(filename: &str) -> Option<String> {
         .trim_end_matches(".GGUF");
     for segment in stem.split(['-', '_', '.']) {
         let seg_lower = segment.to_ascii_lowercase();
-        let is_q = seg_lower.starts_with('q') && seg_lower[1..].starts_with(|c: char| c.is_ascii_digit());
-        let is_iq = seg_lower.starts_with("iq") && seg_lower[2..].starts_with(|c: char| c.is_ascii_digit());
+        let is_q =
+            seg_lower.starts_with('q') && seg_lower[1..].starts_with(|c: char| c.is_ascii_digit());
+        let is_iq =
+            seg_lower.starts_with("iq") && seg_lower[2..].starts_with(|c: char| c.is_ascii_digit());
         if is_q || is_iq {
             // Reattach any immediately-following underscore-joined suffix segments
             // (e.g. "K", "P" in "Q8_K_P") that got split apart above.
             let start = stem.to_ascii_lowercase().find(&seg_lower)?;
             let rest = &stem[start..];
-            let end = rest
-                .find(|c: char| c == '-' || c == '.')
-                .unwrap_or(rest.len());
+            let end = rest.find(['-', '.']).unwrap_or(rest.len());
             return Some(rest[..end].to_ascii_uppercase());
         }
     }

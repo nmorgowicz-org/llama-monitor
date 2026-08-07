@@ -10,6 +10,9 @@ export const COMMUNITY_TEMPLATES = {
     provenance: 'community',
     transformed: true, // Uses -no_json transform at install time
   },
+  // Google's official template is listed first (and is what getDefaultTemplateForFamily()
+  // picks) because it's the priority recommendation. jscott3201's agentic fork is kept as
+  // a fallback entry in case Google's template regresses tool-calling again in the future.
   gemma4: [
     {
       name: 'gemma4-google-official',

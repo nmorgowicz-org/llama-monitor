@@ -376,9 +376,9 @@ export async function renderSummary() {
   editRow.style.marginTop = '10px';
 
   const shortcuts = [
-    { label: 'Edit model', step: 1 },
-    { label: 'Edit hardware', step: 2 },
-    { label: 'Edit sampling', step: 3, focusId: 'spawn-temperature' },
+    { label: 'Edit model', step: 0 },
+    { label: 'Edit hardware', step: 1 },
+    { label: 'Edit sampling', step: 1, focusId: 'spawn-temperature' },
   ];
   shortcuts.forEach(({ label, step, focusId }) => {
     const btn = document.createElement('button');
@@ -939,9 +939,9 @@ export function _renderPresetParamsStep() {
   editRow.className = 'summary-edit-row';
   editRow.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;padding:0;';
   [
-    { label: 'Edit model', step: 1 },
-    { label: 'Edit hardware', step: 2 },
-    { label: 'Edit sampling', step: 3, focusId: 'spawn-temperature' },
+    { label: 'Edit model', step: 0 },
+    { label: 'Edit hardware', step: 1 },
+    { label: 'Edit sampling', step: 1, focusId: 'spawn-temperature' },
   ].forEach(({ label, step, focusId }) => {
     const btn = document.createElement('button');
     btn.type = 'button';

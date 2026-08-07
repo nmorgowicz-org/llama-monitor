@@ -267,7 +267,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         await expect(page.locator('#spawn-model-path')).toHaveValue('team/production-model');
         await expect(page.locator('#wizard-next-btn')).toBeEnabled();
         await page.locator('#wizard-next-btn').click();
-        await expect(page.locator('#wizard-step-2')).toHaveClass(/active/);
+        await expect(page.locator('#wizard-step-1')).toHaveClass(/active/);
 
         await page.evaluate(async () => {
             const { closeSpawnWizard, openSpawnWizard } = await import('/js/features/spawn-wizard.js');
@@ -296,7 +296,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         await expect(page.locator('#spawn-hf-repo')).toHaveValue('owner/source-model');
         await expect(page.locator('#wizard-next-btn')).toBeEnabled();
         await page.locator('#wizard-next-btn').click();
-        await expect(page.locator('#wizard-step-2')).toHaveClass(/active/);
+        await expect(page.locator('#wizard-step-1')).toHaveClass(/active/);
     });
 
     test('recommendations select llama.cpp for GGUF and Rapid-MLX for a typed MLX directory', async ({ page }) => {
@@ -363,8 +363,8 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         // The MLX fit rail stays visible on the hardware step — hiding it was a
         // defect fixed during the MLX presentation/IA redesign (only the
         // llama.cpp-specific .wizard-main column is hidden for Rapid-MLX).
-        await expect(page.locator('#wizard-step-2 > .hw-vram-sidebar')).toBeVisible();
-        await expect(page.locator('#wizard-step-2 > .wizard-main')).toBeHidden();
+        await expect(page.locator('#wizard-step-1 > .hw-vram-sidebar')).toBeVisible();
+        await expect(page.locator('#wizard-step-1 > .wizard-main')).toBeHidden();
     });
 
     test('@in-memory-test typed Rapid-MLX sources round-trip unchanged and llama.cpp payloads exclude Rapid-MLX config', async ({ page }) => {
@@ -724,8 +724,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
             openSpawnWizard();
         });
 
-        await page.locator('#wizard-next-btn').click();
-        await expect(page.locator('#wizard-step-1')).toHaveClass(/active/);
+        await expect(page.locator('#wizard-step-0')).toHaveClass(/active/);
 
         const nextBtn = page.locator('#wizard-next-btn');
         await expect(nextBtn).toBeDisabled();
@@ -753,12 +752,9 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         });
 
         await page.locator('.profile-card[data-profile="advanced"]').click();
-        await page.locator('#wizard-next-btn').click();
-        await expect(page.locator('#wizard-step-1')).toHaveClass(/active/);
-
         await page.fill('#spawn-model-path', '/tmp/Qwen3.6-27B-Instruct-Q4_K_M.gguf');
         await page.locator('#wizard-next-btn').click();
-        await expect(page.locator('#wizard-step-2')).toHaveClass(/active/);
+        await expect(page.locator('#wizard-step-1')).toHaveClass(/active/);
         await expect(page.locator('.vsc-section-label')).toContainText('Context fit modes');
         // Scenario cards are rendered via async backend calls; wait for them.
         await expect(page.locator('#vram-scenarios')).toContainText('Reliable agents', { timeout: 8000 });
@@ -777,8 +773,8 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         await expect(nextBtn).toBeEnabled();
 
         // Hardware step must still be active and visible after the layout change
-        await expect(page.locator('#wizard-step-2')).toHaveClass(/active/);
-        await expect(page.locator('#wizard-step-2 > .wizard-main .wizard-section-title', { hasText: 'Configure hardware' })).toBeVisible();
+        await expect(page.locator('#wizard-step-1')).toHaveClass(/active/);
+        await expect(page.locator('#wizard-step-1 > .wizard-main .wizard-section-title', { hasText: 'Configure hardware' })).toBeVisible();
     });
 
     test('@in-memory-test Spawn payload leaves fit parameters unset until the toggle is enabled', async ({ page }) => {
@@ -817,8 +813,12 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
 
         expect(templates.qwen.installEndpoint).toBe('/api/chat-template/install-hf');
         expect(templates.qwen.repo).toBe('froggeric/Qwen-Fixed-Chat-Templates');
-        expect(templates.gemma4.installEndpoint).toBe('/api/chat-template/install-url');
-        expect(templates.gemma4.url).toBe(
+        // Google's official template is the priority default (first entry);
+        // jscott3201's agentic fork is kept as a fallback entry.
+        expect(templates.gemma4[0].installEndpoint).toBe('/api/chat-template/install-hf');
+        expect(templates.gemma4[0].repo).toBe('google/gemma-4-31B-it');
+        expect(templates.gemma4[1].installEndpoint).toBe('/api/chat-template/install-url');
+        expect(templates.gemma4[1].url).toBe(
             'https://raw.githubusercontent.com/jscott3201/llm-tuning/main/gemma4/chat_templates/custom_pub_chat_template_gemma4.jinja',
         );
     });
@@ -839,12 +839,9 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         });
 
         await page.locator('.profile-card[data-profile="advanced"]').click();
-        await page.locator('#wizard-next-btn').click();
-        await expect(page.locator('#wizard-step-1')).toHaveClass(/active/);
-
         await page.fill('#spawn-model-path', '/tmp/Qwen3.6-27B-Instruct-Q4_K_M.gguf');
         await page.locator('#wizard-next-btn').click();
-        await expect(page.locator('#wizard-step-2')).toHaveClass(/active/);
+        await expect(page.locator('#wizard-step-1')).toHaveClass(/active/);
         await expect(page.locator('.vsc-section-label')).toContainText('Context fit modes');
         // Scenario cards are rendered via async backend calls; wait for them.
         await expect(page.locator('#vram-scenarios')).toContainText('Reliable agents', { timeout: 8000 });
@@ -901,8 +898,6 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         });
 
         await page.locator('#wizard-next-btn').click();
-        await page.fill('#spawn-model-path', '/tmp/Qwen3.6-27B-MTP-Q4_K_M.gguf');
-        await page.locator('#wizard-next-btn').click();
 
         await expect(page.locator('#hw-mtp-section')).toBeVisible();
         await expect(page.locator('#hw-use-mtp')).toBeChecked({ checked: true });
@@ -922,11 +917,8 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         });
 
         await page.locator('#wizard-next-btn').click();
-        await page.fill('#spawn-model-path', '/tmp/Qwen3.6-27B-Instruct-Q4_K_M.gguf');
-        await page.locator('#wizard-next-btn').click();
-        await page.locator('#wizard-next-btn').click();
 
-        await expect(page.locator('#wizard-step-3')).toHaveClass(/active/);
+        await expect(page.locator('#wizard-step-1')).toHaveClass(/active/);
         await expect(page.locator('#spawn-top-k')).toBeVisible();
         await expect(page.locator('#spawn-max-tokens')).toBeVisible();
         await expect(page.locator('#spawn-output-mode')).toBeVisible();

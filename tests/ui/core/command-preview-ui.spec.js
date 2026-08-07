@@ -37,9 +37,9 @@ test.describe('Rapid-MLX launch command preview (step 6)', () => {
     // the wiring and not just the function.
     for (let i = 0; i < 5; i += 1) {
       const next = page.locator('#wizard-next-btn');
-      if (await next.isEnabled()) await next.click();
+      if (await next.isVisible() && await next.isEnabled()) await next.click();
     }
-    await expect(page.locator('#wizard-step-5')).toHaveClass(/active/);
+    await expect(page.locator('#wizard-step-2')).toHaveClass(/active/);
   }
 
   test('@in-memory-test renders the argv, the runtime diff, and the reasons', async ({ page }) => {
@@ -79,6 +79,6 @@ test.describe('Rapid-MLX launch command preview (step 6)', () => {
       'Could not locate the Rapid-MLX executable',
     );
     // The preview is advisory; failing to build it must not disable spawning.
-    await expect(page.locator('#wizard-step-5')).toHaveClass(/active/);
+    await expect(page.locator('#wizard-step-2')).toHaveClass(/active/);
   });
 });

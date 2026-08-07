@@ -33,7 +33,7 @@ import { openCardPanel, _closeCardPanel } from './spawn-wizard-model-card.js';
 export { openCardPanel };
 import { configureMlxWizardIA, applyMlxTierVisibility } from './spawn-wizard-mlx-ia.js';
 import { configureLlamaWizardIA, applyLlamaTierVisibility } from './spawn-wizard-llama-ia.js';
-import { controlsForLoader } from './spawn-wizard-groups.js';
+import { controlsForLoader, applyEffectiveLocks } from './spawn-wizard-groups.js';
 import {
   _platformInfo,
   setWizardPlatformInfo,
@@ -77,6 +77,7 @@ import {
 } from './spawn-wizard-hf-tags.js';
 import {
   renderHardwareModelHeader,
+  renderContextChipRow,
   _autoDiscoverLocalModelQuants,
   _renderQuantSwapActions,
   resetQuantSwapSearchState,
@@ -178,11 +179,11 @@ const USE_CASE_TO_KV_DTYPE = {
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
-export const STEP_LABELS = ['How it works', 'Choose model', 'Hardware & memory', 'Settings', 'Review settings', 'Start server'];
+export const STEP_LABELS = ['Choose model', 'Hardware & memory', 'Start server'];
 // URL slugs parallel to STEP_LABELS so wizard steps are deep-linkable and browser
 // Back/Forward traverses them. Step 0 has no slug ('/spawn'); the rest are
 // '/spawn/<slug>'. Keep in sync with STEP_LABELS.
-const STEP_SLUGS = ['', 'model', 'hardware', 'settings', 'review', 'start'];
+const STEP_SLUGS = ['', 'hardware', 'start'];
 
 // Set while openSpawnWizard runs its own initial showStep() so that internal step
 // change doesn't push a history entry; showSpawnRoute reconciles the URL afterward.
@@ -573,7 +574,7 @@ export function openSpawnWizard(opts = {}) {
   }
 
   if (opts.localPath) {
-    // Pre-load a local model path and jump straight to step 2 (model).
+    // Pre-load a local model path and jump straight to the Model step.
     wizardState.model.source = 'local';
     wizardState.model.path = opts.localPath;
     wizardState.model.hfRepo = '';
@@ -589,7 +590,7 @@ export function openSpawnWizard(opts = {}) {
     });
     updateModelInputVisibility();
     renderLocalModelHint();
-    showStep(1); // step 1 = Model (0-indexed)
+    showStep(0); // step 0 = Model (0-indexed)
   } else if (opts.templatePreset?.backend !== 'rapid_mlx') {
     wizardState.model.source = 'local';
     updateModelInputVisibility();
@@ -603,7 +604,7 @@ export function openSpawnWizard(opts = {}) {
     });
     updateModelInputVisibility();
     renderLocalModelHint();
-    showStep(1);
+    showStep(0);
   }
 
   renderEngineSelection();
@@ -1380,17 +1381,17 @@ function bindEvents() {
   dom.portInput?.addEventListener('input', () => {
     const parsed = parseInt(dom.portInput.value, 10);
     wizardState.access.port = Number.isFinite(parsed) && parsed > 0 ? parsed : 8001;
-    if (wizardState.currentStep === 3) renderSummary();
+    if (wizardState.currentStep === 1) renderSummary();
     refreshStepGuardrails();
   });
   dom.bindHostSelect?.addEventListener('change', () => {
     wizardState.access.bindHost = dom.bindHostSelect.value || '127.0.0.1';
-    if (wizardState.currentStep === 3) renderSummary();
+    if (wizardState.currentStep === 1) renderSummary();
     refreshStepGuardrails();
   });
   dom.apiKeyInput?.addEventListener('input', () => {
     wizardState.access.apiKey = (dom.apiKeyInput.value || '').trim();
-    if (wizardState.currentStep === 3) renderSummary();
+    if (wizardState.currentStep === 1) renderSummary();
     refreshStepGuardrails();
   });
 
@@ -1594,10 +1595,6 @@ function getStepGuardState(step = wizardState.currentStep) {
   const warning = (message) => ({ canProceed: true, tone: 'warning', message, focusEl: null });
 
   if (step === 0) {
-    return info('Choose a profile and use case. You can change both later before launching.');
-  }
-
-  if (step === 1) {
     const { source, path, hfRepo, hfFile } = wizardState.model;
     const rapid = wizardState.engine.selected === 'rapid_mlx';
     const artifactKind = classifyWizardArtifact();
@@ -1639,7 +1636,7 @@ function getStepGuardState(step = wizardState.currentStep) {
     return info('Hugging Face model selected. Continue to review its hardware fit.');
   }
 
-  if (step === 2) {
+  if (step === 1) {
     // Workload/use-case is now chosen on page 1 and auto-applied with a sane
     // default (Phase 7B2's dedicated step-3 picker + confirmation gate was
     // redundant with it and has been removed).
@@ -1657,22 +1654,16 @@ function getStepGuardState(step = wizardState.currentStep) {
     if (specType === 'draft-model' && !dom.draftModelInput?.value.trim()) {
       return error('Enter a draft model path for speculative decoding.', dom.draftModelInput);
     }
-    return info('Review the VRAM estimate and adjust context, KV cache, or auto-size before continuing.');
-  }
-
-  if (step === 3) {
+    // Network/access guard (formerly a separate Review step; its DOM is now
+    // part of this same Hardware & memory step).
     if (wizardState.access.bindHost === '0.0.0.0' && !wizardState.access.apiKey) {
       return warning('This server will be LAN-visible without an API key. Add one unless you intentionally want an open endpoint.');
     }
-    return info('Review defaults and network exposure. Continue when this matches how you want the server to start.');
+    return info('Review the VRAM estimate and network exposure before continuing.');
   }
 
-  if (step === 4) {
-    return info('Saving a preset is optional. Click Next when you are ready to launch.');
-  }
-
-  if (step === 5) {
-    return info('This starts the server with the configuration shown above.');
+  if (step === 2) {
+    return info('Saving a preset is optional. This starts the server with the configuration shown above.');
   }
 
   return info('');
@@ -1770,11 +1761,11 @@ export function _inferFamilyFromName(name) {
 export function showStep(index) {
   wizardState.currentStep = index;
 
-  // Plan §6.2: apply a preserve-and-restore snapshot taken before re-entering step 1 (Model)
+  // Plan §6.2: apply a preserve-and-restore snapshot taken before re-entering step 0 (Model)
   // from a chat-template-degraded warning's "Switch to repo selection" button. Applied on
-  // arrival at step 2 (Hardware) — by then the new model selection is complete, so
+  // arrival at step 1 (Hardware) — by then the new model selection is complete, so
   // context-length-dependent fields can be re-validated against it.
-  if (index === 2) _applyPendingRestore();
+  if (index === 1) _applyPendingRestore();
 
   // Keep the URL in sync so browser Back/Forward traverses wizard steps. Only
   // when the wizard is open and already on a /spawn route; pushState (no dispatch)
@@ -1814,7 +1805,7 @@ export function showStep(index) {
   if (dom.backBtn) dom.backBtn.style.display = index === 0 ? 'none' : '';
   if (dom.nextBtn) dom.nextBtn.style.display = index === STEP_LABELS.length - 1 ? 'none' : '';
 
-  if (index === 1) {
+  if (index === 0) {
     _loadModelDirSwitcher();
     // The VRAM sidebar + quant advisor on this step need effectiveAvailBytes()
     // populated, but that data was previously only fetched on step 2 (Hardware).
@@ -1827,7 +1818,7 @@ export function showStep(index) {
       });
     }
   }
-  if (index === 2) {
+  if (index === 1) {
     const rapid = wizardState.engine.selected === 'rapid_mlx';
     // A context-target pill picked on the Model step (step 1) only writes
     // wizardState.hardware.contextSize — it can't reach dom.contextSizeInput
@@ -1885,11 +1876,11 @@ export function showStep(index) {
       hfHideDownloadPanel(dlPanel);
     }
     // Fetch model-specific sampling defaults (temperature, presence_penalty, etc.)
-    // so the review step pre-populates with the model's recommended settings.
+    // so the review section pre-populates with the model's recommended settings.
     _fetchAndApplyModelSamplingDefaults();
-  }
-  if (index === 3) {
-    const rapid = wizardState.engine.selected === 'rapid_mlx';
+    // Review/Summary content is now merged into this step's DOM (Option A
+    // collapse); fetch VRAM and render the summary that lives further down
+    // the same page instead of waiting for a separate step entry.
     if (rapid) {
       // Rapid-MLX: use fresh snapshot, not cached llama GPU values
       refreshHfTokenState().finally(() => {
@@ -1901,10 +1892,8 @@ export function showStep(index) {
       });
     }
   }
-  if (index === 4) {
+  if (index === 2) {
     _renderPresetParamsStep();
-  }
-  if (index === 5) {
     _renderSpawnConfigCard();
   }
 
@@ -2178,6 +2167,8 @@ function renderEngineSelection() {
     if (selected === 'rapid_mlx') applyRapidMlxDefaults();
   }
   configureMlxWizardIA(dom.overlay, selected === 'rapid_mlx', wizardState.profile);
+  if (selected === 'rapid_mlx') applyEffectiveLocks(dom.overlay);
+  renderContextChipRow();
   // llama.cpp's advanced fields exist in the DOM regardless of engine
   // selection (hidden via .engine-rapid-mlx CSS when MLX is active), so this
   // is always enabled — mirrors configureMlxWizardIA's build-once guard.
@@ -2641,7 +2632,7 @@ export async function doIntrospect(path) {
               wizardState.arch.mmprojBytes = bestMmproj.size || 0;
             }
             // Re-render the mmproj section if hardware step is active
-            if (wizardState.currentStep === 2) renderMmprojSection();
+            if (wizardState.currentStep === 1) renderMmprojSection();
             scheduleVramUpdate();
           }
         }
@@ -2697,7 +2688,7 @@ export async function doIntrospect(path) {
               wizardState.model.selectedDraftPath = bestDraft.path;
             }
             // Re-render MTP section to include draft selector
-            if (wizardState.currentStep === 2) renderMtpSection();
+            if (wizardState.currentStep === 1) renderMtpSection();
             scheduleVramUpdate();
           }
         }
@@ -2969,9 +2960,9 @@ function onHardwareChange(e) {
     pendingHardwareScrollRestore = null;
   }
 
-  if (isToggle && wizardState.currentStep === 2 && !pendingHardwareScrollReset) {
-    const main = document.querySelector('#wizard-step-2 .wizard-main');
-    const sidebar = document.querySelector('#wizard-step-2 .hw-vram-sidebar');
+  if (isToggle && wizardState.currentStep === 1 && !pendingHardwareScrollReset) {
+    const main = document.querySelector('#wizard-step-1 .wizard-main');
+    const sidebar = document.querySelector('#wizard-step-1 .hw-vram-sidebar');
     pendingHardwareScrollRestore = {
       main: main?.scrollTop ?? 0,
       sidebar: sidebar?.scrollTop ?? 0,
@@ -2980,6 +2971,7 @@ function onHardwareChange(e) {
   readHardwareState();
   scheduleVramUpdate();
   refreshStepGuardrails();
+  renderContextChipRow();
 }
 
 function readHardwareState() {
@@ -3035,11 +3027,11 @@ export function scheduleVramUpdate() {
 }
 
 export function maybeResetHardwareStepScroll() {
-  if (!pendingHardwareScrollReset || wizardState.currentStep !== 2) return;
+  if (!pendingHardwareScrollReset || wizardState.currentStep !== 1) return;
   pendingHardwareScrollReset = false;
 
-  const main = document.querySelector('#wizard-step-2 .wizard-main');
-  const sidebar = document.querySelector('#wizard-step-2 .hw-vram-sidebar');
+  const main = document.querySelector('#wizard-step-1 .wizard-main');
+  const sidebar = document.querySelector('#wizard-step-1 .hw-vram-sidebar');
   // When a toggle hides part of the hardware form, the column can shrink from
   // scrollable to non-scrollable in the same frame. Reset unconditionally so we
   // never leave the viewport stranded at a stale offset showing blank space.
@@ -3048,21 +3040,21 @@ export function maybeResetHardwareStepScroll() {
 }
 
 export function maybeRestoreHardwareStepScroll() {
-  if (!pendingHardwareScrollRestore || wizardState.currentStep !== 2) return;
+  if (!pendingHardwareScrollRestore || wizardState.currentStep !== 1) return;
 
   const snapshot = pendingHardwareScrollRestore;
   pendingHardwareScrollRestore = null;
 
   const restore = () => {
-    if (wizardState.currentStep !== 2) return;
+    if (wizardState.currentStep !== 1) return;
 
     const focused = document.activeElement;
     if (focused === dom.fitEnableSelect) {
       focused.blur?.();
     }
 
-    const main = document.querySelector('#wizard-step-2 .wizard-main');
-    const sidebar = document.querySelector('#wizard-step-2 .hw-vram-sidebar');
+    const main = document.querySelector('#wizard-step-1 .wizard-main');
+    const sidebar = document.querySelector('#wizard-step-1 .hw-vram-sidebar');
     if (main) {
       const maxScroll = Math.max(0, main.scrollHeight - main.clientHeight);
       main.scrollTop = Math.min(snapshot.main, maxScroll);

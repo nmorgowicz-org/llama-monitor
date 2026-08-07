@@ -45,7 +45,7 @@ const GROUPS = [
   {
     section: 'context', id: 'retained-cache', title: 'Retained prompt cache',
     description: 'Bound reusable prompt snapshots by both memory and working-set size.',
-    rows: ['pe-row-rapid-prefix-cache', 'pe-row-rapid-cache-memory', 'pe-row-rapid-hybrid-cache-entries'],
+    rows: ['pe-row-rapid-cache-mode', 'pe-row-rapid-prefix-cache', 'pe-row-rapid-cache-memory', 'pe-row-rapid-hybrid-cache-entries'],
   },
   {
     section: 'context', id: 'scheduler', title: 'Scheduler & throughput',

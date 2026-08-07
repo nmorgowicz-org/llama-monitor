@@ -62,7 +62,7 @@ export default async function(ctx) {
     }, rapidFixture);
     await page.waitForSelector('#spawn-wizard-overlay.open', { timeout: 10000 });
     await page.waitForFunction(
-        () => document.getElementById('wizard-step-1')?.classList.contains('active'),
+        () => document.getElementById('wizard-step-0')?.classList.contains('active'),
         { timeout: 5000 }
     );
     await page.waitForFunction(
@@ -87,7 +87,7 @@ export default async function(ctx) {
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
     await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
     await page.waitForFunction(
-        () => document.getElementById('wizard-step-2')?.classList.contains('active'),
+        () => document.getElementById('wizard-step-1')?.classList.contains('active'),
         { timeout: 5000 }
     );
     await sleep(300); // let panel layout settle after step transition
@@ -150,7 +150,7 @@ export default async function(ctx) {
     await sleep(400);
     await scrollToElement('#spawn-kv-cache-dtype', 20);
     await sleep(300);
-    await captureShot(page, 'spawn-wizard-reasoning-mode-on.png', { runtimeTag: 'llamacpp-local' });
+    await captureShot(page, 'spawn-wizard-reasoning-mode-on.png', { runtimeTag: 'rapidmlx-local' });
 
     // Speculative decoding controls live inside the collapsible
     // "Companions & experimental acceleration" group (IA reorg); it must be
@@ -163,10 +163,10 @@ export default async function(ctx) {
     });
     await scrollToElement('#spawn-rapid-speculative-enabled', 30);
     await sleep(250);
-    await captureShot(page, 'spawn-wizard-speculative-enabled-dark.png', { runtimeTag: 'llamacpp-local' });
+    await captureShot(page, 'spawn-wizard-speculative-enabled-dark.png', { runtimeTag: 'rapidmlx-local' });
     await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
     await sleep(150);
-    await captureShot(page, 'spawn-wizard-speculative-enabled-light.png', { runtimeTag: 'llamacpp-local' });
+    await captureShot(page, 'spawn-wizard-speculative-enabled-light.png', { runtimeTag: 'rapidmlx-local' });
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
     await sleep(200); // allow theme reflow
 
@@ -210,12 +210,12 @@ export default async function(ctx) {
     );
     await scrollToElement('#spawn-rapid-speculative-trust-wrap', 0);
     await sleep(300);
-    await captureShot(page, 'spawn-wizard-speculative-trust-consent-dark.png', { runtimeTag: 'llamacpp-local' });
+    await captureShot(page, 'spawn-wizard-speculative-trust-consent-dark.png', { runtimeTag: 'rapidmlx-local' });
     await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
     await sleep(150);
     await scrollToElement('#spawn-rapid-speculative-trust-wrap', 0);
     await sleep(300);
-    await captureShot(page, 'spawn-wizard-speculative-trust-consent-light.png', { runtimeTag: 'llamacpp-local' });
+    await captureShot(page, 'spawn-wizard-speculative-trust-consent-light.png', { runtimeTag: 'rapidmlx-local' });
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
 
     // spawn-wizard-parser-detected.png — Parser/hybrid dropdowns with "Detected:" hints.
@@ -228,7 +228,7 @@ export default async function(ctx) {
     await sleep(300);
     await scrollToElement('#spawn-rapid-tool-call-parser', -50);
     await sleep(400);
-    await captureShot(page, 'spawn-wizard-parser-detected.png', { runtimeTag: 'llamacpp-local' });
+    await captureShot(page, 'spawn-wizard-parser-detected.png', { runtimeTag: 'rapidmlx-local' });
 
     // Reset reasoning mode.
     await page.evaluate(() => {
@@ -292,12 +292,9 @@ export default async function(ctx) {
     await sleep(500);
     await captureShot(page, 'spawn-wizard-rapid-mlx-fit.png', { fullPage: true, runtimeTag: 'rapidmlx-local' });
 
-    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
-    await page.waitForFunction(
-        () => document.getElementById('wizard-step-3')?.classList.contains('active'),
-        { timeout: 8000 }
-    );
-    // Reasoning mode ON so review step shows "INT4 → INT8 (reasoning profile)".
+    // Reasoning mode ON so the config preview shows "INT4 → INT8 (reasoning
+    // profile)". This lives on the same Hardware step (Option A collapse:
+    // 6 steps → 3), so no navigation is needed before toggling it.
     await page.evaluate(() => {
         const cb = document.getElementById('spawn-rapid-reasoning-mode');
         if (cb && !cb.checked) cb.click();
@@ -305,7 +302,7 @@ export default async function(ctx) {
     await sleep(400);
     await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
     await page.waitForFunction(
-        () => document.getElementById('wizard-step-4')?.classList.contains('active'),
+        () => document.getElementById('wizard-step-2')?.classList.contains('active'),
         { timeout: 8000 }
     );
     await sleep(500);

@@ -1882,7 +1882,7 @@ function _configureBackendPresetEditor(preset) {
     // Phase 7: Toggle Rapid-MLX advanced rows based on backend (inline styles override CSS).
     // The webui rows are gone from this list because they are gone from index.html: they were
     // gated on llama.cpp's --ui/--path, which rapid-mlx does not have.
-    const rapidRows = ['pe-row-rapid-advanced', 'pe-row-rapid-workload', 'pe-row-rapid-reasoning', 'pe-row-rapid-reasoning-mode', 'pe-row-rapid-parser-overrides', 'pe-row-rapid-architecture-overrides', 'pe-row-rapid-speculative', 'pe-row-rapid-throughput', 'pe-row-rapid-batch-sizes', 'pe-row-rapid-prefix-cache', 'pe-row-rapid-cache-memory', 'pe-row-rapid-hybrid-cache-entries'];
+    const rapidRows = ['pe-row-rapid-advanced', 'pe-row-rapid-workload', 'pe-row-rapid-reasoning', 'pe-row-rapid-reasoning-mode', 'pe-row-rapid-parser-overrides', 'pe-row-rapid-architecture-overrides', 'pe-row-rapid-speculative', 'pe-row-rapid-throughput', 'pe-row-rapid-batch-sizes', 'pe-row-rapid-cache-mode', 'pe-row-rapid-prefix-cache', 'pe-row-rapid-cache-memory', 'pe-row-rapid-hybrid-cache-entries'];
     rapidRows.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = isRapid ? '' : 'none';

@@ -101,3 +101,64 @@ export function assertQuickValueCoverage() {
     throw new Error(`Quick-tier controls missing quickValue (I2): ${missing.map(c => c.id).join(', ')}`);
   }
 }
+
+// Human-readable copy for each `effective:` tag (plan §6/P4 — the control's
+// selection is accepted by the UI/backend but a runtime constraint pins the
+// actual launch behavior regardless of what's picked here).
+const EFFECTIVE_COPY = {
+  'reasoning-pins-int8': {
+    value: 'int8',
+    why: "Rapid-MLX's --reasoning flag pins active KV to int8 unconditionally on this build. Kept visible so a future runtime that respects it doesn't need new UI.",
+  },
+  'turboquant-withheld': {
+    value: 'Standard — int4 retained storage',
+    why: 'Requested but not applied at launch: the server always starts with standard int4 retained storage until a per-model qualification receipt exists. K8V4 also measured 40–100% slower TTFT in Phase 6 benchmarks.',
+  },
+  'pflash-off': {
+    value: 'Off — qualified default',
+    why: 'A 2026-07-24 benchmark measured recall collapsing to 0.0–0.4 (vs 1.0 with PFlash off) at long context — the compressed region is dropped, not lossily retained. Silent failure mode in an agentic coding loop.',
+  },
+};
+
+// P4 fix: render a locked-row treatment (dimmed control + "Effective: X"
+// chip + "Why?" popover) for every control whose registry entry carries an
+// `effective` tag, instead of leaving the selection live-looking while the
+// runtime silently overrides it.
+export function applyEffectiveLocks(root) {
+  if (!root) return;
+  for (const c of CONTROLS) {
+    if (!c.effective) continue;
+    const copy = EFFECTIVE_COPY[c.effective];
+    if (!copy) continue;
+    const field = root.querySelector(`#${c.id}`)?.closest('.hardware-field');
+    if (!field || field.dataset.effectiveLocked === '1') continue;
+    field.dataset.effectiveLocked = '1';
+    field.classList.add('field-effective-locked');
+    const label = field.querySelector('label');
+    if (label && !label.querySelector('.effective-chip')) {
+      const chip = document.createElement('span');
+      chip.className = 'effective-chip';
+      chip.textContent = `Effective: ${copy.value}`;
+      chip.title = copy.why;
+      label.appendChild(document.createTextNode(' '));
+      label.appendChild(chip);
+    }
+    const btn = field.querySelector('button.effective-why-btn') || (() => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'effective-why-btn';
+      b.textContent = 'Why?';
+      b.setAttribute('aria-label', `Why is ${c.id} locked to ${copy.value}?`);
+      b.addEventListener('click', () => {
+        b.setAttribute('aria-expanded', String(b.getAttribute('aria-expanded') !== 'true'));
+        const hint = field.querySelector('.field-hint');
+        if (hint) hint.classList.toggle('effective-why-open');
+      });
+      const hintEl = field.querySelector('.field-hint');
+      if (hintEl) field.insertBefore(b, hintEl);
+      else field.appendChild(b);
+      return b;
+    })();
+    void btn;
+  }
+}

@@ -33,16 +33,9 @@ export default async function(ctx, options) {
     });
     await sleep(200);
 
-    // Next to step 1 (model), then directly jump to step 2 (VRAM) with injected HF model.
-    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
-    await page.waitForFunction(
-        () => document.getElementById('wizard-step-1')?.classList.contains('active'),
-        { timeout: 6000 }
-    ).catch(() => {
-        console.log('[CAPTURE] Step 1 (Model) wait timed out; continuing.');
-    });
-
-    // Inject model BEFORE clicking Next so validation passes.
+    // Profile/use-case and model selection are on the same step (Option A collapse:
+    // 6 steps → 3), so no navigation click is needed before injecting the model.
+    // Inject model, then force-jump to the Hardware step below.
     await page.evaluate(async () => {
         const { wizardState } = await import('/js/features/spawn-wizard.js');
         wizardState.model.source   = 'hf';
@@ -57,25 +50,14 @@ export default async function(ctx, options) {
     // Move to Hardware step — advance step state + trigger render.
     await page.evaluate(async () => {
         const mod = await import('/js/features/spawn-wizard.js');
-        mod.wizardState.currentStep = 2;
-        // Manually update step visibility
-        document.querySelectorAll('.wizard-step').forEach(s => s.classList.remove('active'));
-        document.getElementById('wizard-step-2')?.classList.add('active');
-        document.querySelectorAll('.step-badge').forEach(b => {
-            const s = Number(b.dataset.step);
-            b.classList.remove('active', 'completed');
-            if (s === 2) b.classList.add('active');
-            else if (s < 2) b.classList.add('completed');
-        });
-        document.getElementById('wizard-step-label').textContent = 'Hardware';
-        // Trigger VRAM update
+        mod.showStep(1);
         mod.scheduleVramUpdate && mod.scheduleVramUpdate();
     });
     await page.waitForFunction(
-        () => document.getElementById('wizard-step-2')?.classList.contains('active'),
+        () => document.getElementById('wizard-step-1')?.classList.contains('active'),
         { timeout: 8000 }
     ).catch(() => {
-        console.log('[CAPTURE] Step 2 (Hardware) wait timed out; continuing.');
+        console.log('[CAPTURE] Step 1 (Hardware) wait timed out; continuing.');
     });
     await sleep(600);
 

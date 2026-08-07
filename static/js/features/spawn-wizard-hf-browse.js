@@ -574,6 +574,9 @@ async function loadMlxSidebarBody(repoId) {
   const quant = introspect?.data?.config?.quantization;
   const sizeBytes = introspect?.data?.recursive_size_bytes || wizardState.model.modelBytes || 0;
   const quantLabel = quant?.bits ? `${quant.bits}-bit${quant.group_size ? `, group ${quant.group_size}` : ''}` : 'precision not reported';
+  // quantLabel/sizeBytes are numeric fields from the qualify/introspect API responses
+  // (bits, group_size, byte counts), never raw text.
+  // eslint-disable-next-line no-unsanitized/property
   infoEl.innerHTML = `<div class="mlx-info-label">What this repo is</div>${quantLabel} · ${sizeBytes ? formatGB(sizeBytes) : 'size unknown'}`;
 
   // Ctx pills seeded from the repo's own native context rather than left at the static list.

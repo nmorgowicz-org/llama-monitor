@@ -726,9 +726,8 @@ impl RapidMlxAdapter {
         // Phase 6: Auto/Off/Custom prompt-cache mode resolves to the three raw fields here —
         // the single choke point shared by both the real launch path and the command-preview
         // endpoint (see `for_settings_preview`, which also calls `apply_config`).
-        let (prefix_cache_enabled, retained_cache_mib, hybrid_cache_entries) = config
-            .cache_mode
-            .resolve(
+        let (prefix_cache_enabled, retained_cache_mib, hybrid_cache_entries) =
+            config.cache_mode.resolve(
                 config.prefix_cache_enabled,
                 config.retained_cache_mib,
                 config.hybrid_cache_entries,
@@ -1061,10 +1060,7 @@ impl ChatTemplateDegradeReason {
 
     /// Alias sources are classified from the model's origin, not the overlay error, because
     /// `create_template_overlay` has no notion of `RapidMlxModelSource` — it only sees a path.
-    fn classify(
-        source: &model_resolver::RapidMlxModelSource,
-        err: &anyhow::Error,
-    ) -> Self {
+    fn classify(source: &model_resolver::RapidMlxModelSource, err: &anyhow::Error) -> Self {
         if matches!(source, model_resolver::RapidMlxModelSource::Alias { .. }) {
             return Self::AliasSource;
         }
@@ -1316,8 +1312,7 @@ mod tests {
 
     #[test]
     fn cache_mode_auto_resolves_to_measured_recommendation() {
-        let (enabled, retained_mib, hybrid_entries) =
-            CacheMode::Auto.resolve(false, None, None);
+        let (enabled, retained_mib, hybrid_entries) = CacheMode::Auto.resolve(false, None, None);
         assert!(enabled);
         assert_eq!(retained_mib, Some(8192));
         assert_eq!(hybrid_entries, Some(16));

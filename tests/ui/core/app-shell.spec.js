@@ -174,17 +174,25 @@ test.describe('modals and menus', () => {
   });
 
   test('preset editor installs the recommended Gemma 4 chat template', async ({ page }) => {
-    await page.route('**/api/chat-template/install-url', async route => {
+    await page.route('**/api/models/gguf-meta', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, architecture: 'gemma4' }),
+      });
+    });
+    await page.route('**/api/chat-template/install-hf', async route => {
       expect(route.request().postDataJSON()).toEqual({
-        url: 'https://raw.githubusercontent.com/jscott3201/llm-tuning/main/gemma4/chat_templates/custom_pub_chat_template_gemma4.jinja',
-        name: 'gemma4-jscott3201-agentic',
+        repo: 'google/gemma-4-31B-it',
+        file: 'chat_template.jinja',
+        name: 'gemma4-google-official',
       });
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
           ok: true,
-          path: '/tmp/chat-templates/gemma4-jscott3201-agentic.jinja',
+          path: '/tmp/chat-templates/gemma4-google-official.jinja',
           already_existed: false,
         }),
       });
@@ -197,7 +205,7 @@ test.describe('modals and menus', () => {
     await page.fill('#modal-model-path', '/models/Gemma-4-31B-it-Q4_K_M.gguf');
     await page.click('#preset-recommended-chat-template-btn');
     await expect(page.locator('#modal-chat-template-file')).toHaveValue(
-      '/tmp/chat-templates/gemma4-jscott3201-agentic.jinja',
+      '/tmp/chat-templates/gemma4-google-official.jinja',
     );
   });
 

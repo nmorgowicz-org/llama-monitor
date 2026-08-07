@@ -81,6 +81,42 @@ export async function _fetchAndShowQuantOptions(repoId) {
   container.appendChild(list);
 }
 
+const USE_CASE_LABELS = { agentic: 'Agentic / tool-calling', general: 'General chat', roleplay: 'Roleplay / creative' };
+
+// Sticky context bar (plan §2): compact loader/context/KV-precision/use-case
+// summary rendered into the sticky #hw-model-header so it stays visible while
+// the rest of step 2 scrolls. Reads the same DOM the fields themselves write
+// to rather than duplicating state.
+export function renderContextChipRow() {
+  const row = document.getElementById('hw-context-chip-row');
+  if (!row) return;
+  const rapid = wizardState.engine.selected === 'rapid_mlx';
+  const loaderLabel = rapid ? 'Rapid-MLX' : 'llama.cpp';
+  const ctxVal = document.getElementById('spawn-context-size')?.value || '';
+  const kvLabel = rapid
+    ? 'int8 (pinned)'
+    : (document.getElementById('spawn-cache-type-k')?.value || 'f16');
+  const useCaseLabel = USE_CASE_LABELS[wizardState.useCase] || wizardState.useCase;
+
+  const chips = [
+    { label: 'Loader', value: loaderLabel },
+    { label: 'Use case', value: useCaseLabel },
+  ];
+  if (ctxVal) chips.push({ label: 'Context', value: ctxVal });
+  chips.push({ label: 'KV', value: kvLabel });
+
+  row.innerHTML = '';
+  chips.forEach(({ label, value }) => {
+    const chip = document.createElement('span');
+    chip.className = 'hw-context-chip';
+    chip.append(`${label}: `);
+    const strong = document.createElement('strong');
+    strong.textContent = value;
+    chip.appendChild(strong);
+    row.appendChild(chip);
+  });
+}
+
 export function renderHardwareModelHeader() {
   const header = document.getElementById('hw-model-header');
   if (!header) return;
@@ -193,6 +229,8 @@ export function renderHardwareModelHeader() {
   // different quant — it must not persist from a previous wizard session.
   const actionsRow = document.getElementById('hw-quant-swap-actions');
   if (actionsRow) actionsRow.style.display = 'none';
+
+  renderContextChipRow();
 }
 
 let _lastQuantSearchFile = ''; // prevent redundant searches
