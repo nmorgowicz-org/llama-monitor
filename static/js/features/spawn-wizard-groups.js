@@ -17,66 +17,89 @@
 // Rapid-MLX entries mirror spawn-wizard-mlx-ia.js's GROUPS (kept in sync by
 // hand for now — see note at bottom).
 
+// critical/view (Phase 10a Milestone 1, added 2026-08-07): two independent
+// axes replacing the old single `tier` overload (plan's P2 — "tier does
+// double duty and neither job well"). `tier` itself is left in place for
+// now (the disclosure engine in spawn-wizard-ia.js still reads it —
+// retired in Milestone 2) but is no longer the source of truth for either
+// question below; critical/view are.
+//   critical — can this be safely touched without expert knowledge? Decides
+//     inline-editable-in-Guided (true) vs. drawer/Pro-only (false). Derived
+//     1:1 from the old quick/balanced vs. advanced split: nothing here
+//     reclassifies a control's actual expert-knowledge requirement, it just
+//     names the axis that was already implicit in `tier`.
+//   view — which view(s) render this control outside the drawer:
+//     'card'   — one of the four Guided decision cards (archived doc §3
+//                "always open" list: context size, KV precision, vision,
+//                speed boost) — visible with no drawer/Pro interaction.
+//     'both'   — reachable inline in Pro's dense layout and via Guided's
+//                "All settings" drawer (I1: never hidden, just not a card).
+//   Every control keeps view:'both' minimum — I1 (never hidden) applies to
+//   both axes, not just the old tier.
 export const CONTROLS = [
   // ── llama.cpp: Quick (disabled at Quick; gpu-layers writes 'auto') ────────
-  { id: 'spawn-context-size', loaders: ['llama_cpp'], tier: 'quick' },
-  { id: 'spawn-batch-size', loaders: ['llama_cpp'], tier: 'quick' },
-  { id: 'spawn-gpu-layers', loaders: ['llama_cpp'], tier: 'quick', quickValue: 'auto' },
+  { id: 'spawn-context-size', loaders: ['llama_cpp'], tier: 'quick', critical: true, view: 'card' },
+  { id: 'spawn-batch-size', loaders: ['llama_cpp'], tier: 'quick', critical: true, view: 'both' },
+  { id: 'spawn-gpu-layers', loaders: ['llama_cpp'], tier: 'quick', quickValue: 'auto', critical: true, view: 'both' },
 
   // ── llama.cpp: Balanced ────────────────────────────────────────────────
-  { id: 'spawn-cache-type-k', loaders: ['llama_cpp'], tier: 'balanced' },
-  { id: 'spawn-cache-type-v', loaders: ['llama_cpp'], tier: 'balanced' },
-  { id: 'spawn-kv-unified', loaders: ['llama_cpp'], tier: 'balanced' },
-  { id: 'hw-quant-select', loaders: ['llama_cpp'], tier: 'balanced' },
-  { id: 'hw-mmproj-select', loaders: ['llama_cpp'], tier: 'balanced' },
-  { id: 'hw-use-mtp', loaders: ['llama_cpp'], tier: 'balanced' },
+  { id: 'spawn-cache-type-k', loaders: ['llama_cpp'], tier: 'balanced', critical: true, view: 'card' },
+  { id: 'spawn-cache-type-v', loaders: ['llama_cpp'], tier: 'balanced', critical: true, view: 'card' },
+  { id: 'spawn-kv-unified', loaders: ['llama_cpp'], tier: 'balanced', critical: true, view: 'both' },
+  { id: 'hw-quant-select', loaders: ['llama_cpp'], tier: 'balanced', critical: true, view: 'both' },
+  { id: 'hw-mmproj-select', loaders: ['llama_cpp'], tier: 'balanced', critical: true, view: 'card' },
+  { id: 'hw-use-mtp', loaders: ['llama_cpp'], tier: 'balanced', critical: true, view: 'card' },
   // Promoted from Advanced for symmetry with spawn-rapid-max-num-seqs, which
   // is a §2.6 scenario axis and must be Balanced on the MLX side (plan §2.8
   // cross-cutting note).
-  { id: 'spawn-parallel-slots', loaders: ['llama_cpp'], tier: 'balanced' },
+  { id: 'spawn-parallel-slots', loaders: ['llama_cpp'], tier: 'balanced', critical: true, view: 'both' },
 
   // ── llama.cpp: Advanced (#spawn-advanced-fields) ──────────────────────
-  { id: 'spawn-ubatch-size', loaders: ['llama_cpp'], tier: 'advanced' },
-  { id: 'spawn-flash-attn', loaders: ['llama_cpp'], tier: 'advanced' },
-  { id: 'spawn-prio', loaders: ['llama_cpp'], tier: 'advanced' },
-  { id: 'spawn-threads', loaders: ['llama_cpp'], tier: 'advanced' },
-  { id: 'spawn-threads-batch', loaders: ['llama_cpp'], tier: 'advanced' },
-  { id: 'spawn-n-cpu-moe', loaders: ['llama_cpp'], tier: 'advanced' },
-  { id: 'spawn-tensor-split', loaders: ['llama_cpp'], tier: 'advanced' },
-  { id: 'spawn-cache-mode', loaders: ['llama_cpp'], tier: 'advanced' },
-  { id: 'spawn-cache-ram', loaders: ['llama_cpp'], tier: 'advanced' },
-  { id: 'spawn-fit-enable', loaders: ['llama_cpp'], tier: 'advanced' },
-  { id: 'spawn-fit-target', loaders: ['llama_cpp'], tier: 'advanced' },
-  { id: 'spawn-mlock', loaders: ['llama_cpp'], tier: 'advanced' },
+  { id: 'spawn-ubatch-size', loaders: ['llama_cpp'], tier: 'advanced', critical: false, view: 'both' },
+  { id: 'spawn-flash-attn', loaders: ['llama_cpp'], tier: 'advanced', critical: false, view: 'both' },
+  { id: 'spawn-prio', loaders: ['llama_cpp'], tier: 'advanced', critical: false, view: 'both' },
+  { id: 'spawn-threads', loaders: ['llama_cpp'], tier: 'advanced', critical: false, view: 'both' },
+  { id: 'spawn-threads-batch', loaders: ['llama_cpp'], tier: 'advanced', critical: false, view: 'both' },
+  { id: 'spawn-n-cpu-moe', loaders: ['llama_cpp'], tier: 'advanced', critical: false, view: 'both' },
+  { id: 'spawn-tensor-split', loaders: ['llama_cpp'], tier: 'advanced', critical: false, view: 'both' },
+  { id: 'spawn-cache-mode', loaders: ['llama_cpp'], tier: 'advanced', critical: false, view: 'both' },
+  { id: 'spawn-cache-ram', loaders: ['llama_cpp'], tier: 'advanced', critical: false, view: 'both' },
+  { id: 'spawn-fit-enable', loaders: ['llama_cpp'], tier: 'advanced', critical: false, view: 'both' },
+  { id: 'spawn-fit-target', loaders: ['llama_cpp'], tier: 'advanced', critical: false, view: 'both' },
+  { id: 'spawn-mlock', loaders: ['llama_cpp'], tier: 'advanced', critical: false, view: 'both' },
 
   // ── llama.cpp: Advanced, nested collapse (#spawn-spec-details) ────────
-  { id: 'spawn-spec-type', loaders: ['llama_cpp'], tier: 'advanced', nested: 'spec' },
-  { id: 'spawn-spec-draft-type-k', loaders: ['llama_cpp'], tier: 'advanced', nested: 'spec' },
-  { id: 'spawn-spec-draft-type-v', loaders: ['llama_cpp'], tier: 'advanced', nested: 'spec' },
-  { id: 'spawn-draft-model', loaders: ['llama_cpp'], tier: 'advanced', nested: 'spec' },
-  { id: 'spawn-spec-draft-n-min', loaders: ['llama_cpp'], tier: 'advanced', nested: 'spec' },
-  { id: 'spawn-spec-draft-p-min', loaders: ['llama_cpp'], tier: 'advanced', nested: 'spec' },
+  { id: 'spawn-spec-type', loaders: ['llama_cpp'], tier: 'advanced', nested: 'spec', critical: false, view: 'both' },
+  { id: 'spawn-spec-draft-type-k', loaders: ['llama_cpp'], tier: 'advanced', nested: 'spec', critical: false, view: 'both' },
+  { id: 'spawn-spec-draft-type-v', loaders: ['llama_cpp'], tier: 'advanced', nested: 'spec', critical: false, view: 'both' },
+  { id: 'spawn-draft-model', loaders: ['llama_cpp'], tier: 'advanced', nested: 'spec', critical: false, view: 'both' },
+  { id: 'spawn-spec-draft-n-min', loaders: ['llama_cpp'], tier: 'advanced', nested: 'spec', critical: false, view: 'both' },
+  { id: 'spawn-spec-draft-p-min', loaders: ['llama_cpp'], tier: 'advanced', nested: 'spec', critical: false, view: 'both' },
 
   // ── Rapid-MLX (mirrors spawn-wizard-mlx-ia.js GROUPS; see note below) ──
-  { id: 'spawn-rapid-reasoning-mode', loaders: ['rapid_mlx'], tier: 'quick', quickValue: 'on', group: 'thinking' },
-  { id: 'spawn-rapid-tool-call-parser', loaders: ['rapid_mlx'], tier: 'balanced', group: 'protocol' },
-  { id: 'spawn-rapid-reasoning-parser', loaders: ['rapid_mlx'], tier: 'balanced', group: 'protocol' },
-  { id: 'spawn-rapid-hybrid-mode', loaders: ['rapid_mlx'], tier: 'advanced', group: 'protocol' },
-  { id: 'spawn-sampling-mode', loaders: ['rapid_mlx'], tier: 'balanced', group: 'sampling' },
-  { id: 'spawn-kv-cache-dtype', loaders: ['rapid_mlx'], tier: 'advanced', quickValue: 'int8', group: 'active-memory', effective: 'reasoning-pins-int8' },
-  { id: 'spawn-rapid-prefill-step-size', loaders: ['rapid_mlx'], tier: 'advanced', group: 'active-memory' },
-  { id: 'spawn-turboquant-mode', loaders: ['rapid_mlx'], tier: 'advanced', group: 'active-memory', effective: 'turboquant-withheld' },
-  { id: 'spawn-retained-cache-mib', loaders: ['rapid_mlx'], tier: 'balanced', group: 'retained-cache' },
-  { id: 'spawn-rapid-hybrid-cache-entries', loaders: ['rapid_mlx'], tier: 'advanced', group: 'retained-cache' },
-  { id: 'spawn-rapid-gpu-memory-utilization', loaders: ['rapid_mlx'], tier: 'advanced', group: 'scheduler' },
-  { id: 'spawn-rapid-max-num-seqs', loaders: ['rapid_mlx'], tier: 'balanced', group: 'scheduler' },
-  { id: 'spawn-rapid-max-concurrent-requests', loaders: ['rapid_mlx'], tier: 'advanced', group: 'scheduler' },
-  { id: 'spawn-rapid-pflash-policy', loaders: ['rapid_mlx'], tier: 'advanced', group: 'scheduler', effective: 'pflash-off' },
-  { id: 'spawn-rapid-prefill-batch-size', loaders: ['rapid_mlx'], tier: 'advanced', group: 'scheduler' },
-  { id: 'spawn-rapid-completion-batch-size', loaders: ['rapid_mlx'], tier: 'advanced', group: 'scheduler' },
-  { id: 'spawn-rapid-auto-tool-choice', loaders: ['rapid_mlx'], tier: 'balanced', group: 'tool-integration' },
-  { id: 'spawn-rapid-speculative-enabled', loaders: ['rapid_mlx'], tier: 'advanced', group: 'companions', nested: 'companions' },
+  { id: 'spawn-rapid-reasoning-mode', loaders: ['rapid_mlx'], tier: 'quick', quickValue: 'on', group: 'thinking', critical: true, view: 'card' },
+  { id: 'spawn-rapid-tool-call-parser', loaders: ['rapid_mlx'], tier: 'balanced', group: 'protocol', critical: true, view: 'both' },
+  { id: 'spawn-rapid-reasoning-parser', loaders: ['rapid_mlx'], tier: 'balanced', group: 'protocol', critical: true, view: 'both' },
+  { id: 'spawn-rapid-hybrid-mode', loaders: ['rapid_mlx'], tier: 'advanced', group: 'protocol', critical: false, view: 'both' },
+  { id: 'spawn-sampling-mode', loaders: ['rapid_mlx'], tier: 'balanced', group: 'sampling', critical: true, view: 'both' },
+  { id: 'spawn-kv-cache-dtype', loaders: ['rapid_mlx'], tier: 'advanced', quickValue: 'int8', group: 'active-memory', effective: 'reasoning-pins-int8', critical: false, view: 'both' },
+  { id: 'spawn-rapid-prefill-step-size', loaders: ['rapid_mlx'], tier: 'advanced', group: 'active-memory', critical: false, view: 'both' },
+  { id: 'spawn-turboquant-mode', loaders: ['rapid_mlx'], tier: 'advanced', group: 'active-memory', effective: 'turboquant-withheld', critical: false, view: 'both' },
+  { id: 'spawn-retained-cache-mib', loaders: ['rapid_mlx'], tier: 'balanced', group: 'retained-cache', critical: true, view: 'both' },
+  { id: 'spawn-rapid-hybrid-cache-entries', loaders: ['rapid_mlx'], tier: 'advanced', group: 'retained-cache', critical: false, view: 'both' },
+  { id: 'spawn-rapid-gpu-memory-utilization', loaders: ['rapid_mlx'], tier: 'advanced', group: 'scheduler', critical: false, view: 'both' },
+  { id: 'spawn-rapid-max-num-seqs', loaders: ['rapid_mlx'], tier: 'balanced', group: 'scheduler', critical: true, view: 'both' },
+  { id: 'spawn-rapid-max-concurrent-requests', loaders: ['rapid_mlx'], tier: 'advanced', group: 'scheduler', critical: false, view: 'both' },
+  { id: 'spawn-rapid-pflash-policy', loaders: ['rapid_mlx'], tier: 'advanced', group: 'scheduler', effective: 'pflash-off', critical: false, view: 'both' },
+  { id: 'spawn-rapid-prefill-batch-size', loaders: ['rapid_mlx'], tier: 'advanced', group: 'scheduler', critical: false, view: 'both' },
+  { id: 'spawn-rapid-completion-batch-size', loaders: ['rapid_mlx'], tier: 'advanced', group: 'scheduler', critical: false, view: 'both' },
+  { id: 'spawn-rapid-auto-tool-choice', loaders: ['rapid_mlx'], tier: 'balanced', group: 'tool-integration', critical: true, view: 'both' },
+  { id: 'spawn-rapid-speculative-enabled', loaders: ['rapid_mlx'], tier: 'advanced', group: 'companions', nested: 'companions', critical: false, view: 'both' },
 ];
+
+export function controlsForView(loader, view) {
+  return CONTROLS.filter(c => c.loaders.includes(loader) && (view === 'pro' || c.view === view || c.view === 'both'));
+}
 
 export function controlsForLoader(loader) {
   return CONTROLS.filter(c => c.loaders.includes(loader));
