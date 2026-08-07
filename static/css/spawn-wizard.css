@@ -5717,6 +5717,63 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
 [data-theme="light"] .hw-vram-bar {
   background: rgba(0,0,0,0.06);
 }
+/* M4: All settings drawer */
+.all-settings-drawer {
+  margin-top: 12px;
+}
+.all-settings-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text, #e6edf3);
+  font-size: 12px;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+.all-settings-btn:hover {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+.all-settings-count {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-accent) 20%, transparent);
+  color: var(--color-accent);
+  font-size: 10px;
+  font-weight: 600;
+}
+.all-settings-body {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 15%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-bg-elevated, #1a1f28) 60%, transparent);
+}
+.all-settings-group {
+  /* Populated by JS */
+}
+[data-theme="light"] .all-settings-drawer {
+  /* inherit */
+}
+[data-theme="light"] .all-settings-btn {
+  background: rgba(0,0,0,0.02);
+  border-color: rgba(0,0,0,0.1);
+  color: #1e293b;
+}
+[data-theme="light"] .all-settings-btn:hover {
+  background: rgba(0,0,0,0.05);
+}
+[data-theme="light"] .all-settings-count {
+  background: rgba(0,0,0,0.05);
+  color: #475569;
+}
+[data-theme="light"] .all-settings-body {
+  background: rgba(0,0,0,0.02);
+  border-color: rgba(0,0,0,0.08);
+}
 .hw-model-info {
   display: flex;
   flex-direction: column;

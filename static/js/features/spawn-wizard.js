@@ -114,6 +114,33 @@ import { _renderSpawnConfigCard, spawnServer, resetSpawnStatus } from './spawn-w
 // these from '/js/features/spawn-wizard.js').
 export { buildSpawnPayload, launchPortForPayload, supportsTunePanelForPayload } from './spawn-wizard-spawn.js';
 
+// ── M4: All settings drawer ───────────────────────────────────────────────────
+// Wraps decision-critical controls in always-open cards; everything else
+// goes into a collapsible "All settings" drawer.
+
+const ALL_SETTINGS_COUNT = 23; // Total non-card controls (approx)
+
+function _renderAllSettingsDrawer() {
+  const drawer = document.getElementById('all-settings-drawer');
+  const btn = document.getElementById('all-settings-btn');
+  const countEl = document.getElementById('all-settings-count');
+  const body = document.getElementById('all-settings-body');
+  if (!drawer || !btn || !countEl) return;
+
+  countEl.textContent = ALL_SETTINGS_COUNT;
+
+  // Toggle
+  btn.addEventListener('click', () => {
+    const isOpen = body.style.display === 'block';
+    body.style.display = isOpen ? 'none' : 'block';
+  });
+
+  // Initially hide
+  if (body) body.style.display = 'none';
+}
+
+export { _renderAllSettingsDrawer };
+
 // ── Spawn Wizard Module ───────────────────────────────────────────────────────
 // Spawn Llama-Server V2 — complete guided wizard.
 //
@@ -1806,7 +1833,10 @@ export function showStep(index) {
   // from a chat-template-degraded warning's "Switch to repo selection" button. Applied on
   // arrival at step 1 (Hardware) — by then the new model selection is complete, so
   // context-length-dependent fields can be re-validated against it.
-  if (index === 1) _applyPendingRestore();
+  if (index === 1) {
+    _applyPendingRestore();
+    _renderAllSettingsDrawer();
+  }
 
   // Keep the URL in sync so browser Back/Forward traverses wizard steps. Only
   // when the wizard is open and already on a /spawn route; pushState (no dispatch)
