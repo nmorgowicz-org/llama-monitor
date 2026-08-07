@@ -96,7 +96,7 @@ All VRAM bars in the UI (Spawn Wizard, Preset Editor, Setup view, and the Models
 
 Estimation is primarily based on GGUF introspection, not name matching. Filename-based heuristics are used only when GGUF metadata is unavailable (e.g., pre-download estimates or incomplete headers).
 
-![VRAM breakdown bar in the Hardware step](../screenshots/spawn-wizard-step3-vram.png)
+![VRAM breakdown bar in the Hardware step](../screenshots/spawn-wizard--llamacpp-local--hardware-vram.png)
 
 ---
 

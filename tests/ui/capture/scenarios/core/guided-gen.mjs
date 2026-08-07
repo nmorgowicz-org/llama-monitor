@@ -4,7 +4,7 @@ import { attachToServer } from '../../harness/attach.mjs';
 import { gotoApp } from '../../harness/browser.mjs';
 import { activateScreenshotChat, attachSuggestionsResponseLogger, createFreshChat, describeSuggestionsPanel, sendChatPrompt, waitForChatComplete, waitForChatIdle, waitForSuggestionsSettled } from '../../harness/chat.mjs';
 import { sleep } from '../../harness/paths.mjs';
-import { captureCloseUp, captureElementScreenshot, captureShot, cleanupScreenshotTabs, describePopover, enableGuidedGeneration } from '../../harness/shot.mjs';
+import { captureCloseUp, captureShot, cleanupScreenshotTabs, describePopover, enableGuidedGeneration } from '../../harness/shot.mjs';
 
 export default async function(ctx, options) {
     const { page, baseUrl } = ctx;
@@ -261,7 +261,6 @@ await waitForChatComplete(page);
         }
     }
 
-    // Surprise mode: switch to surprise mode and arm a surprise
     // Fresh chat with content for chat-related screenshot
     await createFreshChat(page);
     await sleep(500);
@@ -314,51 +313,17 @@ await waitForChatComplete(page);
     // 11-chat-input-buttons.png with conversation present
     await captureShot(page, 'panels-chat-input-buttons.png', { fullPage: true });
 
-    // Explicit mode toggles (12a/12b/12c) with real content
-    await page.evaluate(() => document.getElementById('chat-explicit-toggle-footer')?.click());
-    await sleep(800);
-    await captureShot(page, 'guided-gen-explicit-unlocked.png', { fullPage: false });
-    await page.evaluate(() => document.getElementById('chat-explicit-toggle-footer')?.click());
-    await sleep(800);
-    await captureShot(page, 'guided-gen-explicit-unrestricted.png', { fullPage: false });
-    await page.evaluate(() => document.getElementById('chat-explicit-toggle-footer')?.click());
-    await sleep(800);
-    await captureShot(page, 'guided-gen-explicit-locked.png', { fullPage: false });
+    // Explicit mode toggle, suggestions tag-cloud/search-filter, and manage-
+    // categories captures were removed here: they were unreliable (fullPage:
+    // false skip guard meant they never actually regenerated) and are not
+    // needed going forward.
 
-    // Re-open suggestions and ensure setup area is expanded for tag cloud shot
-    await page.evaluate(async () => {
-        const { toggleSuggestionsDropdown } = await import('/js/features/chat-suggestions.js');
-        toggleSuggestionsDropdown();
-    });
+    // Persona Manager modal (the "Open Persona Manager" button opens the
+    // chat-template lifecycle modal, #template-manager-modal).
+    await page.evaluate(() => document.getElementById('chat-open-template-mgr')?.click());
     await sleep(600);
-    // Expand setup if collapsed
-    await page.evaluate(() => {
-        const toggle = document.getElementById('suggestions-view-toggle');
-        if (toggle && toggle.textContent?.trim() === 'Show Setup') {
-            toggle.click();
-        }
-    });
-    await sleep(800);
-    await captureShot(page, 'guided-gen-suggestions-tag-cloud.png', { fullPage: false });
-
-    // Type into search input and wait for filter to apply
-    await page.click('#suggestion-search-input');
-    await page.evaluate(() => {
-        const input = document.getElementById('suggestion-search-input');
-        if (input) input.value = '';
-    });
-    await page.type('#suggestion-search-input', 'horror', { delay: 50 });
-    await sleep(800);
-    await captureShot(page, 'guided-gen-suggestions-search-filter.png', { fullPage: false });
-
-    // Open manage categories modal to validate rendering
-    await page.evaluate(() => document.getElementById('suggestions-manage-btn')?.click());
-    await sleep(800);
-    await captureShot(page, 'guided-gen-manage-categories.png', { fullPage: false });
-    if (options.closeUp) {
-        await captureElementScreenshot(page, '#categories-builtin-list', 'guided-gen-categories-builtin-list.png', { padding: 12 });
-    }
-    await page.keyboard.press('Escape');
+    await captureShot(page, 'guided-gen-persona-modal.png', { fullPage: true });
+    await page.evaluate(() => document.getElementById('template-manager-close')?.click());
     await sleep(300);
 
     await cleanupScreenshotTabs(page);

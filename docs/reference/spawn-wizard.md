@@ -1,5 +1,11 @@
 # Spawn Wizard
 
+> **Same wizard, two docs, different audiences.** "Spawn Wizard" and "Setup Wizard" are two
+> names for one feature. This doc is the **frontend module architecture**: which `.js` file owns
+> which piece of the wizard, and how the codebase is organized. For the **user-facing walkthrough**
+> — what each step looks like, what the controls do, and the underlying HF/VRAM/chat-template API
+> reference — see [setup-wizard.md](setup-wizard.md) instead.
+
 The Spawn Wizard is the guided flow for creating a model server. It provides:
 
 - Profile selection (Quick / Balanced / Advanced) and use-case selection (agentic / general / roleplay)
@@ -260,7 +266,7 @@ The wizard supports two inference backends:
 
 Engine selection appears on Step 0 (Model) as two cards.
 
-![Engine selection](../screenshots/spawn-wizard-engines-dark.png)
+![Engine selection](../screenshots/spawn-wizard-engines--neutral--dark.png)
 
 The wizard:
 

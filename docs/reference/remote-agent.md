@@ -14,7 +14,7 @@ When a remote agent is installed and reachable, the dashboard can show:
 
 This is what upgrades a remote attach session from **Basic** to **Full telemetry**.
 
-![GPU & System telemetry from a remote agent](../screenshots/gpu-metrics.gif)
+![GPU & System telemetry from a remote agent](../screenshots/neutral--gpu-metrics.gif)
 
 ## Agent states and indicators
 

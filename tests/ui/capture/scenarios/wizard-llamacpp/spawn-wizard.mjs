@@ -23,7 +23,7 @@ export default async function(ctx, options) {
     });
     await sleep(200);
 
-    // ── Step 0: profile + use-case — capture AFTER selections so state is visible ─
+    // ── Step 1 (Model): profile + use-case — capture AFTER selections so state is visible ─
     await page.evaluate(() => {
         (document.querySelector('.profile-card[data-profile="power"]')
             || document.querySelector('.profile-card'))?.click();
@@ -34,13 +34,13 @@ export default async function(ctx, options) {
             || document.querySelector('.usecase-card'))?.click();
     });
     await sleep(300);
-    await captureShot(page, 'spawn-wizard-step1-profiles.png', { fullPage: true });
+    await captureShot(page, 'spawn-wizard-model-profiles.png', { fullPage: true });
 
     // Profile/use-case and model selection are now on the same step (Option A
     // collapse: 6 steps → 3). No navigation click needed between them.
 
-    // ── Step 0: model source cards — capture before selecting HF ─────────────
-    await captureShot(page, 'spawn-wizard-step2-source-cards.png', { fullPage: true });
+    // ── Step 1 (Model): model source cards — capture before selecting HF ─────
+    await captureShot(page, 'spawn-wizard-model-source-cards.png', { fullPage: true });
 
     // Select HuggingFace source.
     await page.evaluate(() => {
@@ -49,7 +49,7 @@ export default async function(ctx, options) {
     await sleep(400);
 
     // Capture the base HF panel: discover pills + quickpick row, no search started.
-    await captureShot(page, 'spawn-wizard-step2-hf-base.png', { fullPage: true });
+    await captureShot(page, 'spawn-wizard-model-hf-base.png', { fullPage: true });
 
     // Helper: wait up to 20 s for real result cards; continues silently if none arrive.
     const waitForResults = () => page.waitForFunction(() => {
@@ -78,7 +78,7 @@ export default async function(ctx, options) {
         await sleep(400);
         await scrollToResults();
         await sleep(200);
-        await captureShot(page, 'spawn-wizard-step2-discover-trending.png', { fullPage: true });
+        await captureShot(page, 'spawn-wizard-model-discover-trending.png', { fullPage: true });
     }
 
     // ── Discover pill: Qwen3 ─────────────────────────────────────────────────
@@ -89,7 +89,7 @@ export default async function(ctx, options) {
         await sleep(400);
         await scrollToResults();
         await sleep(200);
-        await captureShot(page, 'spawn-wizard-step2-discover-qwen3.png', { fullPage: true });
+        await captureShot(page, 'spawn-wizard-model-discover-qwen3.png', { fullPage: true });
     }
 
     // ── Quantizer quick-pick: bartowski ──────────────────────────────────────
@@ -100,7 +100,7 @@ export default async function(ctx, options) {
         await sleep(400);
         await scrollToResults();
         await sleep(200);
-        await captureShot(page, 'spawn-wizard-step2-quantizer-bartowski.png', { fullPage: true });
+        await captureShot(page, 'spawn-wizard-model-quantizer-bartowski.png', { fullPage: true });
     }
 
     // ── Community picks panel ─────────────────────────────────────────────────
@@ -127,7 +127,7 @@ export default async function(ctx, options) {
             if (picks) picks.scrollIntoView({ behavior: 'instant', block: 'start' });
         });
         await sleep(300);
-        await captureShot(page, 'spawn-wizard-step2-community-picks.png', { fullPage: true });
+        await captureShot(page, 'spawn-wizard-model-community-picks.png', { fullPage: true });
 
         // Second tab (MoE / Offload picks) if present.
         await page.evaluate(() => {
@@ -135,7 +135,7 @@ export default async function(ctx, options) {
             if (tabs.length > 1) tabs[1].click();
         });
         await sleep(300);
-        await captureShot(page, 'spawn-wizard-step2-community-picks-moe.png', { fullPage: true });
+        await captureShot(page, 'spawn-wizard-model-community-picks-moe.png', { fullPage: true });
     }
 
     // ── Quant advisor: type a known repo so file list populates reliably ──────
@@ -157,7 +157,7 @@ export default async function(ctx, options) {
             return fl && fl.classList.contains('visible') && fl.querySelector('.hf-file-item') !== null;
         }, { timeout: 20000 }).catch(() => {});
         await sleep(500);
-        await captureShot(page, 'spawn-wizard-step2-quant-advisor.png', { fullPage: true });
+        await captureShot(page, 'spawn-wizard-model-quant-advisor.png', { fullPage: true });
 
         // Select Q4_K_M so validation passes on Next.
         await page.evaluate(() => {
@@ -168,7 +168,7 @@ export default async function(ctx, options) {
         await sleep(300);
     }
 
-    // ── Step 2: Hardware / VRAM ───────────────────────────────────────────────
+    // ── Step 2 (Hardware): VRAM ────────────────────────────────────────────────
     // Inject missing model metadata so the VRAM bar renders correctly.
     // Only fill in values that may not have been set by the UI interaction.
     await page.evaluate(async () => {
@@ -211,7 +211,7 @@ export default async function(ctx, options) {
         { timeout: 6000 }
     ).catch(() => {});
     await sleep(500);
-    await captureShot(page, 'spawn-wizard-step3-vram.png', { fullPage: true });
+    await captureShot(page, 'spawn-wizard-hardware-vram.png', { fullPage: true });
 
     // ── Same step (Hardware & memory): sampling/review config list ───────────
     // Option A collapse merged the former Review/Summary step into this one's
@@ -221,9 +221,9 @@ export default async function(ctx, options) {
         if (list) list.scrollIntoView({ behavior: 'instant', block: 'start' });
     });
     await sleep(300);
-    await captureShot(page, 'spawn-wizard-step4-parameters.png', { fullPage: true });
+    await captureShot(page, 'spawn-wizard-hardware-parameters.png', { fullPage: true });
 
-    // ── Step 2: Launch (preset settings + spawn) ────────────────────────────────
+    // ── Step 3 (Launch): preset settings + spawn ──────────────────────────────
     await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
     await page.waitForFunction(
         () => document.getElementById('wizard-step-2')?.classList.contains('active'),
@@ -236,7 +236,7 @@ export default async function(ctx, options) {
         if (row) row.scrollIntoView({ behavior: 'instant', block: 'center' });
     });
     await sleep(300);
-    await captureShot(page, 'spawn-wizard-step5-summary.png', { fullPage: true });
+    await captureShot(page, 'spawn-wizard-launch-summary.png', { fullPage: true });
 
     // Preset settings and Spawn are now on the same step (Option A collapse:
     // 6 steps → 3). No navigation click needed between them.
@@ -245,7 +245,7 @@ export default async function(ctx, options) {
         if (card) card.scrollIntoView({ behavior: 'instant', block: 'start' });
     });
     await sleep(300);
-    await captureShot(page, 'spawn-wizard-step6-spawn.png', { fullPage: true });
+    await captureShot(page, 'spawn-wizard-launch-spawn.png', { fullPage: true });
 
     // Close wizard.
     await page.keyboard.press('Escape');

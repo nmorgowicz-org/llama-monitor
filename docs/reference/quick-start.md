@@ -27,7 +27,7 @@ The setup wizard is the easiest way to get started. It will:
 - Guide you through model and quant selection.
 - Use the VRAM estimator to keep your system stable.
 
-![Engine selection](../screenshots/spawn-wizard-engines-dark.png)
+![Engine selection](../screenshots/spawn-wizard-engines--neutral--dark.png)
 
 Or, if you already have a server running, you can:
 

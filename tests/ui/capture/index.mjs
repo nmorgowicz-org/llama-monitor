@@ -257,21 +257,41 @@ export async function runCli({ scenario: forcedScenario = null, argv = process.a
         baseUrl = server.url;
     }
 
-    try {
-        const launched = await launchBrowser(options.viewport);
-        browser = launched.browser;
-        const page = launched.page;
-        await scenario.run({ page, baseUrl, browser }, options);
-        console.log(`[CAPTURE] Scenario "${scenarioName}" complete.`);
-    } catch (err) {
-        console.error(err.stack || err.message);
-        process.exitCode = 1;
-    } finally {
+    // Headless Chrome occasionally crashes its renderer mid-session on long,
+    // real-network-bound scenarios (frame/context gets detached out from under
+    // an in-flight page.evaluate). This is a Puppeteer/Chrome-level flake, not
+    // an app bug, so retry once with a freshly launched browser before giving up.
+    const maxAttempts = 2;
+    let lastErr = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         cleanupFrames();
-        if (browser) await browser.close();
-        if (server) await cleanupServer(server);
-        if (!RUNNING_PORT) cleanupTempHome();
+        browser = null;
+        try {
+            const launched = await launchBrowser(options.viewport);
+            browser = launched.browser;
+            const page = launched.page;
+            await scenario.run({ page, baseUrl, browser }, options);
+            console.log(`[CAPTURE] Scenario "${scenarioName}" complete.`);
+            lastErr = null;
+            break;
+        } catch (err) {
+            lastErr = err;
+            const detached = /detached frame/i.test(err.message || '');
+            console.error(err.stack || err.message);
+            if (detached && attempt < maxAttempts) {
+                console.log(`[CAPTURE] Detached-frame crash on attempt ${attempt}; retrying with a fresh browser...`);
+            } else {
+                break;
+            }
+        } finally {
+            if (browser) await browser.close();
+        }
     }
+    if (lastErr) {
+        process.exitCode = 1;
+    }
+    if (server) await cleanupServer(server);
+    if (!RUNNING_PORT) cleanupTempHome();
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

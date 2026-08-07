@@ -55,7 +55,7 @@ The popover is populated in real time from WebSocket data; each row shows a gree
 
 The Server tab is the main monitoring dashboard. It combines llama.cpp inference data from `/metrics` and `/slots` with host telemetry when available.
 
-![Inference Section](../screenshots/dashboard-performance-section.png)
+![Inference Section](../screenshots/dashboard--neutral--performance-section.png)
 
 | Card | What it shows |
 |------|----------------|
@@ -66,7 +66,7 @@ The Server tab is the main monitoring dashboard. It combines llama.cpp inference
 | **Connection details** | Activity rail (recent request timeline), request count, and average duration |
 | **Model & Decoding** | Active model name, quantization, sampler config inline, speculative decoding chip and config grid |
 
-![Server Tab](../screenshots/settings-server-tab.png)
+![Server Tab](../screenshots/neutral--settings-server-tab.png)
 
 ### Fine-grained metrics
 
@@ -97,7 +97,7 @@ The Tuning panel provides access to server tuning settings, including sampling p
 - Adjust sampling (temperature, top_p, etc.), memory tuning, and speculative decoding settings where available.
 - Changes apply to the running llama-server when supported.
 
-![Tuning Panel](../screenshots/tune-panel-open.png)
+![Tuning Panel](../screenshots/tune-panel--neutral--open.png)
 
 ## Llama Updater
 
@@ -107,7 +107,7 @@ The Llama Updater manages the `llama-server` binary version directly from the da
 
 A pill in the top navigation bar displays the currently installed build number in the form `llama.cpp · bXXXXX`. When a newer build is available on GitHub, the pill turns red and shows an upward arrow (↑) with the latest build number, for example `llama.cpp · ↑ b5432`. Hovering the pill shows a tooltip with the full upgrade range (e.g., `Update available: b4321 → b5432. Click to manage.`).
 
-![Llama Updater Pill](../screenshots/llama-updater-pill.png)
+![Llama Updater Pill](../screenshots/llama-updater--llamacpp-local--pill.png)
 
 ### Version modal
 
@@ -115,7 +115,7 @@ Clicking the pill opens a version modal that lists the last 8 `llama.cpp` releas
 
 Clicking any row displays that release's notes in a side pane. The **Install** button is shown for every non-current release; clicking it downloads, validates, and promotes a new `llama-server` binary. During installation the pill displays `Installing…` with a live timer. On success the running llama-server is restarted automatically to pick up the new binary.
 
-![Llama Updater Version Modal](../screenshots/llama-updater-version-modal.png)
+![Llama Updater Version Modal](../screenshots/llama-updater--llamacpp-local--version-modal.png)
 
 ### Background version checks
 
@@ -438,7 +438,7 @@ Clock visualization:
 
 - GPU clocks can be shown as dual-ring orbits (one for core, one for memory) with meters, or as chips, or as plain numeric values.
 
-![GPU & System Metrics](../screenshots/dashboard-gpu-section.png)
+![GPU & System Metrics](../screenshots/dashboard--neutral--gpu-section.png)
 
 ### System metrics
 
@@ -709,7 +709,7 @@ Open the shortcuts modal with `Ctrl+/`.
 | `Ctrl+.` | Stop server |
 | `Escape` | Close the active modal |
 
-![Keyboard Shortcuts](../screenshots/panels-keyboard-shortcuts.png)
+![Keyboard Shortcuts](../screenshots/neutral--panels-keyboard-shortcuts.png)
 ## Backend-aware inference telemetry
 
 The performance dashboard selects its inference cards from the active runtime's
@@ -726,7 +726,7 @@ drives which card set is rendered.
 When the active session's backend is Rapid-MLX, the dashboard renders the following
 cards (in order) based on what metrics are available:
 
-![Rapid-MLX dashboard telemetry](../screenshots/dashboard-rapid-mlx-dark.png)
+![Rapid-MLX dashboard telemetry](../screenshots/dashboard-rapid-mlx--rapidmlx-local--dark.png)
 
 - **Rapid-MLX runtime** — model identity, runtime state (e.g. Ready, Degraded),
   uptime. Marked live or degraded depending on health.
@@ -750,7 +750,7 @@ becomes unavailable, it is removed from the grid so the layout reflows cleanly.
 
 Rapid-MLX telemetry is intentionally graceful when metrics are missing:
 
-![Rapid-MLX partial telemetry](../screenshots/dashboard-rapid-mlx-partial.png)
+![Rapid-MLX partial telemetry](../screenshots/dashboard-rapid-mlx--rapidmlx-local--partial.png)
 
 - **Before first sample** — the inference area shows a compact "Connecting to
   Rapid-MLX telemetry…" status instead of llama.cpp cards.

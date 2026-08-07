@@ -30,19 +30,19 @@ Rapid-MLX is now a first-class inference backend for Apple Silicon. Llama Monito
 - Managed runtime: Llama Monitor installs, updates, repairs, and rolls back the Rapid-MLX runtime automatically.
 - Live telemetry: the dashboard surfaces Rapid-MLX-specific metrics (throughput, context, model info) alongside llama.cpp, with the same UX.
 
-![Rapid-MLX dashboard](docs/screenshots/dashboard-rapid-mlx-dark.png)
+![Rapid-MLX dashboard](docs/screenshots/dashboard-rapid-mlx--rapidmlx-local--dark.png)
 
 ### Live Monitoring Cockpit
 
 Top nav and Server tab show Speed (throughput), context pressure, connection details, active sessions, and model/runtime details in real time. Local sessions read host telemetry directly; remote sessions gain the same depth via the remote agent.
 
-![Performance & metrics](docs/screenshots/performance-metrics.gif)
+![Performance & metrics](docs/screenshots/neutral--performance-metrics.gif)
 
 ### GPU & System Telemetry
 
 Real-time GPU utilization, temperature, memory, and power, plus CPU and system-level metrics. Designed for local-first and secure remote setups.
 
-![GPU & System Metrics](docs/screenshots/gpu-metrics.gif)
+![GPU & System Metrics](docs/screenshots/neutral--gpu-metrics.gif)
 
 ### Chat Workspace & Focus Mode
 
@@ -53,19 +53,19 @@ Chat tabs, prompt controls, telemetry overlays, and logs live next to the monito
 - Per-tab prompt and sampling controls
 - Focus mode: hide nav, sidebars, and chrome
 
-![Chat Interface](docs/screenshots/chat-chat.png)
-![Focus Mode](docs/screenshots/chat-focus-mode.png)
+![Chat Interface](docs/screenshots/chat--neutral--chat.png)
+![Focus Mode](docs/screenshots/chat--neutral--focus-mode.png)
 
 ### Chat History Q&A
 
 Ask questions about your conversation in a dedicated sliding panel. It searches message history, pulls relevant context, and streams answers without altering your live chat.
 
-![History Q&A](docs/screenshots/chat-history-qa-panel.png)
+![History Q&A](docs/screenshots/chat-history-qa--neutral--panel.png)
 
 ### Benchmarking & MTP Sweep
 Run live throughput tests and empirical sweeps for Multi-Token Prediction (MTP) draft models directly in the Tuning panel.
 
-![Benchmarking](docs/screenshots/benchmark-results.png)
+![Benchmarking](docs/screenshots/neutral--benchmark-results.png)
 
 ### Guided Generation & Prompt Tooling
 A per-tab notes sidebar, AI-generated suggestions, quick guide flows, and director/surprise tools help you steer replies without rebuilding the prompt stack.
@@ -73,13 +73,13 @@ A per-tab notes sidebar, AI-generated suggestions, quick guide flows, and direct
 - Director mode: type one directive and get four distinct continuation options.
 - Surprise mode: arm a beat that triggers at a later reply.
 
-![Director Options](docs/screenshots/guided-gen-director-options.png)
+![Director Options](docs/screenshots/guided-gen--neutral--director-options.png)
 
 ### Appearance & Theming
 
 Four accent palettes (Carbon Mint, Cyber Rose, Solar Violet, Lava Core) pair with dark and light modes for 8 total combinations. Switch palettes from **Settings → Appearance** — cards, sparklines, charts, and glows all update instantly. Choice is saved per device.
 
-![Light mode dashboard](docs/screenshots/appearance-light-dashboard.png)
+![Light mode dashboard](docs/screenshots/neutral--appearance-light-dashboard.png)
 
 ### TLS, ACME & mTLS
 
@@ -87,7 +87,7 @@ Built-in TLS with ACME (Let's Encrypt) and mTLS for remote agents. Choose No HTT
 
 See [TLS Architecture](docs/reference/tls-architecture.md) for full details.
 
-![Security & Certificates](docs/screenshots/tls-certificates-tab.png)
+![Security & Certificates](docs/screenshots/tls--neutral--certificates-tab.png)
 
 ### Start a Server
 
@@ -101,9 +101,9 @@ An integrated setup wizard for discovering, downloading, configuring, and launch
 - **VRAM-aware tuning**: live breakdown bar with auto-size and quant-compare
 - **llama.cpp binary management**: auto-download, install, and update the llama.cpp runtime
 
-![Engine selection in Setup wizard](docs/screenshots/spawn-wizard-engines-dark.png)
+![Engine selection in Setup wizard](docs/screenshots/spawn-wizard-engines--neutral--dark.png)
 
-![Setup wizard flow](docs/screenshots/spawn-wizard-flow.gif)
+![Setup wizard flow](docs/screenshots/llamacpp-local--spawn-wizard-flow.gif)
 
 **Details**:
 [Setup wizard](docs/reference/setup-wizard.md) ·

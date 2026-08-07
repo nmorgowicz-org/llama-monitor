@@ -41,8 +41,8 @@ See also: [Navigation](navigation.md)
 
 The left conversation sidebar is the main organizer for chat sessions.
 
-![Conversation Sidebar](../screenshots/sidebar-sidebar-expanded.png)
-![Conversation Sidebar Collapsed](../screenshots/sidebar-sidebar-collapsed.png)
+![Conversation Sidebar](../screenshots/sidebar--neutral--sidebar-expanded.png)
+![Conversation Sidebar Collapsed](../screenshots/sidebar--neutral--sidebar-collapsed.png)
 
 - **Recency groups** — Conversations are grouped into `Pinned`, `Today`, `Yesterday`, `This Week`, and `Older`
 - **Per-conversation status** — Each row shows the conversation name, persona label, explicit-mode badge, message count, and a context-pressure bar derived from the last known context percentage
@@ -60,13 +60,13 @@ The left conversation sidebar is the main organizer for chat sessions.
     - **Archive** — archives all selected conversations
     - **Clear** — clears the current selection
 
-![Conversation Context Menu](../screenshots/chat-context-menu.png)
+![Conversation Context Menu](../screenshots/neutral--chat-context-menu.png)
 
 ### Cross-Conversation Message Search
 
 The sidebar's `Search Messages` button opens a larger flyout beside the conversation rail and searches message bodies across stored conversations.
 
-![Conversation Search](../screenshots/sidebar-fts-search-active.png)
+![Conversation Search](../screenshots/sidebar--neutral--fts-search-active.png)
 
 - **Message search** — Searches stored message content, not just conversation names
 - **Wider results surface** — Matches render in a dedicated flyout instead of replacing the narrow sidebar list
@@ -135,7 +135,7 @@ Each message exposes action buttons in its footer:
 
 The template manager is the central place for chat personas.
 
-![Persona Manager](../screenshots/guided-gen-persona-modal.png)
+![Persona Manager](../screenshots/guided-gen--neutral--persona-modal.png)
 
 ### Template List Sections
 
@@ -173,7 +173,7 @@ The Behavior panel lets you override the default role-boundary instruction for t
 
 The behavior panel provides fast access to the active persona prompt, role-boundary controls, AI gender, and explicit-mode settings for the current tab.
 
-![Behavior Settings](../screenshots/panels-behavior-settings.png)
+![Behavior Settings](../screenshots/panels--neutral--behavior-settings.png)
 
 ## Model Parameters
 
@@ -198,7 +198,7 @@ These parameters are applied for both llama.cpp and Rapid-MLX sessions. Rapid-ML
 - llama.cpp-specific flags not recognized by Rapid-MLX are dropped (e.g., MTP sweep settings, GGUF tuning knobs).
 - The `max_tokens` cap is enforced per-backend via the shared UI but is ultimately constrained by the active model's context window.
 
-![Response Settings](../screenshots/panels-model-settings.png)
+![Response Settings](../screenshots/panels--neutral--model-settings.png)
 
 ## Context Pressure Bar
 
@@ -237,7 +237,7 @@ Compaction turns older history into a memory/tombstone entry so the conversation
 
 The debug inspector shows the exact outbound request shape used for the next reply. Open it with the `{...}` button in the chat input toolbar.
 
-![Prompt Debug Inspector](../screenshots/panels-prompt-debug.png)
+![Prompt Debug Inspector](../screenshots/panels--neutral--prompt-debug.png)
 
 ### What It Shows
 
@@ -271,8 +271,8 @@ Real-time metrics for the active chat tab, accessible from the telemetry toggle 
 
 The panel can float as a popover or be pinned inline below the toolbar.
 
-![Chat Telemetry](../screenshots/chat-chat-telemetry.png)
-![Chat Telemetry Pinned](../screenshots/chat-chat-telemetry-pinned.png)
+![Chat Telemetry](../screenshots/chat--neutral--chat-telemetry.png)
+![Chat Telemetry Pinned](../screenshots/chat--neutral--chat-telemetry-pinned.png)
 
 ### Per-Message Metrics
 
@@ -322,7 +322,7 @@ Enter-to-send is stored in shared settings. When disabled, `Enter` inserts a new
 
 The History Q&A panel lets you ask natural language questions about an active conversation without disturbing the live chat context.
 
-![History Q&A Panel](../screenshots/chat-history-qa-panel.png)
+![History Q&A Panel](../screenshots/chat-history-qa--neutral--panel.png)
 
 ### Opening the Panel
 
@@ -401,7 +401,7 @@ Guided-generation features shape the next assistant reply without forcing you to
 
 The right-side context notes panel stores structured notes on the active tab and injects them into the system prompt as grouped `### SECTION NOTES ###` blocks.
 
-![Context Notes Sidebar](../screenshots/guided-gen-context-notes-expanded.png)
+![Context Notes Sidebar](../screenshots/guided-gen--neutral--context-notes-expanded.png)
 
 #### Built-In Sections
 
@@ -433,15 +433,13 @@ The `Analyze` action calls `POST /api/context-notes/analyze`.
 
 Suggestions generate user-side next-step ideas from the current conversation context.
 
-![Suggestions Dropdown](../screenshots/guided-gen-suggestions-dropdown.png)
+![Suggestions Dropdown](../screenshots/guided-gen--neutral--suggestions-dropdown.png)
 
 The browser sends recent messages, the current system prompt, non-empty context notes, and the active quick-guide instruction (if one is currently active) as suggestion context.
 
 Custom suggestion categories are stored in shared settings so they follow the workspace across browsers.
 
-![Tag Cloud](../screenshots/guided-gen-suggestions-tag-cloud.png)
-![Search Filter](../screenshots/guided-gen-suggestions-search-filter.png)
-![Suggestions Results](../screenshots/guided-gen-suggestions-results.png)
+![Suggestions Results](../screenshots/guided-gen--neutral--suggestions-results.png)
 
 #### When They Appear
 
@@ -469,8 +467,6 @@ Custom categories appear alongside built-in ones and persist to `localStorage` (
 
 #### Manage Categories
 
-![Manage Categories](../screenshots/guided-gen-manage-categories.png)
-
 - **Built-in prompts** — Editable, reorderable, and individually disableable
 - **Custom categories** — Add your own groups and prompt lists
 - **Per-prompt edits** — Name, description, and prompt text
@@ -493,9 +489,9 @@ Quick Guide is the inline steering surface for one-off reply direction.
 | **Director** | Expands one directing note into four continuation options |
 | **Surprise** | Arms a hidden future beat that lands on a later assistant reply |
 
-![Quick Guide](../screenshots/guided-gen-quick-guide-dropdown.png)
-![Director Mode](../screenshots/guided-gen-director-options.png)
-![Director Results](../screenshots/guided-gen-director-applied.png)
+![Quick Guide](../screenshots/guided-gen--neutral--quick-guide-dropdown.png)
+![Director Mode](../screenshots/guided-gen--neutral--director-options.png)
+![Director Results](../screenshots/guided-gen--neutral--director-applied.png)
 
 #### Quick Mode Details
 
@@ -515,8 +511,6 @@ Quick Guide is the inline steering surface for one-off reply direction.
 - **Countdown** — A beat fires when `remaining_turns` reaches `0`; other armed beats decrement after assistant replies complete
 - **Per-tab queue** — Armed surprises are part of tab state
 
-![Surprise Mode Armed](../screenshots/guided-gen-surprise-armed.png)
-
 ## Explicit Mode
 
 Explicit mode is a three-level content filter layered on top of the active persona.
@@ -526,10 +520,6 @@ Explicit mode is a three-level content filter layered on top of the active perso
 | **Off** | 🔒 | Default filtering |
 | **Unlocked** | 🔓 | Level 1 persona policy |
 | **Unrestricted** | 🔥 | Level 2 persona policy |
-
-![Explicit Unlocked](../screenshots/guided-gen-explicit-unlocked.png)
-![Explicit Unrestricted](../screenshots/guided-gen-explicit-unrestricted.png)
-![Explicit Locked](../screenshots/guided-gen-explicit-locked.png)
 
 ### Controls
 
