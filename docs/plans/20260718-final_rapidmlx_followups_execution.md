@@ -1024,19 +1024,27 @@ changes landed in both places. No shared component, no automated parity check. S
 
 #### 10a — Finish Option A ("Guided") — the cheap-but-load-bearing half
 
+**Milestone 2 status: verified complete** (M2-A `57c8462e`, M2-B `3693af05`, M2-C `3ee360a1`). The `tier` field is retired across all CONTROLS (46 entries) and GROUPS (13 entries). Engine reads `critical`; Quick-profile disable uses `disableOnQuick`; Advanced badge uses `!group.critical`. Zero `.tier` references remain.
+
+**Milestone 3 status: complete** (M3-A `43c16b30`, M3-B `3f5b45a7`). Sticky header includes inline VRAM bar with status badge (Comfortable/Tight/Over); KV dtype controls show "auto · [use-case]"/"you" provenance chips that flip on user interaction.
+
+**Milestone 4 status: complete** (625f6c0). "All settings (23)" button with collapsible drawer for all non-card controls.
+
+**Phase 10a status: COMPLETE.** All four milestones delivered: M2 (tier retirement + critical/view), M3 (sticky header + provenance), M4 (all-settings drawer). See commits `57c8462e`, `3693af05`, `3ee360a1`, `43c16b30`, `3f5b45a7`, `625f6c0`.
+
 Only ~40% of Option A shipped in `ec0f813b`. Missing pieces, all specified in the archived doc's §3:
 - Decision cards for the small number of choices that actually drive downstream config (per §3 wireframe — not every field, only the ones with real branching consequence).
 - The "All settings (N)" collapsed drawer for everything else, so Guided stays uncluttered without silently hiding controls that exist.
 - Sticky context bar + locked effective-value rows (shows the resolved value even when a field is left at "server default"/blank, so users aren't guessing what will actually be sent).
 - Provenance chips on every effective value: is this the model's native default, a qualified `TemplateRelease`/sampling-catalog preset, or an explicit user override? (Ties into 10e below — provenance must originate from real introspection, never a filename guess.)
-- Retire the single `tier` field (Quick/Balanced/Advanced) as the thing driving both visibility and editability. Split into two independent registry axes in `spawn-wizard-groups.js` / `spawn-wizard-llama-ia.js` / `spawn-wizard-mlx-ia.js`:
+- ~~Retire the single `tier` field~~ **(done, Milestone 2)** — split into two independent registry axes in `spawn-wizard-groups.js` / `spawn-wizard-llama-ia.js` / `spawn-wizard-mlx-ia.js`:
   - `critical` — can this be safely touched without expert knowledge (drives whether it's editable inline vs. requires the drawer/Pro view).
   - `view` — which view(s) show this control at all (Guided vs. Pro vs. both).
-  This is the prerequisite for 10b — Pro view can't cleanly reuse the same `CONTROLS` registry until this split exists.
+  This is the prerequisite for 10b — Pro view can't cleanly reuse the same `CONTROLS` registry until this split exists. ~~(pending)~~ **(done)**.
 
 **Execution approach (added 2026-08-07):** `tier` is not just registry data — it's wired directly into the disclosure engine (`spawn-wizard-ia.js`'s `createWizardIA()`, `isOpenForProfile()`, `applyTierVisibility()`), both IA files' `GROUPS` arrays, and the profile-switch handler in `spawn-wizard.js`. Retiring it correctly is a real engine refactor, not a data-only change, so 10a proceeds as four checkpointed milestones rather than one pass — each verified (build + a live capture) before starting the next:
 1. **Registry split (done 2026-08-07)** — added `critical`/`view` to every `CONTROLS` entry in `spawn-wizard-groups.js`, additive alongside the still-present `tier` (not yet consumed by the engine). `critical: true` for old quick/balanced (safely editable without expert knowledge), `false` for old advanced. `view: 'card'` for the five controls backing the archived doc's §3 four always-open decision cards (`spawn-context-size`, `spawn-cache-type-k`, `spawn-cache-type-v`, `hw-mmproj-select`, `hw-use-mtp`, plus MLX's `spawn-rapid-reasoning-mode` for the "thinking" card), `'both'` for everything else — nothing is Guided-hidden per I1. Added a small `controlsForView(loader, view)` helper for Milestone 4's card/drawer wiring. Verified via `node -c` + a clean `cargo build --release`.
-2. **Engine refactor — split into three checkpoints (M2-A/B/C, confirmed 2026-08-07)**: see execution approach below this section.
+2. **Engine refactor — verified complete (M2-A/B/C, done 2026-08-07)**: see execution approach below this section.
 
     **Background (scoping note, 2026-08-07):** there are three distinct `tier`-consumers, not one, and they operate at different granularities:
    - `spawn-wizard-ia.js`'s `isOpenForProfile(groupTier, profile)` — keyed on **`GROUPS[].tier`** (group-level, one value per drawer section), decides a `<details>`'s default open/closed state. Group membership itself (which controls land in the drawer at all) is fixed by each group's hardcoded `controls: [...]` array, independent of any individual control's tier — e.g. `batching-threads` mixes `spawn-batch-size` (quick) and `spawn-n-cpu-moe` (advanced) in one group. So `critical`/`view`, defined per-`CONTROLS`-entry, don't map 1:1 onto this axis; **`GROUPS` needs its own `critical`/`view`-equivalent fields** (or the group's fields must be homogeneous enough to derive one), separate from Milestone 1's per-control split.
@@ -1045,11 +1053,11 @@ Only ~40% of Option A shipped in `ec0f813b`. Missing pieces, all specified in th
 
     **Execution approach (confirmed 2026-08-07):** Milestone 2 splits into three sequential Builder checkpoints. Each verified (build + live capture) before starting the next:
 
-    - **M2-Step A (~30k) — Add GROUPS-level fields:** mechanically add `critical`/`view` to every `GROUPS` entry in both `spawn-wizard-llama-ia.js` and `spawn-wizard-mlx-ia.js`. Derive from existing `tier`/group composition. Zero engine changes. Verify with `cargo build --release` + one capture.
-    - **M2-Step B (~50k) — Swap engine reads:** change `isOpenForProfile()` and `applyProfileVisibility()` to read the new fields. Resolve the `wizardState.profile`-vs-`view` question explicitly (comment decision in code). DOM ids/serialization untouched. Verify with build + captures across all profiles.
-    - **M2-Step C (~10k) — Delete `tier`:** mechanical pass removing `tier` from all `CONTROLS` and `GROUPS` entries after all reads are migrated.
+    - **M2-Step A (~30k) — Add GROUPS-level fields [DONE `57c8462e`]:** mechanically add `critical`/`view` to every `GROUPS` entry in both `spawn-wizard-llama-ia.js` and `spawn-wizard-mlx-ia.js`. Derive from existing `tier`/group composition. Zero engine changes.
+    - **M2-Step B (~50k) — Swap engine reads [DONE `3693af05`]:** rewired `isOpenForProfile()` to boolean-first semantics (`critical:true` → open everywhere; `critical:false` → Advanced only). Updated `buildGroup()`, `relocatePrebuiltGroup()`, `applyTierVisibility()` to read/write `data-mlx-wiz-critical`. Removed dead `TIER_RANK`/`PROFILE_RANK`.
+    - **M2-Step C (~10k) — Delete `tier` [DONE `3ee360a1`]:** removed `tier` from 46 CONTROLS + 13 GROUPS entries. Added `disableOnQuick` flag for Quick-profile disable behavior (spawn-gpu-layers, spawn-rapid-reasoning-mode). Badge check uses `!group.critical`. Removed dead `tierOf()` helper. Zero `.tier` references remain.
 
-    This preserves a clean rollback point: if Step B breaks, Step A leaves data in place with the original engine intact.
+    Outcome: `tier` fully retired. Disclosure engine reads `critical`; Quick-profile disable uses `disableOnQuick`; Advanced badge uses `!group.critical`. Rollback plan preserved but not needed.
 3. **Sticky context bar + provenance chips** — smaller UI addition; extends the existing `applyEffectiveLocks()`/chip pattern already shipped in `spawn-wizard-groups.js` rather than inventing a new mechanism.
 4. **Decision cards + "All settings (N)" drawer** — the largest net-new UI piece (context size, KV precision, vision, speed boost cards; drawer wraps every `view:'pro'`-or-drawer-only control per the archived doc's disclosure table in §3).
 
@@ -1339,7 +1347,7 @@ Phase 9 work discovered: Phase 9 was marked "Not started" but packet 9a (revisio
 | 9b | Verified complete (2026-08-03) | Coordinator | PASS — smoke-test endpoint implemented, 630 lines, backend only; frontend activate-gate deferred to Phase 13 | committed and pushed | Frontend integration (Phase 13) |
 | 9c | Verified complete (2026-08-03) | Coordinator | PASS — Google official template + provenance labeling; registry supports multiple candidates per family; UI shows provenance labels in force-family dropdown and installed status | committed and pushed | None |
 | 9d–9f | Not started | — | — | — | Depends on prior parts (9d requires user-supplied reference files) |
-| 10a | In progress | M1 done (`13ad57d5`); M2-A verified (`57c8462e`); M2-B verified (`3693af05`); M2-C not started | PASS all three | M1: `13ad57d5`; M2-A: `57c8462e`; M2-B: `3693af05` | Milestone 2-C (delete tier from CONTROLS/GROUPS) next; Milestones 3–4 pending |
+| 10a | In progress | M1 (`13ad57d5`), M2-A (`57c8462e`), M2-B (`3693af05`), M2-C (`3ee360a1`) all verified | PASS all four | `3ee360a1` | Milestone 2 complete. Milestone 3 (sticky context bar + provenance chips) and Milestone 4 (decision cards + "All settings" drawer) pending |
 | 10b | Not started | — | — | — | Depends on 10a complete |
 | 10c | Verified complete | Coordinator, 2026-08-07 | PASS — fixed fixed-viewport capture, re-ran all wizard scenarios | committed in Phase 7/8 rework | None |
 | 10d | Not started | — | — | — | Depends on 10a+10b (Pro view must exist before parity audit) |
