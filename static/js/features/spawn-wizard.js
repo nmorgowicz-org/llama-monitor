@@ -1076,16 +1076,17 @@ function bindEvents() {
 
    // Use-case cards map to workload_scenario strings for backend VRAM estimation.
    dom.usecaseCards?.forEach(card => {
-     card.addEventListener('click', () => {
-       wizardState.useCase = card.dataset.usecase;
-       dom.usecaseCards.forEach(c => c.classList.remove('selected'));
-       card.classList.add('selected');
-       const profileId = USE_CASE_TO_PROFILE[card.dataset.usecase];
-       if (profileId) wizardState.hardware.workloadScenario = profileId;
-       applyUseCaseKvDtype(card.dataset.usecase);
-       updateVramDisplay();
-       refreshStepGuardrails();
-     });
+      card.addEventListener('click', () => {
+        wizardState.useCase = card.dataset.usecase;
+        dom.usecaseCards.forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+        const profileId = USE_CASE_TO_PROFILE[card.dataset.usecase];
+        if (profileId) wizardState.hardware.workloadScenario = profileId;
+        applyUseCaseKvDtype(card.dataset.usecase);
+        _updateKvProvenanceChips();
+        updateVramDisplay();
+        refreshStepGuardrails();
+      });
     card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click(); } });
   });
 
@@ -1224,8 +1225,10 @@ function bindEvents() {
   // through these same controls, and accepting one is just as much a choice as picking from
   // the dropdown, so it counts too.
   [dom.cacheTypeKSelect, dom.cacheTypeVSelect].forEach(el => {
-    el?.addEventListener('change', () => { wizardState.hardware.kvDtypeUserSet = true; });
+    el?.addEventListener('change', () => { wizardState.hardware.kvDtypeUserSet = true; _updateKvProvenanceChips(); });
   });
+
+  _updateKvProvenanceChips();
 
   // mmproj "Browse" button: open file browser for mmproj projectors
   const mmprojBrowseBtn = document.querySelector('#hw-mmproj-browse-btn');
@@ -1498,6 +1501,44 @@ function applyUseCaseKvDtype(useCase) {
   wizardState.hardware.cacheTypeV = dtype;
   if (dom.cacheTypeKSelect) dom.cacheTypeKSelect.value = dtype;
   if (dom.cacheTypeVSelect) dom.cacheTypeVSelect.value = dtype;
+}
+
+// Provenance chips (M3-B): small pill next to KV labels showing where the value came from.
+const USE_CASE_PROV_LABELS = { agentic: 'Agentic', general: 'General', roleplay: 'Roleplay' };
+
+function _updateKvProvenanceChips() {
+  if (wizardState.engine.selected === 'rapid_mlx') return;
+  const isAuto = !wizardState.hardware.kvDtypeUserSet;
+  const [kField, vField] = [
+    document.getElementById('spawn-cache-type-k')?.closest('.kv-inline-field'),
+    document.getElementById('spawn-cache-type-v')?.closest('.kv-inline-field'),
+  ];
+  for (const field of [kField, vField]) {
+    if (!field) continue;
+    let chip = field.querySelector('.prov-chip');
+    const label = field.querySelector('label');
+    if (!chip && label) {
+      chip = document.createElement('span');
+      chip.className = 'prov-chip';
+      label.appendChild(document.createTextNode(' '));
+      label.appendChild(chip);
+    }
+    if (!chip) continue;
+    chip.className = 'prov-chip';
+    if (isAuto) {
+      const source = USE_CASE_PROV_LABELS[wizardState.useCase] || 'Default';
+      chip.className += ' prov-chip-auto';
+      chip.textContent = `auto · ${source}`;
+    } else {
+      chip.className += ' prov-chip-you';
+      chip.textContent = 'you';
+    }
+  }
+}
+
+function _ensureKvUserSet() {
+  wizardState.hardware.kvDtypeUserSet = true;
+  _updateKvProvenanceChips();
 }
 
 export async function refreshHfTokenState() {
