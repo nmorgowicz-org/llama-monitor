@@ -181,7 +181,7 @@ with a remote agent reporting GPU data). No binary is spawned; no temp config is
 // backend-independent chrome, otherwise 'llamacpp-local' / 'llamacpp-remote' /
 // 'rapidmlx-local' / 'mtplx-local'. Individual shots in a mixed-runtime
 // scenario can override via captureShot(..., { runtimeTag: '...' }).
-const SCENARIOS = {
+export const SCENARIOS = {
     'welcome': { run: scenarioWelcome, category: 'core', runtime: 'neutral' },
     'free-cache': { run: scenarioFreeCache, category: 'core', runtime: 'neutral' },
     'rapid-preset': { run: scenarioRapidPreset, setup: () => { seedRapidMlxCapturePreset(); }, category: 'presets', runtime: 'rapidmlx-local' },
