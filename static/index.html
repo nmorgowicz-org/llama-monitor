@@ -4471,23 +4471,30 @@
                          </div>
                      </div>
 
-                     <!-- Decision Card 4: Speed boost (speculative decoding) -->
-                     <div class="hw-decision-card" id="hw-decision-speed">
-                         <div class="hw-decision-card-header">
-                             <div class="hw-decision-card-title">
-                                 <span class="hw-decision-card-number">4</span>
-                                 Speed boost
-                             </div>
-                         </div>
-                         <div class="hw-decision-card-desc">Predict tokens ahead, verify in one pass. Free speed for compatible models.</div>
-                         <div class="hw-decision-card-content">
-                             <div class="hw-decision-tiles hw-speed-tiles">
-                                 <button type="button" class="hw-decision-tile hw-decision-tile-active" data-speed="on" title="MTP heads detected — use them">On — MTP heads detected</button>
-                                 <button type="button" class="hw-decision-tile" data-speed="ngram" title="N-gram only">N-gram only</button>
-                                 <button type="button" class="hw-decision-tile" data-speed="off" title="Disable speculative decoding">Off</button>
-                             </div>
-                         </div>
-                     </div>
+                      <!-- Decision Card 4: Speed boost (speculative decoding) -->
+                      <div class="hw-decision-card" id="hw-decision-speed">
+                          <div class="hw-decision-card-header">
+                              <div class="hw-decision-card-title">
+                                  <span class="hw-decision-card-number">4</span>
+                                  Speed boost
+                              </div>
+                          </div>
+                          <div class="hw-decision-card-desc">Predict tokens ahead, verify in one pass. Free speed for compatible models.</div>
+                          <div class="hw-decision-card-content">
+                              <label class="hw-speed-option">
+                                  <input type="radio" name="hw-speed" value="on" checked>
+                                  On — MTP heads detected
+                              </label>
+                              <label class="hw-speed-option">
+                                  <input type="radio" name="hw-speed" value="ngram">
+                                  N-gram only
+                              </label>
+                              <label class="hw-speed-option">
+                                  <input type="radio" name="hw-speed" value="off">
+                                  Off
+                              </label>
+                          </div>
+                      </div>
 
                      <!-- All settings drawer -->
                      <div class="hw-all-settings" id="hw-all-settings">

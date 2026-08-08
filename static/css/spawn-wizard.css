@@ -1267,6 +1267,31 @@
   min-width: 0;
 }
 
+/* Speed boost radio options */
+.hw-speed-option {
+  display: block;
+  font-size: 9px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: all 0.1s ease;
+}
+
+.hw-speed-option:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.hw-speed-option input[type="radio"] {
+  margin-right: 6px;
+  accent-color: var(--color-accent);
+}
+
+.hw-speed-option input[type="radio"]:checked + *,
+.hw-speed-option:has(input[type="radio"]:checked) {
+  color: var(--color-text);
+}
+
 .hw-decision-browse-btn {
   font-size: 9px;
   padding: 4px 8px;
