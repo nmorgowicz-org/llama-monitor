@@ -141,6 +141,89 @@ function _renderAllSettingsDrawer() {
 
 export { _renderAllSettingsDrawer };
 
+// ── M5-A: View mode toggle + left rail ──────────────────────────────────────
+
+const VIEW_MODE_STORAGE_KEY = 'wizard_view_mode';
+
+function _initViewMode() {
+  const select = document.getElementById('view-mode-select');
+  const toggle = document.getElementById('view-mode-toggle');
+  const rail = document.getElementById('pro-rail');
+
+  // Restore from sessionStorage
+  try {
+    const saved = sessionStorage.getItem(VIEW_MODE_STORAGE_KEY);
+    if (saved === 'pro' || saved === 'guided') {
+      wizardState.viewMode = saved;
+    }
+  } catch {}
+
+  if (select) select.value = wizardState.viewMode;
+
+  if (!toggle || !rail) return;
+
+  const updateVisibility = () => {
+    if (wizardState.viewMode === 'pro') {
+      toggle.style.display = 'flex';
+      rail.style.display = '';
+    } else {
+      toggle.style.display = 'none';
+      rail.style.display = 'none';
+    }
+  };
+
+  select?.addEventListener('change', () => {
+    const newMode = select.value;
+    try { sessionStorage.setItem(VIEW_MODE_STORAGE_KEY, newMode); } catch {}
+    wizardState.viewMode = newMode;
+    updateVisibility();
+  });
+
+  updateVisibility();
+}
+
+function _renderProRail() {
+  const nav = document.getElementById('pro-rail-nav');
+  if (!nav) return;
+  nav.innerHTML = '';
+
+  // Get groups from both IA files
+  const groups = [
+    ...(window.spawnWizardLlamaIA?.GROUPS || []),
+    ...(window.spawnWizardMlxIA?.GROUPS || []),
+  ];
+
+  // Deduplicate by id
+  const seen = new Set();
+  for (const g of groups) {
+    if (seen.has(g.id) || !g.id) continue;
+    seen.add(g.id);
+
+    const item = document.createElement('a');
+    item.className = 'pro-rail-item';
+    item.textContent = g.label || g.id;
+    item.href = `#${g.id}`;
+    item.dataset.groupId = g.id;
+    item.addEventListener('click', (e) => {
+      e.preventDefault();
+      const main = document.querySelector('#wizard-step-1 .wizard-main');
+      if (!main) return;
+      // Find the group in the main pane and scroll to it
+      const allGroups = main.querySelectorAll('[data-group-id]');
+      for (const el of allGroups) {
+        if (el.dataset.groupId === g.id) {
+          main.scrollTo({ top: Math.max(0, el.offsetTop - main.offsetTop - 60), behavior: 'smooth' });
+          break;
+        }
+      }
+      // Update active state
+      nav.querySelectorAll('.pro-rail-item').forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+    });
+    nav.appendChild(item);
+  }
+}
+
 // ── Spawn Wizard Module ───────────────────────────────────────────────────────
 // Spawn Llama-Server V2 — complete guided wizard.
 //
@@ -278,6 +361,13 @@ export const wizardState = {
   profile: 'balanced',
   useCase: 'agentic',    // 'agentic' | 'general' | 'roleplay'
   mode: 'guided',
+  viewMode: (() => {
+    try {
+      const saved = sessionStorage.getItem('wizard_view_mode');
+      if (saved === 'pro') return 'pro';
+    } catch {}
+    return 'guided';
+  })(),
   model: {
     source: 'local',     // 'local' | 'hf' | 'import'
     path: '',
@@ -637,6 +727,7 @@ export function openSpawnWizard(opts = {}) {
   renderEngineSelection();
   refreshEngineRecommendation();
 
+  _initViewMode();
   setupWizardEscape();
 }
 
@@ -2240,6 +2331,7 @@ function renderEngineSelection() {
   configureMlxWizardIA(dom.overlay, selected === 'rapid_mlx', wizardState.profile);
   if (selected === 'rapid_mlx') applyEffectiveLocks(dom.overlay);
   renderContextChipRow();
+  if (wizardState.viewMode === 'pro') _renderProRail();
   // llama.cpp's advanced fields exist in the DOM regardless of engine
   // selection (hidden via .engine-rapid-mlx CSS when MLX is active), so this
   // is always enabled — mirrors configureMlxWizardIA's build-once guard.

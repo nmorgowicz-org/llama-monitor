@@ -7243,3 +7243,111 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
 
 /* Capture mode: suppress the binary-prerequisite banner (it flashes per-step in steps 3+). */
 [data-screenshot-capture="true"] #wizard-binary-prereq { display:none !important; }
+
+/* ── M5-A: View mode toggle ──────────────────────────────────────────────── */
+.view-mode-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--color-text-muted, #8b949e);
+    margin-left: 6px;
+}
+.view-mode-toggle label {
+    font-weight: 500;
+}
+.view-mode-toggle select {
+    padding: 3px 6px;
+    border-radius: 4px;
+    border: 1px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
+    background: color-mix(in srgb, var(--color-bg-elevated, #1a1f28) 90%, transparent);
+    color: var(--color-text, #e6edf3);
+    font-size: 11px;
+    cursor: pointer;
+}
+.view-mode-toggle select:hover {
+    border-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+
+/* ── M5-A: Pro left rail ─────────────────────────────────────────────────── */
+.pro-rail {
+    width: 180px;
+    flex-shrink: 0;
+    padding: 12px 8px;
+    border-right: 1px solid color-mix(in srgb, var(--color-accent) 15%, transparent);
+    overflow-y: auto;
+    background: color-mix(in srgb, var(--color-bg-elevated, #1a1f28) 40%, transparent);
+}
+.pro-rail-header {
+    margin-bottom: 10px;
+    padding: 0 4px;
+}
+.pro-rail-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-text-muted, #8b949e);
+}
+.pro-rail-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.pro-rail-item {
+    display: block;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--color-text-muted, #8b949e);
+    cursor: pointer;
+    text-decoration: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.pro-rail-item:hover {
+    background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+    color: var(--color-text, #e6edf3);
+}
+.pro-rail-item.active {
+    background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+    color: var(--color-text, #e6edf3);
+    font-weight: 600;
+}
+.pro-rail-footer {
+    margin-top: auto;
+    padding: 4px 0;
+}
+.pro-rail-kb-shortcut {
+    display: block;
+    width: 100%;
+    padding: 4px;
+    border: 1px dashed color-mix(in srgb, var(--color-accent) 25%, transparent);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--color-text-muted, #8b949e);
+    font-size: 10px;
+    cursor: default;
+    text-align: center;
+}
+[data-theme="light"] .pro-rail {
+    border-right-color: rgba(0,0,0,0.08);
+    background: rgba(0,0,0,0.01);
+}
+[data-theme="light"] .pro-rail-title {
+    color: #64748b;
+}
+[data-theme="light"] .pro-rail-item {
+    color: #64748b;
+}
+[data-theme="light"] .pro-rail-item:hover,
+[data-theme="light"] .pro-rail-item.active {
+    color: #1e293b;
+    background: rgba(0,0,0,0.04);
+}
+[data-theme="light"] .view-mode-toggle select {
+    background: #f8fafc;
+    border-color: rgba(0,0,0,0.12);
+    color: #1e293b;
+}
