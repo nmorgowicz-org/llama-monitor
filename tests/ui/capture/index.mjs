@@ -232,10 +232,22 @@ export const SCENARIOS = {
             ],
         },
     },
-    'spawn-wizard-gif': { run: scenarioSpawnWizardGif, category: 'wizard-llamacpp', runtime: 'llamacpp-local' },
-    'spawn-wizard-rapid-mlx-gif': { run: scenarioSpawnWizardRapidMlxGif, category: 'wizard-rapidmlx', runtime: 'rapidmlx-local' },
-    'spawn-wizard-hf-download': { run: scenarioSpawnWizardHfDownload, category: 'wizard-llamacpp', runtime: 'llamacpp-local' },
-    'spawn-wizard-tier-matrix': { run: scenarioSpawnWizardTierMatrix, category: 'wizard-llamacpp', runtime: 'llamacpp-local' },
+    'spawn-wizard-gif': {
+        run: scenarioSpawnWizardGif, category: 'wizard-llamacpp', runtime: 'llamacpp-local',
+        contract: { intent: 'Capture the llama.cpp wizard flow as a diagnostic GIF.', expectedOutputs: ['llamacpp-local--spawn-wizard-flow.gif'] },
+    },
+    'spawn-wizard-hf-download': {
+        run: scenarioSpawnWizardHfDownload, category: 'wizard-llamacpp', runtime: 'llamacpp-local',
+        contract: { intent: 'Capture the llama.cpp HF download panel idle and progress states.', expectedOutputs: ['spawn-wizard-hf-download--llamacpp-local--idle.png', 'spawn-wizard-hf-download--llamacpp-local--progress.png'] },
+    },
+    'spawn-wizard-tier-matrix': {
+        run: scenarioSpawnWizardTierMatrix, category: 'wizard-llamacpp', runtime: 'llamacpp-local',
+        contract: { intent: 'Capture the current llama.cpp disclosure tier matrix.', expectedOutputs: ['spawn-wizard-tier-matrix--llamacpp-local--quick.png', 'spawn-wizard-tier-matrix--llamacpp-local--balanced.png', 'spawn-wizard-tier-matrix--llamacpp-local--advanced.png'] },
+    },
+    'spawn-wizard-rapid-mlx-gif': {
+        run: scenarioSpawnWizardRapidMlxGif, category: 'wizard-rapidmlx', runtime: 'rapidmlx-local',
+        contract: { intent: 'Capture the Rapid-MLX wizard flow as a diagnostic GIF.', expectedOutputs: ['rapidmlx-local--spawn-wizard-rapid-mlx-flow.gif'] },
+    },
     'discussions': { run: scenarioDiscussions, setup: () => { seedRapidMlxCapturePreset(); }, category: 'presets', runtime: 'neutral' },
     'tune-panel': { run: scenarioTunePanel, category: 'features', runtime: 'neutral' },
     'benchmark-results': { run: scenarioBenchmarkResults, category: 'features', runtime: 'neutral' },

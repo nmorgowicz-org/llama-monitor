@@ -7,6 +7,7 @@ import { execFileSync } from 'child_process';
 import { gotoApp } from '../../harness/browser.mjs';
 import { currentArtifactsDir, tagFilename, FRAME_DIR, sleep } from '../../harness/paths.mjs';
 import { cleanupFrames } from '../../harness/shot.mjs';
+import { recordArtifact } from '../../harness/receipt.mjs';
 
 export default async function(ctx, _options) {
     const { page, baseUrl } = ctx;
@@ -245,13 +246,15 @@ export default async function(ctx, _options) {
     // Scale to 900 px wide so the GIF fits GitHub README content width without
     // clipping. Height is computed proportionally (-1).
     console.log(`[CAPTURE] Converting ${frameIdx} frames to GIF at ${fps} fps (scaled to 900 px)...`);
+    const output = tagFilename('spawn-wizard-flow.gif');
     execFileSync('ffmpeg', [
         '-y',
         '-framerate', String(fps),
         '-i', join(FRAME_DIR, `spawn-wizard-gif_%03d.png`),
         '-vf', 'scale=900:-1:flags=lanczos,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5',
-        join(currentArtifactsDir(), tagFilename('spawn-wizard-flow.gif')),
+        join(currentArtifactsDir(), output),
     ], { stdio: 'inherit' });
+    recordArtifact(output, page.viewport());
     cleanupFrames();
     console.log('[CAPTURE] spawn-wizard-flow.gif complete.');
 }

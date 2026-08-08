@@ -24,6 +24,10 @@ export function recordCapture(filename, viewport) {
     active.produced.push({ filename, viewport });
 }
 
+export function recordArtifact(filename, viewport = null) {
+    recordCapture(filename, viewport);
+}
+
 export function finishCaptureReceipt() {
     if (!active) return null;
     const receipt = active;
