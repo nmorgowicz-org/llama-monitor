@@ -93,7 +93,14 @@ function wireVisionCard() {
   if (visionSelect && origSelect) {
     // Populate vision select from original select options
     function syncOptions() {
-      visionSelect.innerHTML = origSelect.innerHTML || '<option value="">( none — text only )</option>';
+      const options = Array.from(origSelect.options, option => option.cloneNode(true));
+      if (!options.length) {
+        const fallback = document.createElement('option');
+        fallback.value = '';
+        fallback.textContent = '( none — text only )';
+        options.push(fallback);
+      }
+      visionSelect.replaceChildren(...options);
     }
     syncOptions();
 
