@@ -1469,8 +1469,7 @@ function bindEvents() {
       // Always reset modelBytes so getModelBytes() re-estimates from the new filename
       // if the file size is unknown — stale size from a different quant would corrupt the math.
       wizardState.model.modelBytes = Number(qf.size) || 0;
-      if (detectMtpFromName(fpath) && !wizardState.arch.mtpDepth) {
-        wizardState.arch.mtpDepth = 1;
+      if (wizardState.arch.mtpDepth > 0) {
         renderMtpSection();
       }
       scheduleVramUpdate();
@@ -1970,13 +1969,9 @@ export function showStep(index) {
       renderMmprojSection();
       renderMtpSection();
     }
-    // Auto-default spec type if the user hasn't made an explicit choice.
-    // MTP-named models get draft-mtp+ngram-mod; all others get ngram-mod (free perf gains).
-    if (!rapid && dom.specTypeSelect && !dom.specTypeSelect.value) {
-      const modelName = (wizardState.model.localPath || wizardState.model.hfRepo || wizardState.model.hfFile || '').toLowerCase();
-      dom.specTypeSelect.value = modelName.includes('mtp') ? 'draft-mtp,ngram-mod' : 'ngram-mod';
-      dom.specTypeSelect.dispatchEvent(new Event('change'));
-    }
+    // Speculation is never enabled from a filename. A qualified GGUF/profile
+    // capability may populate an explicit recommendation; otherwise leave the
+    // control unset and let the server-owned safe default apply.
     if (!rapid) _updateSpecHint(dom.specTypeSelect?.value || '');
     // Trigger download panel now (moved from file-select to hardware step entry)
     const dlPanel = document.getElementById('hf-download-panel');
@@ -3320,7 +3315,7 @@ export function buildHeuristicArch(name, paramB) {
       nExperts: isMoe ? 64 : 0,
       nExpertsUsed: isMoe ? 3 : 0,
       expertFraction: isMoe ? 0.80 : 0.65,
-      mtpDepth: wizardState.arch.mtpDepth || (detectMtpFromName(name) ? 1 : 0),
+      mtpDepth: wizardState.arch.mtpDepth || 0,
       mmprojBytes: wizardState.arch.mmprojBytes || 0,
       paramB,
     };

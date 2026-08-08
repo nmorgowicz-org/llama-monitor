@@ -18,7 +18,7 @@ Updated as milestones pass; this ledger records verified repository state, not i
 | Phase 0 evidence freeze and contract inventory | Complete | Commit `39634a71`; release identity, route/auth inventory, control contract, fixture freeze, and raw G0 receipts recorded under `docs/plans/evidence/spawn-wizard-guided-pro/`. |
 | Phase 1 capture contract and baseline ownership | Complete | Commits `eeb8bf8`, `1147adc`, `35b04da`; strict receipts, realistic viewport enforcement, capture tests, llama/Pro/Rapid baselines, all six registered wizard scenario contracts, GIF receipts, and runtime/dashboard group migration are implemented. Fresh outside-sandbox runs verified llama baseline, HF download, tier matrix, Pro baseline, Rapid baseline, and both wizard GIF groups. |
 | Phase 2 CSS split | Complete | Commit `1a91f91`; `spawn-wizard-base.css` + `spawn-wizard-theme.css` are linked in original order, concatenation is byte-identical to the pre-split stylesheet, generated routes/assets build, and release-built llama/Pro baseline captures pass. |
-| Phase 3 introspection/effective/provenance truth | In progress | Phase 3A inventory recorded at `docs/plans/evidence/spawn-wizard-guided-pro/phase-3-inference-inventory.md`; typed local/HF GGUF and MLX provenance/default response work remains. |
+| Phase 3 introspection/effective/provenance truth | In progress | Phase 3A inventory recorded at `docs/plans/evidence/spawn-wizard-guided-pro/phase-3-inference-inventory.md`; filename-based MTP enabling/default fallbacks are removed in the wizard, while typed local/HF GGUF and MLX provenance/default response work remains. |
 
 > [!IMPORTANT]
 > **Coordinator start here:** jump to the [Terra Coordinator handoff prompt](#terra-coordinator-handoff), copy

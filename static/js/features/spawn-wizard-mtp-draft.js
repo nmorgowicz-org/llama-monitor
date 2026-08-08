@@ -4,7 +4,7 @@
 // sidecar flow in spawn-wizard-rapid-mlx.js and the future MTPLX runtime; per
 // the MTPLX audit these are three unrelated speculative-decoding mechanisms.
 import {
-  dom, wizardState, scheduleVramUpdate, guessQuantFromName, detectMtpFromName,
+  dom, wizardState, scheduleVramUpdate, guessQuantFromName,
   _modelStemForSearch,
 } from './spawn-wizard.js';
 import { formatBytes } from './spawn-wizard-format.js';
@@ -217,8 +217,7 @@ export function renderMtpSection() {
   const section = document.getElementById('hw-mtp-section');
   if (!section) return;
 
-  const modelPath = wizardState.model.hfFile || wizardState.model.path || '';
-  const hasBuiltInMtp = wizardState.arch.mtpDepth > 0 || detectMtpFromName(modelPath);
+  const hasBuiltInMtp = wizardState.arch.mtpDepth > 0;
   const hasAssistantSelected = (wizardState.model.selectedDraftPath || '').trim().length > 0;
   const showMtp = hasBuiltInMtp || hasAssistantSelected;
 
