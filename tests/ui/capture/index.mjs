@@ -29,6 +29,7 @@ import scenarioEvidenceDrawer from './scenarios/presets/evidence-drawer.mjs';
 import scenarioCommunitySources from './scenarios/presets/community-sources.mjs';
 import scenarioDiscussions from './scenarios/presets/discussions.mjs';
 import scenarioSpawnWizard from './scenarios/wizard-llamacpp/spawn-wizard.mjs';
+import scenarioSpawnWizardProBaseline from './scenarios/wizard-llamacpp/spawn-wizard-pro-baseline.mjs';
 import scenarioSpawnWizardRapidGuidedBaseline from './scenarios/wizard-rapidmlx/spawn-wizard-rapid-guided-baseline.mjs';
 import scenarioSpawnWizardGif from './scenarios/wizard-llamacpp/spawn-wizard-gif.mjs';
 import scenarioSpawnWizardHfDownload from './scenarios/wizard-llamacpp/spawn-wizard-hf-download.mjs';
@@ -200,7 +201,22 @@ const SCENARIOS = {
     'models': { run: scenarioModels, setup: () => ({ extraArgs: seedModelsDirFixture() }), category: 'models', runtime: 'neutral' },
     'dashboard': { run: scenarioDashboard, category: 'core', runtime: 'neutral' },
     'dashboard-rapid-mlx': { run: scenarioDashboardRapidMlx, category: 'features', runtime: 'rapidmlx-local' },
-    'spawn-wizard': { run: scenarioSpawnWizard, category: 'wizard-llamacpp', runtime: 'llamacpp-local' },
+    'spawn-wizard': {
+        run: scenarioSpawnWizard, category: 'wizard-llamacpp', runtime: 'llamacpp-local',
+        contract: {
+            intent: 'Document the current llama.cpp wizard baseline with complete, realistic still evidence.',
+            expectedOutputs: [
+                'spawn-wizard--llamacpp-local--model-profiles.png', 'spawn-wizard--llamacpp-local--model-source-cards.png',
+            ],
+        },
+    },
+    'spawn-wizard-pro-baseline': {
+        run: scenarioSpawnWizardProBaseline, category: 'wizard-llamacpp', runtime: 'llamacpp-local',
+        contract: {
+            intent: 'Preserve the current Pro-not-implemented state as evidence until Phase 7.',
+            expectedOutputs: ['spawn-wizard-pro-baseline--llamacpp-local--not-implemented.png'],
+        },
+    },
     'spawn-wizard-rapid-guided-baseline': {
         run: scenarioSpawnWizardRapidGuidedBaseline, setup: () => { seedNestedMlxFixture(); }, category: 'wizard-rapidmlx', runtime: 'rapidmlx-local',
         contract: {

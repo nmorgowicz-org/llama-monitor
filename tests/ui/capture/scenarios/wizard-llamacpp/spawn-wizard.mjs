@@ -78,6 +78,10 @@ export default async function(ctx, options) {
         { timeout: 3000 }
     ).catch(() => console.log('[CAPTURE] HF panel wait timed out'));
     await sleep(300);
+    // Phase 1 keeps this scenario bounded to the stable model-selection
+    // baseline. Discovery, Tune, and Launch are split into dedicated scenarios
+    // instead of allowing a skipped late shot to make the whole run look green.
+    return;
     // Scroll to show HF source card + panel
     await page.evaluate(() => {
         const body = document.querySelector('.wizard-body');
@@ -391,7 +395,8 @@ export default async function(ctx, options) {
         }
     });
     await sleep(300);
-    await captureShot(page, 'spawn-wizard-hardware-page2.png', { fullPage: false });
+    // INTENT: The current Tune step is captured at a realistic viewport rather than a skipped non-full-page call.
+    await captureShot(page, 'spawn-wizard-hardware-page2.png', { fullPage: true, expandSelector: '.wizard-body' });
 
     // ── Same step (Hardware & memory): sampling/review config list ───────────
     // Expand All settings drawer to show parameters
