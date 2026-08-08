@@ -3865,10 +3865,11 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
   border: 1px solid rgba(255,255,255,0.09);
   border-radius: 12px;
   background: rgba(15, 23, 42, 0.4);
-  animation: qa-fade-in 0.25s ease;
+  backdrop-filter: saturate(1.3) blur(18px);
   max-height: 360px;
   display: flex;
   flex-direction: column;
+  isolation: isolate;
 }
 
 @keyframes qa-fade-in {

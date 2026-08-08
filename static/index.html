@@ -3525,8 +3525,7 @@
                 <span class="wizard-step-sep" aria-hidden="true"></span>
                 <span class="step-badge" data-step="2" title="Step 3: Start server"><span class="step-num">3</span></span>
             </div>
-            <!-- M5-A: View mode toggle (Guided/Pro) -->
-            <div class="view-mode-toggle" id="view-mode-toggle" style="display:none;">
+            <div class="view-mode-toggle" id="view-mode-toggle">
                 <label for="view-mode-select">View:</label>
                 <select id="view-mode-select">
                     <option value="guided" selected>Guided</option>
@@ -3933,18 +3932,6 @@
 
             <!-- Step 1: Hardware -->
             <div class="wizard-step" id="wizard-step-1" tabindex="-1">
-                <!-- M5-A: Left-rail settings navigator (Pro mode only) -->
-                <div class="pro-rail" id="pro-rail" style="display:none;">
-                    <div class="pro-rail-header">
-                        <span class="pro-rail-title">Settings</span>
-                    </div>
-                    <nav class="pro-rail-nav" id="pro-rail-nav">
-                        <!-- Populated by JS from GROUPS data -->
-                    </nav>
-                    <div class="pro-rail-footer">
-                        <button type="button" class="pro-rail-kb-shortcut" id="pro-rail-kb-shortcut" title="Quick search (⌘K / Ctrl+K)">⌘K</button>
-                    </div>
-                </div>
                 <div class="wizard-main">
                 <div class="rapid-hardware-panel" id="rapid-hardware-panel" hidden>
                     <div class="rapid-hardware-orb">R</div>

@@ -1,3 +1,4 @@
+console.log('[WIZARD] MODULE LOADED');
 /* global DOMPurify */
 // Set by spawn-wizard-hf-browse.js so this module can re-trigger the quant
 // advisor once memory/VRAM data arrives, without a circular import. Declared
@@ -92,7 +93,7 @@ import {
   updateVramDisplay,
   updateMoeSliderVisuals,
 } from './spawn-wizard-vram-display.js';
-import { renderProLayout, restoreGuidedLayout } from './spawn-wizard-pro-renderer.js';
+
 import {
   bindCtxQuickPicks,
   updateCtxQuickPickActive,
@@ -142,87 +143,32 @@ function _renderAllSettingsDrawer() {
 
 export { _renderAllSettingsDrawer };
 
-// ── M5-A: View mode toggle + left rail ──────────────────────────────────────
-
-const VIEW_MODE_STORAGE_KEY = 'wizard_view_mode';
+// ── View mode toggle ────────────────────────────────────────────────────────
 
 function _initViewMode() {
   const select = document.getElementById('view-mode-select');
-  const toggle = document.getElementById('view-mode-toggle');
-  const rail = document.getElementById('pro-rail');
+  if (!select) return;
 
   // Restore from sessionStorage
   try {
-    const saved = sessionStorage.getItem(VIEW_MODE_STORAGE_KEY);
-    if (saved === 'pro' || saved === 'guided') {
-      wizardState.viewMode = saved;
+    const saved = sessionStorage.getItem('wizard_view_mode');
+    if (saved === 'pro') {
+      wizardState.viewMode = 'pro';
+      select.value = 'pro';
     }
   } catch {}
 
-  if (select) select.value = wizardState.viewMode;
-
-  if (!toggle || !rail) return;
-
-  const switchMode = () => {
-    if (wizardState.viewMode === 'pro') {
-      rail.style.display = '';
-      renderProLayout();
-    } else {
-      rail.style.display = 'none';
-      restoreGuidedLayout();
-    }
-  };
-
-  select?.addEventListener('change', () => {
+  select.addEventListener('change', () => {
     const newMode = select.value;
-    try { sessionStorage.setItem(VIEW_MODE_STORAGE_KEY, newMode); } catch {}
+    try { sessionStorage.setItem('wizard_view_mode', newMode); } catch {}
     wizardState.viewMode = newMode;
-    switchMode();
+    // Phase 10b: When Pro layout is implemented, render it here
+    // For now, only Guided mode is active
+    if (newMode === 'pro') {
+      // TODO: renderProLayout();
+      console.log('[WIZARD] Pro mode selected (not yet implemented)');
+    }
   });
-
-  switchMode();
-}
-
-function _renderProRail() {
-  const nav = document.getElementById('pro-rail-nav');
-  if (!nav) return;
-  nav.innerHTML = '';
-
-  // Get groups from both IA files
-  const groups = [
-    ...(window.spawnWizardLlamaIA?.GROUPS || []),
-    ...(window.spawnWizardMlxIA?.GROUPS || []),
-  ];
-
-  // Deduplicate by id
-  const seen = new Set();
-  for (const g of groups) {
-    if (seen.has(g.id) || !g.id) continue;
-    seen.add(g.id);
-
-    const item = document.createElement('a');
-    item.className = 'pro-rail-item';
-    item.textContent = g.label || g.id;
-    item.href = `#${g.id}`;
-    item.dataset.groupId = g.id;
-    item.addEventListener('click', (e) => {
-      e.preventDefault();
-      const main = document.querySelector('#wizard-step-1 .wizard-main');
-      if (!main) return;
-      // Find the group in the main pane and scroll to it
-      const allGroups = main.querySelectorAll('[data-group-id]');
-      for (const el of allGroups) {
-        if (el.dataset.groupId === g.id) {
-          main.scrollTo({ top: Math.max(0, el.offsetTop - main.offsetTop - 60), behavior: 'smooth' });
-          break;
-        }
-      }
-      // Update active state
-      nav.querySelectorAll('.pro-rail-item').forEach(i => i.classList.remove('active'));
-      item.classList.add('active');
-    });
-    nav.appendChild(item);
-  }
 }
 
 // ── Spawn Wizard Module ───────────────────────────────────────────────────────
@@ -362,13 +308,7 @@ export const wizardState = {
   profile: 'balanced',
   useCase: 'agentic',    // 'agentic' | 'general' | 'roleplay'
   mode: 'guided',
-  viewMode: (() => {
-    try {
-      const saved = sessionStorage.getItem('wizard_view_mode');
-      if (saved === 'pro') return 'pro';
-    } catch {}
-    return 'guided';
-  })(),
+  viewMode: 'guided',    // 'guided' | 'pro'
   model: {
     source: 'local',     // 'local' | 'hf' | 'import'
     path: '',
@@ -633,6 +573,7 @@ function applyReducedMotion() {
 
 export function openSpawnWizard(opts = {}) {
   if (!dom.overlay) return;
+  window.wizardState = wizardState;
   resetWizardState();
   document.getElementById('models-modal')?.classList.remove('open');
   window.closePresetsPanel?.();
@@ -2332,11 +2273,14 @@ function renderEngineSelection() {
   configureMlxWizardIA(dom.overlay, selected === 'rapid_mlx', wizardState.profile);
   if (selected === 'rapid_mlx') applyEffectiveLocks(dom.overlay);
   renderContextChipRow();
-  if (wizardState.viewMode === 'pro') _renderProRail();
   // llama.cpp's advanced fields exist in the DOM regardless of engine
   // selection (hidden via .engine-rapid-mlx CSS when MLX is active), so this
   // is always enabled — mirrors configureMlxWizardIA's build-once guard.
   configureLlamaWizardIA(dom.overlay, true, wizardState.profile);
+
+  // Expose IA data on window for Pro renderer and other consumers
+  window.spawnWizardLlamaIA = { GROUPS: window._llamaGroups || [], SUPERSECTIONS: window._llamaSupersections || [] };
+  window.spawnWizardMlxIA = { GROUPS: window._mlxGroups || [], SUPERSECTIONS: window._mlxSupersections || [] };
   // §2.7: MLX repos are already a specific quant, so swap the llama.cpp quant
   // advisor for the MLX sidebar body (repo-is / sibling-variants) instead.
   const mlxSidebarBody = document.getElementById('mlx-sidebar-body');

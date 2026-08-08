@@ -103,6 +103,8 @@ const ia = createWizardIA({
 
 export function configureMlxWizardIA(root, enabled, profile = 'balanced') {
   ia.configure(root, enabled, profile, GROUPS, SUPERSECTIONS, '#spawn-rapid-advanced-fields');
+  window._mlxGroups = GROUPS;
+  window._mlxSupersections = SUPERSECTIONS;
 }
 
 // Re-applies each built group's tier-driven open/closed state without

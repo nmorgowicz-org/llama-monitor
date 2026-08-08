@@ -64,6 +64,8 @@ const ia = createWizardIA({
 
 export function configureLlamaWizardIA(root, enabled, profile = 'balanced') {
   ia.configure(root, enabled, profile, GROUPS, SUPERSECTIONS, '#spawn-advanced-fields');
+  window._llamaGroups = GROUPS;
+  window._llamaSupersections = SUPERSECTIONS;
 }
 
 export function applyLlamaTierVisibility(root, profile) {

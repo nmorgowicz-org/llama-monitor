@@ -141,6 +141,8 @@ pub const FEATURES_SPAWN_WIZARD_REVIEW_STEP_JS: &str =
     include_str!("../../static/js/features/spawn-wizard-review-step.js");
 pub const FEATURES_SPAWN_WIZARD_SPAWN_JS: &str =
     include_str!("../../static/js/features/spawn-wizard-spawn.js");
+pub const FEATURES_SPAWN_WIZARD_STICKY_VRAM_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-sticky-vram.js");
 pub const FEATURES_SPAWN_WIZARD_THIRD_PARTY_IMPORT_JS: &str =
     include_str!("../../static/js/features/spawn-wizard-third-party-import.js");
 pub const FEATURES_SPAWN_WIZARD_TUNING_JS: &str =

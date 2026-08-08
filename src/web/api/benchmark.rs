@@ -557,24 +557,25 @@ fn api_model_defaults(
                 // `modes_for_model` falls through to the family-agnostic universal presets —
                 // never to a filename/repo-name substring guess.
                 let mut introspected_meta: Option<serde_json::Value> = None;
-                if gguf_arch.is_empty() && !hf_repo_id.is_empty() && !hf_file_path.is_empty() {
-                    if let Ok(meta) =
+                if gguf_arch.is_empty()
+                    && !hf_repo_id.is_empty()
+                    && !hf_file_path.is_empty()
+                    && let Ok(meta) =
                         crate::hf::fetch_gguf_header_metadata(&hf_repo_id, &hf_file_path).await
-                    {
-                        let model_meta = meta.to_model_metadata();
-                        if let Some(arch) = &model_meta.gguf_arch {
-                            gguf_arch = arch.clone();
-                        }
-                        introspected_meta = Some(serde_json::json!({
-                            "gguf_arch": model_meta.gguf_arch,
-                            "total_params_b": meta.param_b(),
-                            "active_params_b": model_meta.active_params_b,
-                            "n_experts": model_meta.n_experts,
-                            "n_experts_used": model_meta.n_experts_used,
-                            "mtp_depth": model_meta.mtp_depth,
-                            "n_ctx_train": model_meta.n_ctx_train,
-                        }));
+                {
+                    let model_meta = meta.to_model_metadata();
+                    if let Some(arch) = &model_meta.gguf_arch {
+                        gguf_arch = arch.clone();
                     }
+                    introspected_meta = Some(serde_json::json!({
+                        "gguf_arch": model_meta.gguf_arch,
+                        "total_params_b": meta.param_b(),
+                        "active_params_b": model_meta.active_params_b,
+                        "n_experts": model_meta.n_experts,
+                        "n_experts_used": model_meta.n_experts_used,
+                        "mtp_depth": model_meta.mtp_depth,
+                        "n_ctx_train": model_meta.n_ctx_train,
+                    }));
                 }
 
                 let backend = body["backend"]

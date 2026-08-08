@@ -403,6 +403,17 @@ async function detectPlatformBackend() {
 // rendered identically no matter what HF had been asked for.
 
 function resolveSortParam(legacySort, hfSort) {
+  // If legacySort is set (e.g. discover pills), prefer it over hfSort
+  if (legacySort) {
+    switch (legacySort) {
+      case 'trending':    return 'trendingScore';
+      case 'newest':      return 'lastModified';
+      case 'relevance':   return 'relevance';
+      case 'downloads':   return 'downloads';
+      case 'likes':       return 'likes';
+      default:            return legacySort;
+    }
+  }
   switch (hfSort) {
     case HF_SORT.RELEVANCE:    return 'relevance';
     case HF_SORT.LAST_UPDATED: return 'lastModified';

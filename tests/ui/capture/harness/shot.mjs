@@ -64,9 +64,13 @@ export async function captureShot(page, rawFilename, options = {}) {
     // viewport size, same as what a user actually sees.
     if (expandSelector) {
         await page.evaluate((sel) => {
-            document.querySelector(sel)?.scrollTo({ top: 0, behavior: 'instant' });
+            const el = document.querySelector(sel);
+            if (el) {
+                el.scrollTop = 0;
+                el.scrollLeft = 0;
+            }
         }, expandSelector);
-        await sleep(100);
+        await sleep(200);
         await page.screenshot({ path: join(currentArtifactsDir(), filename), fullPage: false, ...screenshotOptions });
         console.log(`[CAPTURE] Saved ${filename}`);
         return;

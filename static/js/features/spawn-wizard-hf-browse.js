@@ -1093,7 +1093,7 @@ async function fetchHfFiles(repo) {
       // Real GGUF-header introspection (Phase 10e) — no filename guessing. Fires a
       // range-fetch against the real header so paramB/MoE/MTP/gguf_arch reflect the
       // actual file, same as local doIntrospect() does for downloaded models.
-      introspectHfFileMetadata(repoId, fname, file.size ? Number(file.size) : 0);
+      const introspectionDone = introspectHfFileMetadata(repoId, fname, file.size ? Number(file.size) : 0);
 
       // Store file lists so hardware step can offer quant swap + mmproj
       wizardState.model.quantFiles = [];
@@ -1127,6 +1127,13 @@ async function fetchHfFiles(repo) {
       autoInstallChatTemplate();
       refreshEngineRecommendation();
       refreshStepGuardrails();
+
+      // After introspection completes, trigger quant advisor if paramB was set
+      void introspectionDone.then((ok) => {
+        if (ok && wizardState.model.paramB > 0) {
+          triggerQuantAdvisor();
+        }
+      });
     },
   });
 }
