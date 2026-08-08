@@ -1032,7 +1032,7 @@ changes landed in both places. No shared component, no automated parity check. S
 
 **Phase 10a status: COMPLETE.** All four milestones delivered: M2 (tier retirement + critical/view), M3 (sticky header + provenance), M4 (all-settings drawer). See commits `57c8462e`, `3693af05`, `3ee360a1`, `43c16b30`, `3f5b45a7`, `625f6c0`.
 
-**Phase 10b status: In progress — M5-A + M5-B complete.** M5-A (`fdf6b954`, `ad8add9`): Pro toggle + left rail settings navigator. Toggle always visible, switches between "Guided"/"Pro" labels. M5-B (`32d3e16`): Pro renderer — dense multi-column layout, each supersection as section, groups as subsections, controls in grid. The actual Pro renderer now works.
+**Phase 10b status: In progress — M5-A + M5-B + M5-C complete.** M5-A (`fdf6b954`, `ad8add9`): Pro toggle + left rail. M5-B (`32d3e16`): Pro renderer. M5-C (`a3b50302`): ⌘K quick filter (Cmd/Ctrl+K shortcut), "Modified only" toggle (hides at-default controls), "Reset all" button. Pro layout functional end-to-end.
 
 Only ~40% of Option A shipped in `ec0f813b`. Missing pieces, all specified in the archived doc's §3:
 - Decision cards for the small number of choices that actually drive downstream config (per §3 wireframe — not every field, only the ones with real branching consequence).
