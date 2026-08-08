@@ -1032,6 +1032,8 @@ changes landed in both places. No shared component, no automated parity check. S
 
 **Phase 10a status: COMPLETE.** All four milestones delivered: M2 (tier retirement + critical/view), M3 (sticky header + provenance), M4 (all-settings drawer). See commits `57c8462e`, `3693af05`, `3ee360a1`, `43c16b30`, `3f5b45a7`, `625f6c0`.
 
+**Phase 10b status: In progress — M5-A complete.** M5-A (`fdf6b954`, `ad8add9`): Pro toggle + left rail settings navigator. Toggle is always visible in header (switches between "Guided"/"Pro" labels); left rail appears only in Pro mode with group navigation. The actual Pro renderer (dense multi-column layout) is M5-B.
+
 Only ~40% of Option A shipped in `ec0f813b`. Missing pieces, all specified in the archived doc's §3:
 - Decision cards for the small number of choices that actually drive downstream config (per §3 wireframe — not every field, only the ones with real branching consequence).
 - The "All settings (N)" collapsed drawer for everything else, so Guided stays uncluttered without silently hiding controls that exist.
