@@ -35,6 +35,7 @@ export { openCardPanel };
 import { configureMlxWizardIA, applyMlxTierVisibility } from './spawn-wizard-mlx-ia.js';
 import { configureLlamaWizardIA, applyLlamaTierVisibility } from './spawn-wizard-llama-ia.js';
 import { controlsForLoader, applyEffectiveLocks } from './spawn-wizard-groups.js';
+import { initGuidedCards } from './spawn-wizard-guided.js';
 import {
   _platformInfo,
   setWizardPlatformInfo,
@@ -1869,6 +1870,11 @@ export function showStep(index) {
   if (index === 1) {
     _applyPendingRestore();
     _renderAllSettingsDrawer();
+    // Initialize Option A (Guided) decision cards on first step 2 visit
+    if (!window._guidedCardsInitialized) {
+      initGuidedCards();
+      window._guidedCardsInitialized = true;
+    }
   }
 
   // Keep the URL in sync so browser Back/Forward traverses wizard steps. Only
