@@ -4,6 +4,7 @@ import fs from 'fs';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
 import { FRAME_DIR, REMOTE_SERVER, SCREENSHOT_TAB_PREFIX, currentArtifactsDir, tagFilename, sleep } from './paths.mjs';
+import { recordCapture } from './receipt.mjs';
 
 export async function cleanupScreenshotTabs(page, { keepOne = false } = {}) {
     await page.evaluate(async ({ prefix, keepOne }) => {
@@ -72,11 +73,13 @@ export async function captureShot(page, rawFilename, options = {}) {
         }, expandSelector);
         await sleep(200);
         await page.screenshot({ path: join(currentArtifactsDir(), filename), fullPage: false, ...screenshotOptions });
+        recordCapture(filename, page.viewport());
         console.log(`[CAPTURE] Saved ${filename}`);
         return;
     }
 
     await page.screenshot({ path: join(currentArtifactsDir(), filename), fullPage: true, ...screenshotOptions });
+    recordCapture(filename, page.viewport());
     console.log(`[CAPTURE] Saved ${filename}`);
 }
 

@@ -71,18 +71,22 @@ export default async function(ctx) {
     );
     await sleep(350);
 
-    await captureShot(page, 'spawn-wizard-engines-dark.png', { fullPage: true, expandSelector: '.wizard-body' });
+    // INTENT: Rapid engine selection in the current dark desktop baseline.
+    await captureShot(page, 'spawn-wizard-rapid-guided-baseline-dark.png', { fullPage: true, expandSelector: '.wizard-body' });
     await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
     await sleep(250);
-    await captureShot(page, 'spawn-wizard-engines-light.png', { fullPage: true, expandSelector: '.wizard-body' });
+    // INTENT: Rapid engine selection in the current light desktop baseline.
+    await captureShot(page, 'spawn-wizard-rapid-guided-baseline-light.png', { fullPage: true, expandSelector: '.wizard-body' });
 
     await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
     await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
     await sleep(250);
-    await captureShot(page, 'spawn-wizard-engines-reduced-narrow.png', { fullPage: true, expandSelector: '.wizard-body' });
+    // INTENT: Rapid engine selection at the narrow reduced-motion baseline.
+    await captureShot(page, 'spawn-wizard-rapid-guided-baseline-reduced-narrow.png', { fullPage: true, expandSelector: '.wizard-body' });
 
-    // Use taller viewport so the rapid-hardware-panel fits without flex compression.
-    await page.setViewport({ width: 1440, height: 1200 });
+    // Keep baseline evidence at a realistic desktop viewport. The wizard body
+    // scrolls internally; a taller capture would hide overflow defects.
+    await page.setViewport({ width: 1280, height: 900, deviceScaleFactor: 1 });
     await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
     await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
@@ -150,6 +154,7 @@ export default async function(ctx) {
     await sleep(400);
     await scrollToElement('#spawn-kv-cache-dtype', 20);
     await sleep(300);
+    // INTENT: Rapid reasoning mode shows its effective KV precision lock.
     await captureShot(page, 'spawn-wizard-reasoning-mode-on.png', { runtimeTag: 'rapidmlx-local', expandSelector: '.wizard-body' });
 
     // Speculative decoding controls live inside the collapsible
@@ -163,9 +168,11 @@ export default async function(ctx) {
     });
     await scrollToElement('#spawn-rapid-speculative-enabled', 30);
     await sleep(250);
+    // INTENT: Rapid speculative controls are visible in dark mode.
     await captureShot(page, 'spawn-wizard-speculative-enabled-dark.png', { runtimeTag: 'rapidmlx-local', expandSelector: '.wizard-body' });
     await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
     await sleep(150);
+    // INTENT: Rapid speculative controls remain legible in light mode.
     await captureShot(page, 'spawn-wizard-speculative-enabled-light.png', { runtimeTag: 'rapidmlx-local', expandSelector: '.wizard-body' });
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
     await sleep(200); // allow theme reflow
@@ -210,11 +217,13 @@ export default async function(ctx) {
     );
     await scrollToElement('#spawn-rapid-speculative-trust-wrap', 0);
     await sleep(300);
+    // INTENT: Rapid trust consent warning is visible in dark mode.
     await captureShot(page, 'spawn-wizard-speculative-trust-consent-dark.png', { runtimeTag: 'rapidmlx-local', expandSelector: '.wizard-body' });
     await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
     await sleep(150);
     await scrollToElement('#spawn-rapid-speculative-trust-wrap', 0);
     await sleep(300);
+    // INTENT: Rapid trust consent warning is visible in light mode.
     await captureShot(page, 'spawn-wizard-speculative-trust-consent-light.png', { runtimeTag: 'rapidmlx-local', expandSelector: '.wizard-body' });
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
 
@@ -228,6 +237,7 @@ export default async function(ctx) {
     await sleep(300);
     await scrollToElement('#spawn-rapid-tool-call-parser', -50);
     await sleep(400);
+    // INTENT: Rapid parser selection exposes detected profile evidence.
     await captureShot(page, 'spawn-wizard-parser-detected.png', { runtimeTag: 'rapidmlx-local', expandSelector: '.wizard-body' });
 
     // Reset reasoning mode.
@@ -250,6 +260,7 @@ export default async function(ctx) {
     await sleep(300);
     // Keep the full-screen state: the Wizard context and backdrop are part of
     // the visual evidence, rather than a separate close-up artifact.
+    // INTENT: Rapid advanced cache controls retain their readable desktop frame.
     await captureShot(page, 'spawn-wizard-rapid-mlx-advanced-controls.png', { runtimeTag: 'rapidmlx-local', expandSelector: '.wizard-body' });
 
     // spawn-wizard-rapid-mlx-escape-hatch.png — Advanced escape-hatch flags expanded.
@@ -269,6 +280,7 @@ export default async function(ctx) {
         if (sectionVisible) {
             await scrollToElement('#rapid-mlx-advanced-section', -30);
             await sleep(300);
+            // INTENT: Rapid escape-hatch controls are shown only when available.
             await captureShot(page, 'spawn-wizard-rapid-mlx-escape-hatch.png', { runtimeTag: 'rapidmlx-local', expandSelector: '.wizard-body' });
         } else {
             console.log('[CAPTURE] Escape-hatch section not visible, skipping.');
@@ -290,6 +302,7 @@ export default async function(ctx) {
         document.querySelector('.wizard-body')?.scrollTo({ top: 0, behavior: 'instant' });
     });
     await sleep(500);
+    // INTENT: Rapid memory fit state is visible at the top of the Tune pane.
     await captureShot(page, 'spawn-wizard-rapid-mlx-fit.png', { fullPage: true, runtimeTag: 'rapidmlx-local', expandSelector: '.wizard-body' });
 
     // Reasoning mode ON so the config preview shows "INT4 → INT8 (reasoning
@@ -306,6 +319,7 @@ export default async function(ctx) {
         { timeout: 8000 }
     );
     await sleep(500);
+    // INTENT: Rapid launch review exposes the requested/effective configuration.
     await captureShot(page, 'spawn-wizard-rapid-mlx-review.png', { fullPage: true, runtimeTag: 'rapidmlx-local', expandSelector: '.wizard-body' });
 
     console.log('[CAPTURE] Scenario "spawn-wizard-engines" complete.');

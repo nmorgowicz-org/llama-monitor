@@ -1,4 +1,5 @@
 // Scenario: spawn-wizard
+// SCENARIO INTENT: Capture the current llama.cpp three-step wizard state without treating it as future Guided or Pro acceptance.
 // Extracted from tests/ui/capture.mjs (Phase A3).
 import { gotoApp } from '../../harness/browser.mjs';
 import { sleep } from '../../harness/paths.mjs';

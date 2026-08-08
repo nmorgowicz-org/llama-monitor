@@ -1,4 +1,5 @@
 // Scenario: spawn-wizard-gif
+// SCENARIO INTENT: Animate the current llama.cpp wizard flow for diagnostic documentation.
 // Extracted from tests/ui/capture.mjs (Phase A3).
 import fs from 'fs';
 import { join } from 'path';

@@ -1,4 +1,5 @@
 // Scenario: spawn-wizard-hf-download
+// SCENARIO INTENT: Capture user-visible llama.cpp Hugging Face download states and progress.
 // Extracted from tests/ui/capture.mjs (Phase A3).
 import { attachToServer } from '../../harness/attach.mjs';
 import { gotoApp } from '../../harness/browser.mjs';

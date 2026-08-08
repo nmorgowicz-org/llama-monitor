@@ -1,4 +1,5 @@
 // Scenario: spawn-wizard-tier-matrix (plan §5 Phase 4b item 3).
+// SCENARIO INTENT: Capture the current legacy disclosure tiers as diagnostic evidence only.
 // Captures the llama.cpp hardware step at Quick / Balanced / Advanced so
 // applyProfileVisibility()'s registry-driven tier disclosure — which no
 // other capture scenario exercises across all three profiles — has visual

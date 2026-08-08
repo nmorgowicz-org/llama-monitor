@@ -8,6 +8,7 @@ import { seedConfig, findAvailablePort, spawnLlamaMonitor, cleanupServer, cleanu
 import { seedRapidMlxCapturePreset, seedNestedMlxFixture, seedModelsDirFixture } from './harness/fixtures.mjs';
 import { launchBrowser } from './harness/browser.mjs';
 import { cleanupFrames } from './harness/shot.mjs';
+import { beginCaptureReceipt, finishCaptureReceipt } from './harness/receipt.mjs';
 
 import scenarioWelcome from './scenarios/core/welcome.mjs';
 import scenarioFreeCache from './scenarios/core/free-cache.mjs';
@@ -28,14 +29,14 @@ import scenarioEvidenceDrawer from './scenarios/presets/evidence-drawer.mjs';
 import scenarioCommunitySources from './scenarios/presets/community-sources.mjs';
 import scenarioDiscussions from './scenarios/presets/discussions.mjs';
 import scenarioSpawnWizard from './scenarios/wizard-llamacpp/spawn-wizard.mjs';
-import scenarioSpawnWizardEngines from './scenarios/wizard-llamacpp/spawn-wizard-engines.mjs';
+import scenarioSpawnWizardRapidGuidedBaseline from './scenarios/wizard-rapidmlx/spawn-wizard-rapid-guided-baseline.mjs';
 import scenarioSpawnWizardGif from './scenarios/wizard-llamacpp/spawn-wizard-gif.mjs';
 import scenarioSpawnWizardHfDownload from './scenarios/wizard-llamacpp/spawn-wizard-hf-download.mjs';
 import scenarioSpawnWizardTierMatrix from './scenarios/wizard-llamacpp/spawn-wizard-tier-matrix.mjs';
 import scenarioSpawnWizardRapidMlxGif from './scenarios/wizard-rapidmlx/spawn-wizard-rapid-mlx-gif.mjs';
-import scenarioRapidMlxRuntime from './scenarios/wizard-rapidmlx/rapid-mlx-runtime.mjs';
-import scenarioRapidMlxLive from './scenarios/wizard-rapidmlx/rapid-mlx-live.mjs';
-import scenarioDashboardRapidMlx from './scenarios/wizard-rapidmlx/dashboard-rapid-mlx.mjs';
+import scenarioRapidMlxRuntime from './scenarios/features/rapid-mlx-runtime.mjs';
+import scenarioRapidMlxLive from './scenarios/validation/rapid-mlx-live.mjs';
+import scenarioDashboardRapidMlx from './scenarios/features/dashboard-rapid-mlx.mjs';
 import scenarioSettings from './scenarios/config/settings.mjs';
 import scenarioAppearancePalette from './scenarios/config/appearance-palette.mjs';
 import scenarioTls from './scenarios/config/tls.mjs';
@@ -198,9 +199,23 @@ const SCENARIOS = {
     'panels': { run: scenarioPanels, setup: () => ({ extraArgs: seedModelsDirFixture() }), category: 'core', runtime: 'neutral' },
     'models': { run: scenarioModels, setup: () => ({ extraArgs: seedModelsDirFixture() }), category: 'models', runtime: 'neutral' },
     'dashboard': { run: scenarioDashboard, category: 'core', runtime: 'neutral' },
-    'dashboard-rapid-mlx': { run: scenarioDashboardRapidMlx, category: 'wizard-rapidmlx', runtime: 'rapidmlx-local' },
+    'dashboard-rapid-mlx': { run: scenarioDashboardRapidMlx, category: 'features', runtime: 'rapidmlx-local' },
     'spawn-wizard': { run: scenarioSpawnWizard, category: 'wizard-llamacpp', runtime: 'llamacpp-local' },
-    'spawn-wizard-engines': { run: scenarioSpawnWizardEngines, setup: () => { seedNestedMlxFixture(); }, category: 'wizard-llamacpp', runtime: 'neutral' },
+    'spawn-wizard-rapid-guided-baseline': {
+        run: scenarioSpawnWizardRapidGuidedBaseline, setup: () => { seedNestedMlxFixture(); }, category: 'wizard-rapidmlx', runtime: 'rapidmlx-local',
+        contract: {
+            intent: 'Document the current Rapid-MLX wizard baseline in its own Rapid artifact group.',
+            expectedOutputs: [
+                'spawn-wizard-rapid-guided-baseline--rapidmlx-local--dark.png', 'spawn-wizard-rapid-guided-baseline--rapidmlx-local--light.png',
+                'spawn-wizard-rapid-guided-baseline--rapidmlx-local--reduced-narrow.png', 'rapidmlx-local--spawn-wizard-reasoning-mode-on.png',
+                'rapidmlx-local--spawn-wizard-speculative-enabled-dark.png', 'rapidmlx-local--spawn-wizard-speculative-enabled-light.png',
+                'rapidmlx-local--spawn-wizard-speculative-trust-consent-dark.png', 'rapidmlx-local--spawn-wizard-speculative-trust-consent-light.png',
+                'rapidmlx-local--spawn-wizard-parser-detected.png', 'rapidmlx-local--spawn-wizard-rapid-mlx-advanced-controls.png',
+                'rapidmlx-local--spawn-wizard-rapid-mlx-escape-hatch.png', 'rapidmlx-local--spawn-wizard-rapid-mlx-fit.png',
+                'rapidmlx-local--spawn-wizard-rapid-mlx-review.png',
+            ],
+        },
+    },
     'spawn-wizard-gif': { run: scenarioSpawnWizardGif, category: 'wizard-llamacpp', runtime: 'llamacpp-local' },
     'spawn-wizard-rapid-mlx-gif': { run: scenarioSpawnWizardRapidMlxGif, category: 'wizard-rapidmlx', runtime: 'rapidmlx-local' },
     'spawn-wizard-hf-download': { run: scenarioSpawnWizardHfDownload, category: 'wizard-llamacpp', runtime: 'llamacpp-local' },
@@ -210,8 +225,8 @@ const SCENARIOS = {
     'benchmark-results': { run: scenarioBenchmarkResults, category: 'features', runtime: 'neutral' },
     'llama-updater': { run: scenarioLlamaUpdater, category: 'features', runtime: 'llamacpp-local' },
     'chat-history-qa': { run: scenarioChatHistoryQA, category: 'features', runtime: 'neutral' },
-    'rapid-mlx-runtime': { run: scenarioRapidMlxRuntime, category: 'wizard-rapidmlx', runtime: 'rapidmlx-local' },
-    'rapid-mlx-live': { run: scenarioRapidMlxLive, category: 'wizard-rapidmlx', runtime: 'rapidmlx-local' },
+    'rapid-mlx-runtime': { run: scenarioRapidMlxRuntime, category: 'features', runtime: 'rapidmlx-local' },
+    'rapid-mlx-live': { run: scenarioRapidMlxLive, category: 'validation', runtime: 'rapidmlx-local' },
     'sparkline': { run: scenarioSparkline, category: 'validation', runtime: 'neutral' },
     'gifs': { run: scenarioGifs, category: 'validation', runtime: 'neutral' },
     'smoke': { run: scenarioSmoke, category: 'core', runtime: 'neutral' },
@@ -238,6 +253,7 @@ export async function runCli({ scenario: forcedScenario = null, argv = process.a
     }
     setArtifactCategory(scenario.category);
     setArtifactRuntime(scenarioName, scenario.runtime);
+    if (scenario.contract) beginCaptureReceipt({ scenario: scenarioName, category: scenario.category, runtime: scenario.runtime, ...scenario.contract });
 
     let server = null;
     let browser = null;
@@ -271,6 +287,7 @@ export async function runCli({ scenario: forcedScenario = null, argv = process.a
             browser = launched.browser;
             const page = launched.page;
             await scenario.run({ page, baseUrl, browser }, options);
+            if (scenario.contract) finishCaptureReceipt();
             console.log(`[CAPTURE] Scenario "${scenarioName}" complete.`);
             lastErr = null;
             break;

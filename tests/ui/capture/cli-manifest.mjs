@@ -25,31 +25,37 @@ function walk(dir) {
     return out;
 }
 
-function intentFor(lines, idx) {
+function intentFor(lines, idx, scenarioIntent) {
     for (let i = idx - 1; i >= Math.max(0, idx - 5); i -= 1) {
         const line = lines[i].trim();
         if (line.startsWith('// INTENT:')) return line.replace('// INTENT:', '').trim();
         if (line.startsWith('//')) return line.replace(/^\/\/\s*/, '').trim();
         if (line !== '') break; // stop at first non-comment, non-blank line
     }
-    return '(unannotated)';
+    return scenarioIntent || '(unannotated)';
 }
 
 function main() {
+    const strict = process.argv.includes('--strict');
     const files = walk(SCENARIOS_DIR);
     let total = 0;
     let annotated = 0;
+    const violations = [];
     for (const file of files.sort()) {
         const text = fs.readFileSync(file, 'utf8');
         const lines = text.split('\n');
+        const scenarioIntent = text.match(/^\/\/ SCENARIO INTENT:\s*(.+)$/m)?.[1] || null;
         const rows = [];
         lines.forEach((line, idx) => {
             const m = CAPTURE_CALL.exec(line);
             if (m) {
-                const intent = intentFor(lines, idx);
+                const intent = intentFor(lines, idx, scenarioIntent);
                 rows.push({ filename: m[2], intent });
                 total += 1;
                 if (intent !== '(unannotated)') annotated += 1;
+                if (strict && relative(SCENARIOS_DIR, file).includes('spawn-wizard') && intent === '(unannotated)') {
+                    violations.push(`${relative(SCENARIOS_DIR, file)}:${idx + 1} missing INTENT for ${m[2]}`);
+                }
             }
         });
         if (rows.length === 0) continue;
@@ -59,6 +65,10 @@ function main() {
         }
     }
     console.log(`\n[CAPTURE MANIFEST] ${annotated}/${total} capture call sites have an INTENT comment.`);
+    if (strict && violations.length) {
+        for (const violation of violations) console.error(`[CAPTURE MANIFEST] ${violation}`);
+        process.exitCode = 1;
+    }
 }
 
 main();

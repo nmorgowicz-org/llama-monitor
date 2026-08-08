@@ -77,6 +77,21 @@ cargo build --release
 node tests/ui/capture/index.mjs --list-scenarios
 ```
 
+### Wizard capture contract
+
+Wizard still scenarios declare an intent and exact final output filenames. Before a run, the harness
+removes only those filenames from that scenario's assigned artifact group; on success it writes a
+`<scenario>--receipt.json` beside the images with the produced names and viewports. A missing,
+unexpected, or unrealistic-viewport screenshot fails the scenario. Check static call-site metadata
+without starting the app with:
+
+```bash
+node tests/ui/capture/cli-manifest.mjs --strict
+```
+
+Rapid wizard stills belong in `artifacts/wizard-rapidmlx`; llama.cpp wizard stills belong in
+`artifacts/wizard-llamacpp`. Runtime/dashboard scenarios are grouped by their own feature area.
+
 ### Current scenarios
 
 | Scenario | Purpose |
