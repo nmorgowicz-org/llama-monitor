@@ -5774,6 +5774,102 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
   background: rgba(0,0,0,0.02);
   border-color: rgba(0,0,0,0.08);
 }
+
+/* ── M5-B: Pro layout (dense multi-column) ───────────────────────────────────── */
+
+.pro-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  margin-bottom: 16px;
+}
+
+.pro-section {
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  background: var(--color-bg-elevated, #1a1f28);
+  padding: 0;
+}
+
+.pro-section-header {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  background: color-mix(in srgb, var(--color-bg-elevated, #1a1f28) 95%, var(--color-accent) 5%);
+}
+
+.pro-section-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  margin: 0 0 2px 0;
+  color: var(--color-text, #e5e7eb);
+}
+
+.pro-section-desc {
+  font-size: 0.78rem;
+  color: var(--color-text-muted, #9ca3af);
+  margin: 0;
+}
+
+.pro-group {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+}
+
+.pro-group:last-child {
+  border-bottom: none;
+}
+
+.pro-group-header {
+  margin-bottom: 10px;
+}
+
+.pro-group-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 0 0 1px 0;
+  color: var(--color-text, #e5e7eb);
+}
+
+.pro-group-desc {
+  font-size: 0.75rem;
+  color: var(--color-text-muted, #9ca3af);
+  margin: 0;
+}
+
+.pro-controls-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 8px;
+}
+
+.pro-control {
+  display: block;
+  min-width: 0;
+}
+
+/* Light theme overrides */
+[data-theme="light"] .pro-section {
+  border-color: color-mix(in srgb, var(--color-text) 15%, transparent);
+  background: var(--color-bg-elevated, #f9fafb);
+}
+
+[data-theme="light"] .pro-section-header {
+  background: color-mix(in srgb, var(--color-bg-elevated, #f9fafb) 95%, var(--color-accent) 5%);
+  border-color: color-mix(in srgb, var(--color-text) 15%, transparent);
+}
+
+[data-theme="light"] .pro-group {
+  border-color: color-mix(in srgb, var(--color-text) 15%, transparent);
+}
+
+/* ── M5-B: Pro layout (dense multi-column) — responsive collapse ─────────────── */
+
+@media (max-width: 768px) {
+  .pro-controls-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .hw-model-info {
   display: flex;
   flex-direction: column;

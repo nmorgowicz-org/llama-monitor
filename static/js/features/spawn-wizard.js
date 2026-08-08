@@ -92,6 +92,7 @@ import {
   updateVramDisplay,
   updateMoeSliderVisuals,
 } from './spawn-wizard-vram-display.js';
+import { renderProLayout, restoreGuidedLayout } from './spawn-wizard-pro-renderer.js';
 import {
   bindCtxQuickPicks,
   updateCtxQuickPickActive,
@@ -162,12 +163,13 @@ function _initViewMode() {
 
   if (!toggle || !rail) return;
 
-  const updateVisibility = () => {
-    // Toggle is always visible; only the rail changes
+  const switchMode = () => {
     if (wizardState.viewMode === 'pro') {
       rail.style.display = '';
+      renderProLayout();
     } else {
       rail.style.display = 'none';
+      restoreGuidedLayout();
     }
   };
 
@@ -175,10 +177,10 @@ function _initViewMode() {
     const newMode = select.value;
     try { sessionStorage.setItem(VIEW_MODE_STORAGE_KEY, newMode); } catch {}
     wizardState.viewMode = newMode;
-    updateVisibility();
+    switchMode();
   });
 
-  updateVisibility();
+  switchMode();
 }
 
 function _renderProRail() {
