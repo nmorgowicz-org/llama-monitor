@@ -163,11 +163,10 @@ function _initViewMode() {
   if (!toggle || !rail) return;
 
   const updateVisibility = () => {
+    // Toggle is always visible; only the rail changes
     if (wizardState.viewMode === 'pro') {
-      toggle.style.display = 'flex';
       rail.style.display = '';
     } else {
-      toggle.style.display = 'none';
       rail.style.display = 'none';
     }
   };
