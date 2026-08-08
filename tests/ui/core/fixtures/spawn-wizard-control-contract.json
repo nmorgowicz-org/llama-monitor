@@ -1,0 +1,1065 @@
+{
+  "schema_version": 1,
+  "generated_from": [
+    "static/js/features/spawn-wizard-groups.js::CONTROLS",
+    "static/js/features/spawn-wizard-llama-ia.js::GROUPS",
+    "static/js/features/spawn-wizard-mlx-ia.js::GROUPS"
+  ],
+  "controls": [
+    {
+      "id": "spawn-context-size",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-card",
+      "presentation_view": "card",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-context-size",
+      "payload_keys": [
+        "context_size"
+      ],
+      "preset_keys": [
+        "context_size"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-batch-size",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-batch-size",
+      "payload_keys": [
+        "batch_size"
+      ],
+      "preset_keys": [
+        "batch_size"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-llama-ia.js:advanced-tuning"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-gpu-layers",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-gpu-layers",
+      "payload_keys": [
+        "gpu_layers"
+      ],
+      "preset_keys": [
+        "gpu_layers"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-cache-type-k",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-card",
+      "presentation_view": "card",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-cache-type-k",
+      "payload_keys": [
+        "ctk"
+      ],
+      "preset_keys": [
+        "ctk"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-cache-type-v",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-card",
+      "presentation_view": "card",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-cache-type-v",
+      "payload_keys": [
+        "ctv"
+      ],
+      "preset_keys": [
+        "ctv"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-kv-unified",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-kv-unified",
+      "payload_keys": [
+        "kv_unified"
+      ],
+      "preset_keys": [
+        "kv_unified"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "hw-quant-select",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "hw-quant-select",
+      "payload_keys": [],
+      "preset_keys": [],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "read-only or model-selection wrapper"
+    },
+    {
+      "id": "hw-mmproj-select",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-card",
+      "presentation_view": "card",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "hw-mmproj-select",
+      "payload_keys": [
+        "mmproj"
+      ],
+      "preset_keys": [
+        "mmproj"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "hw-use-mtp",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-card",
+      "presentation_view": "card",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "hw-use-mtp",
+      "payload_keys": [
+        "spec_type",
+        "spec_draft_n_max"
+      ],
+      "preset_keys": [
+        "spec_type",
+        "spec_draft_n_max"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-parallel-slots",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-parallel-slots",
+      "payload_keys": [
+        "parallel_slots"
+      ],
+      "preset_keys": [
+        "parallel_slots"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-llama-ia.js:advanced-tuning"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-ubatch-size",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-ubatch-size",
+      "payload_keys": [
+        "ubatch_size"
+      ],
+      "preset_keys": [
+        "ubatch_size"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-llama-ia.js:advanced-tuning"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-flash-attn",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-flash-attn",
+      "payload_keys": [
+        "flash_attn"
+      ],
+      "preset_keys": [
+        "flash_attn"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-llama-ia.js:advanced-tuning"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-prio",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-prio",
+      "payload_keys": [
+        "prio"
+      ],
+      "preset_keys": [
+        "prio"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-llama-ia.js:advanced-tuning"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-threads",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-threads",
+      "payload_keys": [
+        "threads"
+      ],
+      "preset_keys": [
+        "threads"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-llama-ia.js:advanced-tuning"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-threads-batch",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-threads-batch",
+      "payload_keys": [
+        "threads_batch"
+      ],
+      "preset_keys": [
+        "threads_batch"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-llama-ia.js:advanced-tuning"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-n-cpu-moe",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-n-cpu-moe",
+      "payload_keys": [
+        "n_cpu_moe"
+      ],
+      "preset_keys": [
+        "n_cpu_moe"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-llama-ia.js:moe-multigpu"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-tensor-split",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-tensor-split",
+      "payload_keys": [
+        "tensor_split"
+      ],
+      "preset_keys": [
+        "tensor_split"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-llama-ia.js:moe-multigpu"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-cache-mode",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-cache-mode",
+      "payload_keys": [
+        "cache_mode"
+      ],
+      "preset_keys": [
+        "cache_mode"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-llama-ia.js:prompt-cache"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-cache-ram",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-cache-ram",
+      "payload_keys": [
+        "cache_ram_mib"
+      ],
+      "preset_keys": [
+        "cache_ram_mib"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-llama-ia.js:prompt-cache"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-fit-enable",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-fit-enable",
+      "payload_keys": [
+        "fit_enabled"
+      ],
+      "preset_keys": [
+        "fit_enabled"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-llama-ia.js:fit-memory"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-fit-target",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-fit-target",
+      "payload_keys": [
+        "fit_target"
+      ],
+      "preset_keys": [
+        "fit_target"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-llama-ia.js:fit-memory"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-mlock",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-mlock",
+      "payload_keys": [
+        "mlock"
+      ],
+      "preset_keys": [
+        "mlock"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-llama-ia.js:fit-memory"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-spec-type",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-spec-type",
+      "payload_keys": [
+        "spec_type"
+      ],
+      "preset_keys": [
+        "spec_type"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-spec-draft-type-k",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-spec-draft-type-k",
+      "payload_keys": [
+        "spec_draft_type_k"
+      ],
+      "preset_keys": [
+        "spec_draft_type_k"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-spec-draft-type-v",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-spec-draft-type-v",
+      "payload_keys": [
+        "spec_draft_type_v"
+      ],
+      "preset_keys": [
+        "spec_draft_type_v"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-draft-model",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-draft-model",
+      "payload_keys": [
+        "draft_model"
+      ],
+      "preset_keys": [
+        "draft_model"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-spec-draft-n-min",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-spec-draft-n-min",
+      "payload_keys": [
+        "spec_draft_n_min"
+      ],
+      "preset_keys": [
+        "spec_draft_n_min"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-spec-draft-p-min",
+      "loaders": [
+        "llama_cpp"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-spec-draft-p-min",
+      "payload_keys": [
+        "spec_draft_p_min"
+      ],
+      "preset_keys": [
+        "spec_draft_p_min"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-rapid-reasoning-mode",
+      "loaders": [
+        "rapid_mlx"
+      ],
+      "classification": "guided-card",
+      "presentation_view": "card",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-rapid-reasoning-mode",
+      "payload_keys": [
+        "reasoning_mode",
+        "no_thinking"
+      ],
+      "preset_keys": [
+        "rapid_mlx",
+        "reasoning_mode",
+        "no_thinking"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-mlx-ia.js:generation"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-rapid-tool-call-parser",
+      "loaders": [
+        "rapid_mlx"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-rapid-tool-call-parser",
+      "payload_keys": [
+        "tool_call_parser"
+      ],
+      "preset_keys": [
+        "rapid_mlx",
+        "tool_call_parser"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-mlx-ia.js:protocol"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-rapid-reasoning-parser",
+      "loaders": [
+        "rapid_mlx"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-rapid-reasoning-parser",
+      "payload_keys": [
+        "reasoning_parser"
+      ],
+      "preset_keys": [
+        "rapid_mlx",
+        "reasoning_parser"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-mlx-ia.js:protocol"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-rapid-hybrid-mode",
+      "loaders": [
+        "rapid_mlx"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-rapid-hybrid-mode",
+      "payload_keys": [
+        "hybrid_mode"
+      ],
+      "preset_keys": [
+        "rapid_mlx",
+        "hybrid_mode"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-mlx-ia.js:protocol"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-sampling-mode",
+      "loaders": [
+        "rapid_mlx"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-sampling-mode",
+      "payload_keys": [
+        "sampling_mode"
+      ],
+      "preset_keys": [
+        "rapid_mlx",
+        "sampling_mode"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-mlx-ia.js:sampling"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-kv-cache-dtype",
+      "loaders": [
+        "rapid_mlx"
+      ],
+      "classification": "read-only-effective",
+      "presentation_view": "both",
+      "effective_tag": "reasoning-pins-int8",
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-kv-cache-dtype",
+      "payload_keys": [
+        "kv_cache_dtype"
+      ],
+      "preset_keys": [
+        "rapid_mlx",
+        "kv_cache_dtype"
+      ],
+      "effective_read_path": "spawn-wizard-groups.js::EFFECTIVE_COPY.reasoning-pins-int8",
+      "group_membership": [
+        "spawn-wizard-mlx-ia.js:active-memory"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-rapid-prefill-step-size",
+      "loaders": [
+        "rapid_mlx"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-rapid-prefill-step-size",
+      "payload_keys": [
+        "prefill_step_size"
+      ],
+      "preset_keys": [
+        "rapid_mlx",
+        "prefill_step_size"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-mlx-ia.js:active-memory"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-turboquant-mode",
+      "loaders": [
+        "rapid_mlx"
+      ],
+      "classification": "read-only-effective",
+      "presentation_view": "both",
+      "effective_tag": "turboquant-withheld",
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-turboquant-mode",
+      "payload_keys": [
+        "turboquant_mode"
+      ],
+      "preset_keys": [
+        "rapid_mlx",
+        "turboquant_mode"
+      ],
+      "effective_read_path": "spawn-wizard-groups.js::EFFECTIVE_COPY.turboquant-withheld",
+      "group_membership": [
+        "spawn-wizard-mlx-ia.js:active-memory"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-retained-cache-mib",
+      "loaders": [
+        "rapid_mlx"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-retained-cache-mib",
+      "payload_keys": [
+        "retained_cache_mib",
+        "prefix_cache_enabled"
+      ],
+      "preset_keys": [
+        "rapid_mlx",
+        "retained_cache_mib",
+        "prefix_cache_enabled"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-mlx-ia.js:retained-cache"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-rapid-hybrid-cache-entries",
+      "loaders": [
+        "rapid_mlx"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-rapid-hybrid-cache-entries",
+      "payload_keys": [
+        "hybrid_cache_entries"
+      ],
+      "preset_keys": [
+        "rapid_mlx",
+        "hybrid_cache_entries"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-mlx-ia.js:retained-cache"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-rapid-gpu-memory-utilization",
+      "loaders": [
+        "rapid_mlx"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-rapid-gpu-memory-utilization",
+      "payload_keys": [
+        "gpu_memory_utilization"
+      ],
+      "preset_keys": [
+        "rapid_mlx",
+        "gpu_memory_utilization"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-mlx-ia.js:scheduler"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-rapid-max-num-seqs",
+      "loaders": [
+        "rapid_mlx"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-rapid-max-num-seqs",
+      "payload_keys": [
+        "max_num_seqs"
+      ],
+      "preset_keys": [
+        "rapid_mlx",
+        "max_num_seqs"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-mlx-ia.js:scheduler"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-rapid-max-concurrent-requests",
+      "loaders": [
+        "rapid_mlx"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-rapid-max-concurrent-requests",
+      "payload_keys": [
+        "max_concurrent_requests"
+      ],
+      "preset_keys": [
+        "rapid_mlx",
+        "max_concurrent_requests"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-mlx-ia.js:scheduler"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-rapid-pflash-policy",
+      "loaders": [
+        "rapid_mlx"
+      ],
+      "classification": "read-only-effective",
+      "presentation_view": "both",
+      "effective_tag": "pflash-off",
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-rapid-pflash-policy",
+      "payload_keys": [
+        "pflash_policy"
+      ],
+      "preset_keys": [
+        "rapid_mlx",
+        "pflash_policy"
+      ],
+      "effective_read_path": "spawn-wizard-groups.js::EFFECTIVE_COPY.pflash-off",
+      "group_membership": [
+        "spawn-wizard-mlx-ia.js:scheduler"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-rapid-prefill-batch-size",
+      "loaders": [
+        "rapid_mlx"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-rapid-prefill-batch-size",
+      "payload_keys": [
+        "prefill_batch_size"
+      ],
+      "preset_keys": [
+        "rapid_mlx",
+        "prefill_batch_size"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-mlx-ia.js:scheduler"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-rapid-completion-batch-size",
+      "loaders": [
+        "rapid_mlx"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-rapid-completion-batch-size",
+      "payload_keys": [
+        "completion_batch_size"
+      ],
+      "preset_keys": [
+        "rapid_mlx",
+        "completion_batch_size"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-mlx-ia.js:scheduler"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-rapid-auto-tool-choice",
+      "loaders": [
+        "rapid_mlx"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-rapid-auto-tool-choice",
+      "payload_keys": [
+        "auto_tool_choice"
+      ],
+      "preset_keys": [
+        "rapid_mlx",
+        "auto_tool_choice"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-mlx-ia.js:tool-integration"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    },
+    {
+      "id": "spawn-rapid-speculative-enabled",
+      "loaders": [
+        "rapid_mlx"
+      ],
+      "classification": "guided-drawer",
+      "presentation_view": "both",
+      "effective_tag": null,
+      "source": "static/js/features/spawn-wizard-groups.js::CONTROLS",
+      "canonical_dom_id": "spawn-rapid-speculative-enabled",
+      "payload_keys": [
+        "speculative_config"
+      ],
+      "preset_keys": [
+        "rapid_mlx",
+        "speculative_config"
+      ],
+      "effective_read_path": "wizardState -> canonical payload; no separate effective value",
+      "group_membership": [
+        "spawn-wizard-mlx-ia.js:companions"
+      ],
+      "pro_classification": "pro-pane (planned; current renderer absent)",
+      "launch_classification": "payload-backed"
+    }
+  ],
+  "human_audited": {
+    "llama_groups": "static/js/features/spawn-wizard-llama-ia.js::GROUPS",
+    "rapid_mlx_groups": "static/js/features/spawn-wizard-mlx-ia.js::GROUPS",
+    "preset_serializer": "src/presets/mod.rs::ModelPreset"
+  }
+}
