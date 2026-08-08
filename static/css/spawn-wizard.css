@@ -5862,6 +5862,120 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
   border-color: color-mix(in srgb, var(--color-text) 15%, transparent);
 }
 
+/* ── M5-C: Pro header bar (quick filter, modified-only, reset) ───────────────── */
+
+.pro-header-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  margin-bottom: 0;
+  background: color-mix(in srgb, var(--color-bg-elevated, #1a1f28) 90%, var(--color-accent) 10%);
+  border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  font-size: 0.8rem;
+}
+
+.pro-filter-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.15));
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-muted, #9ca3af);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.pro-filter-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text, #e5e7eb);
+}
+
+.pro-filter-input {
+  flex: 1;
+  padding: 3px 8px;
+  border: 1px solid var(--color-accent, #3b82f6);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--color-text, #e5e7eb);
+  font-size: 0.78rem;
+  outline: none;
+}
+
+.pro-filter-input::placeholder {
+  color: var(--color-text-muted, #6b7280);
+}
+
+.pro-modified-only {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.15));
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-muted, #9ca3af);
+  font-size: 0.75rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.pro-modified-only input[type="checkbox"] {
+  display: none;
+}
+
+.pro-modified-only input[type="checkbox"]:checked + .pro-modified-only-label {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--color-accent, #3b82f6);
+}
+
+.pro-reset-all {
+  padding: 3px 8px;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.15));
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-muted, #9ca3af);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.pro-reset-all:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* Highlight modified controls */
+.pro-control.pro-modified,
+.pro-control.pro-modified + .pro-control,
+.hardware-field.pro-modified,
+.kv-inline-row.pro-modified {
+  border-left: 2px solid var(--color-accent, #3b82f6);
+}
+
+/* Dim at-default controls */
+.pro-control.pro-at-default,
+.hardware-field.pro-at-default,
+.kv-inline-row.pro-at-default {
+  opacity: 0.5;
+}
+
+/* Light theme overrides */
+[data-theme="light"] .pro-header-bar {
+  background: color-mix(in srgb, var(--color-bg-elevated, #f9fafb) 90%, var(--color-text) 10%);
+  border-color: color-mix(in srgb, var(--color-text) 15%, transparent);
+}
+
+[data-theme="light"] .pro-filter-input {
+  background: var(--color-bg-elevated, #f9fafb);
+  color: var(--color-text, #111827);
+  border-color: color-mix(in srgb, var(--color-text) 30%, transparent);
+}
+
 /* ── M5-B: Pro layout (dense multi-column) — responsive collapse ─────────────── */
 
 @media (max-width: 768px) {

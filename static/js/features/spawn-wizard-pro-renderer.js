@@ -40,6 +40,175 @@ export function renderProLayout() {
     main.insertBefore(proLayout, main.firstChild);
   }
 
+  // Pro header bar with quick filter, modified-only, reset
+  const headerBar = document.createElement('div');
+  headerBar.id = 'pro-header-bar';
+  headerBar.className = 'pro-header-bar';
+  headerBar.innerHTML = `
+    <input type="text" class="pro-filter-input" id="pro-filter-input" placeholder="⌘K Find a setting…" style="display:none;" />
+    <button type="button" class="pro-filter-btn" id="pro-filter-btn" title="Press ⌘K / Ctrl+K to find a setting">⌘K</button>
+    <label class="pro-modified-only" id="pro-modified-only">
+      <input type="checkbox" id="pro-modified-only-check" />
+      <span class="pro-modified-only-label">☐ Modified only (<span id="pro-modified-count">0</span>)</span>
+    </label>
+    <button type="button" class="pro-reset-all" id="pro-reset-all" title="Reset all changed settings to defaults">↺ Reset all</button>
+  `;
+  proLayout.appendChild(headerBar);
+
+  // ── Quick filter (⌘K) ──────────────────────────────────────────────────────
+  const filterInput = document.getElementById('pro-filter-input');
+  const filterBtn = document.getElementById('pro-filter-btn');
+
+  // Global keyboard shortcut
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault();
+      filterInput.style.display = 'block';
+      filterInput.focus();
+    }
+    if (e.key === 'Escape' && filterInput.style.display === 'block') {
+      filterInput.style.display = 'none';
+      filterInput.value = '';
+      filterInput.dispatchEvent(new Event('input'));
+    }
+  });
+
+  // Search input: filter controls by label/key match
+  filterInput?.addEventListener('input', () => {
+    const q = filterInput.value.toLowerCase().trim();
+    const allGroups = proLayout.querySelectorAll('.pro-group, .pro-section');
+    allGroups.forEach(g => {
+      const text = g.textContent.toLowerCase();
+      g.style.display = (!q || text.includes(q)) ? '' : 'none';
+    });
+  });
+
+  filterBtn?.addEventListener('click', () => {
+    filterInput.style.display = 'block';
+    filterInput.focus();
+  });
+
+  // ── Modified only ───────────────────────────────────────────────────────────
+  const modifiedOnlyCheck = document.getElementById('pro-modified-only-check');
+  const modifiedCountEl = document.getElementById('pro-modified-count');
+  const allControls = new Map(); // controlId → { defaultVal, currentValue }
+
+  // Scan all form controls and record defaults vs current values
+  const scanAllControls = () => {
+    const inputs = main.querySelectorAll('input, select, textarea');
+    for (const input of inputs) {
+      const id = input.id;
+      if (!id) continue;
+      const field = input.closest('.hardware-field, .kv-inline-row');
+      if (!field && !input.closest('.hardware-grid, #pro-layout')) continue;
+
+      const defaultVal = getDefaultForControl(id);
+      const currentVal = getControlValue(input);
+      allControls.set(id, { defaultVal, currentValue: currentVal, element: input });
+    }
+    updateModifiedCount();
+  };
+
+  const getDefaultForControl = (id) => {
+    // Map control IDs to their shipped defaults
+    const defaults = {
+      'spawn-batch-size': '2048',
+      'spawn-ubatch-size': '2048',
+      'spawn-parallel-slots': '1',
+      'spawn-flash-attn': 'on',
+      'spawn-threads': '',
+      'spawn-threads-batch': '',
+      'spawn-prio': 'default',
+      'spawn-n-cpu-moe': 'auto',
+      'spawn-tensor-split': '',
+      'spawn-cache-mode': 'custom',
+      'spawn-cache-ram': '',
+      'spawn-fit-enable': '',
+      'spawn-fit-target': '',
+      'spawn-mlock': 'off',
+      'spawn-rapid-max-concurrent-requests': '',
+      'spawn-rapid-max-num-seqs': '',
+      'spawn-rapid-gpu-memory-utilization': '',
+      'spawn-rapid-pflash-policy': 'off',
+      'spawn-rapid-auto-tool-choice': 'off',
+      'spawn-rapid-speculative-enabled': 'off',
+      'spawn-rapid-prefill-step-size': '512',
+      'spawn-rapid-reasoning-mode': 'on',
+      'spawn-rapid-completion-batch-size': '',
+      'spawn-rapid-prefill-batch-size': '',
+      'spawn-sampling-mode': 'auto',
+      'spawn-retained-cache-mib': '8192',
+      'spawn-rapid-hybrid-cache-entries': '16',
+      'spawn-gpu-layers': 'auto',
+      'spawn-temperature': '',
+      'spawn-top-p': '',
+      'spawn-top-k': '',
+      'spawn-min-p': '',
+      'spawn-repeat-penalty': '',
+      'spawn-presence-penalty': '',
+      'spawn-max-tokens': '',
+      'spawn-seed': '',
+      'spawn-rapid-reasoning-parser': '',
+      'spawn-rapid-tool-call-parser': '',
+      'spawn-rapid-hybrid-mode': 'auto',
+    };
+    return defaults[id] ?? '';
+  };
+
+  const getControlValue = (el) => {
+    if (el.type === 'checkbox' || el.type === 'radio') return el.checked ? 'on' : 'off';
+    return el.value || '';
+  };
+
+  const updateModifiedCount = () => {
+    let count = 0;
+    for (const [id, data] of allControls) {
+      if (data.currentValue !== data.defaultVal) count++;
+    }
+    if (modifiedCountEl) modifiedCountEl.textContent = count;
+
+    // Apply modified-only filter
+    const onlyModified = modifiedOnlyCheck?.checked;
+    allControls.forEach((data, id) => {
+      const el = data.element;
+      if (!el) return;
+      const isModified = data.currentValue !== data.defaultVal;
+      const parent = el.closest('.pro-control, .hardware-field, .kv-inline-row');
+      if (!parent) return;
+      parent.classList.toggle('pro-modified', isModified);
+      parent.classList.toggle('pro-at-default', !isModified);
+      if (onlyModified) {
+        parent.style.display = isModified ? '' : 'none';
+      }
+    });
+  };
+
+  // Re-scan on input/change events
+  main.addEventListener('input', scanAllControls);
+  main.addEventListener('change', scanAllControls);
+
+  // Scan after a short delay to let initial values settle
+  setTimeout(scanAllControls, 100);
+
+  // ── Reset all ───────────────────────────────────────────────────────────────
+  document.getElementById('pro-reset-all')?.addEventListener('click', () => {
+    for (const [id, data] of allControls) {
+      if (data.currentValue !== data.defaultVal) {
+        const el = data.element;
+        if (el.type === 'checkbox' || el.type === 'radio') {
+          el.checked = data.defaultVal === 'on';
+        } else if (el.tagName === 'SELECT') {
+          const selVal = el.options[0]?.value ?? '';
+          el.value = data.defaultVal || selVal;
+        } else {
+          el.value = data.defaultVal;
+        }
+      }
+    }
+    // Trigger input event to update display
+    main.dispatchEvent(new Event('input'));
+  });
+
   // Use the active engine's IA file (not both)
   const rapid = (window.wizardState?.engine?.selected || '') === 'rapid_mlx';
   const llamaIA = window.spawnWizardLlamaIA;
