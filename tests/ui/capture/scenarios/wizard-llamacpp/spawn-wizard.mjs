@@ -379,7 +379,18 @@ export default async function(ctx, options) {
         { timeout: 6000 }
     ).catch(() => {});
     await sleep(500);
-    await captureShot(page, 'spawn-wizard-hardware-vram.png', { fullPage: true, expandSelector: '.wizard-body' });
+     await captureShot(page, 'spawn-wizard-hardware-vram.png', { fullPage: true, expandSelector: '.wizard-body' });
+
+    // ── Same step (Hardware & memory): decision cards 3-4 + all settings drawer ─
+    await page.evaluate(() => {
+        const body = document.querySelector('.wizard-body');
+        const card3 = document.getElementById('hw-decision-vision');
+        if (body && card3) {
+            body.scrollTop = card3.offsetTop - 20;
+        }
+    });
+    await sleep(300);
+    await captureShot(page, 'spawn-wizard-hardware-page2.png', { fullPage: false });
 
     // ── Same step (Hardware & memory): sampling/review config list ───────────
     // Expand All settings drawer to show parameters

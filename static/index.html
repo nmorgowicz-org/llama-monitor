@@ -4249,9 +4249,11 @@
                         <div class="hw-context-chip-row" id="hw-context-chip-row"></div>
                     </div>
 
-                    <div class="hardware-grid">
-                        <div class="hardware-field">
-                            <label for="spawn-gpu-layers" title="Layers running on GPU. Higher = faster, but uses more memory. Auto is recommended.">GPU layers</label>
+                     <!-- Old layout: hidden for Option A (Guided) wireframe -->
+                     <div class="hw-guided-old-layout">
+                     <div class="hardware-grid">
+                         <div class="hardware-field">
+                             <label for="spawn-gpu-layers" title="Layers running on GPU. Higher = faster, but uses more memory. Auto is recommended.">GPU layers</label>
                             <select id="spawn-gpu-layers">
                                 <option value="auto">Auto (recommended)</option>
                                 <option value="all">All layers on GPU</option>
@@ -4387,15 +4389,121 @@
                     <!-- VRAM exceeded warning (red inline feedback when context > available VRAM) -->
                     <div class="ctx-fit-warning" id="ctx-vram-warning" style="display:none;"></div>
 
-                    <!-- Advanced fields: always available, grouped and collapsed by default outside
-                         the Advanced profile so Quick/Balanced users aren't blocked from batch/threads/MoE
-                         tuning when they need it, without cluttering the default view. The flat dump below
-                         is hidden and relocated into registry-generated groups by spawn-wizard-llama-ia.js
-                         (plan §5 Phase 4 item 4) — this wrapper id is the JS anchor, not itself a <details>. -->
-                    <div class="advanced-only" id="spawn-advanced-fields">
-                        <div class="wizard-section-title">Advanced options</div>
-                        <div class="field-hint" style="margin-bottom:10px;">Safe defaults for most setups. Change only if you have a specific reason.</div>
-                        <div class="hardware-grid">
+                     <!-- Close old layout wrapper -->
+                     </div> <!-- /hw-guided-old-layout -->
+
+                     <!-- Option A (Guided): Sticky context bar + 4 decision cards + drawer -->
+                     <div class="hw-sticky-bar" id="hw-sticky-bar">
+                         <div class="hw-sticky-left">
+                             <span class="hw-sticky-model" id="hw-sticky-model-name">—</span>
+                             <span class="hw-sticky-quant" id="hw-sticky-quant">—</span>
+                             <span class="hw-sticky-loader" id="hw-sticky-loader">—</span>
+                             <span class="hw-sticky-usecase" id="hw-sticky-usecase" title="Use-case profile"></span>
+                         </div>
+                         <div class="hw-sticky-right">
+                             <span class="hw-sticky-ctx" id="hw-sticky-ctx" title="Context size"></span>
+                             <span class="hw-sticky-kv" id="hw-sticky-kv" title="KV cache precision"></span>
+                             <span class="hw-sticky-fa" id="hw-sticky-fa" title="Flash attention"></span>
+                             <span class="hw-sticky-par" id="hw-sticky-par" title="Parallel slots"></span>
+                         </div>
+                     </div>
+
+                     <!-- Decision Card 1: Context size -->
+                     <div class="hw-decision-card" id="hw-decision-ctx">
+                         <div class="hw-decision-card-header">
+                             <div class="hw-decision-card-title">
+                                 <span class="hw-decision-card-number">1</span>
+                                 How much context?
+                             </div>
+                             <span class="hw-provenance-chip" id="hw-ctx-provenance" title="Auto-seeded by use-case">auto · Agentic</span>
+                         </div>
+                         <div class="hw-decision-card-desc">Longer context = more KV memory. Pick based on your task.</div>
+                         <div class="hw-decision-card-content">
+                             <div class="hw-decision-tiles hw-ctx-tiles" id="hw-ctx-tiles">
+                                 <button type="button" class="hw-decision-tile" data-ctx="32768" title="32k — focused work">32k <span class="hw-tile-tag">Focused</span></button>
+                                 <button type="button" class="hw-decision-tile" data-ctx="65536" title="65k — Roleplay / RP">65k <span class="hw-tile-tag">RP</span></button>
+                                 <button type="button" class="hw-decision-tile hw-decision-tile-active" data-ctx="131072" title="131k — Agentic work">131k <span class="hw-tile-tag">Agent</span></button>
+                                 <button type="button" class="hw-decision-tile" data-ctx="163840" title="160k — large context">160k <span class="hw-tile-tag">Large</span></button>
+                                 <button type="button" class="hw-decision-tile" data-ctx="200000" title="200k — very large context">200k <span class="hw-tile-tag">Large</span></button>
+                                 <button type="button" class="hw-decision-tile hw-ctx-tile-model-max" data-ctx="262144" title="262k — model training limit">262k <span class="hw-tile-tag">Max</span></button>
+                             </div>
+                             <div class="hw-decision-custom-row">
+                                 <span class="hw-decision-custom-label">or type ▸</span>
+                                 <input type="number" id="hw-ctx-custom" min="512" step="512" value="131072" title="Custom context size">
+                                 <span class="hw-decision-custom-hint" id="hw-ctx-custom-hint">KV cost at this size: —</span>
+                             </div>
+                         </div>
+                     </div>
+
+                     <!-- Decision Card 2: KV cache precision -->
+                     <div class="hw-decision-card" id="hw-decision-kv">
+                         <div class="hw-decision-card-header">
+                             <div class="hw-decision-card-title">
+                                 <span class="hw-decision-card-number">2</span>
+                                 KV cache precision
+                             </div>
+                             <span class="hw-provenance-chip" id="hw-kv-provenance" title="Auto-seeded by use-case">auto · Agentic</span>
+                         </div>
+                         <div class="hw-decision-card-desc">Memory vs. quality for stored past tokens. q8_0 is safe for most models.</div>
+                         <div class="hw-decision-card-content">
+                             <div class="hw-decision-tiles hw-kv-tiles" id="hw-kv-tiles">
+                                 <button type="button" class="hw-decision-tile hw-decision-tile-active" data-kv="q8_0" title="Recommended — high precision, good quality">q8_0 <span class="hw-tile-star">★ recommended</span></button>
+                                 <button type="button" class="hw-decision-tile" data-kv="q4_0" title="Saves memory, lower quality">q4_0 <span class="hw-tile-warn">⚠ tool calls</span></button>
+                                 <button type="button" class="hw-decision-tile" data-kv="f16" title="Lossless — most memory">f16 <span class="hw-tile-tag">lossless</span></button>
+                             </div>
+                         </div>
+                     </div>
+
+                     <!-- Decision Card 3: Vision -->
+                     <div class="hw-decision-card" id="hw-decision-vision">
+                         <div class="hw-decision-card-header">
+                             <div class="hw-decision-card-title">
+                                 <span class="hw-decision-card-number">3</span>
+                                 Vision
+                             </div>
+                         </div>
+                         <div class="hw-decision-card-desc">Multimodal projector (mmproj). Required for vision models.</div>
+                         <div class="hw-decision-card-content">
+                             <select id="hw-vision-select" title="Vision projector file">
+                                 <option value="" selected>( none — text only )</option>
+                             </select>
+                             <button type="button" id="hw-vision-browse-btn" class="hw-decision-browse-btn">Browse…</button>
+                         </div>
+                     </div>
+
+                     <!-- Decision Card 4: Speed boost (speculative decoding) -->
+                     <div class="hw-decision-card" id="hw-decision-speed">
+                         <div class="hw-decision-card-header">
+                             <div class="hw-decision-card-title">
+                                 <span class="hw-decision-card-number">4</span>
+                                 Speed boost
+                             </div>
+                         </div>
+                         <div class="hw-decision-card-desc">Predict tokens ahead, verify in one pass. Free speed for compatible models.</div>
+                         <div class="hw-decision-card-content">
+                             <div class="hw-decision-tiles hw-speed-tiles">
+                                 <button type="button" class="hw-decision-tile hw-decision-tile-active" data-speed="on" title="MTP heads detected — use them">On — MTP heads detected</button>
+                                 <button type="button" class="hw-decision-tile" data-speed="ngram" title="N-gram only">N-gram only</button>
+                                 <button type="button" class="hw-decision-tile" data-speed="off" title="Disable speculative decoding">Off</button>
+                             </div>
+                         </div>
+                     </div>
+
+                     <!-- All settings drawer -->
+                     <div class="hw-all-settings" id="hw-all-settings">
+                         <button type="button" class="hw-all-settings-toggle" id="hw-all-settings-toggle">
+                             ⚙ All settings (23)
+                         </button>
+                         <div class="hw-all-settings-panel" id="hw-all-settings-panel">
+                             <!-- Advanced fields relocated here by JS -->
+                         </div>
+                     </div>
+
+                     <!-- Old advanced fields wrapper: hidden for Option A -->
+                     <div class="advanced-only" id="spawn-advanced-fields" style="display:none;">
+                         <div class="wizard-section-title">Advanced options</div>
+                         <div class="field-hint" style="margin-bottom:10px;">Safe defaults for most setups. Change only if you have a specific reason.</div>
+                         <div class="hardware-grid">
                             <div class="hardware-field">
                                 <label for="spawn-batch-size" title="Advanced — affects how fast prompts are processed. Internal flag: -b">Prompt batch size</label>
                                 <input type="number" id="spawn-batch-size" min="1" value="2048">

@@ -1053,6 +1053,268 @@
   margin-top: 6px;
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+   Option A (Guided): Sticky context bar + decision cards + drawer
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Hide old layout for Option A */
+.hw-guided-old-layout {
+  display: none;
+}
+
+/* Sticky context bar (pinned top of step 2) */
+.hw-sticky-bar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  background: var(--color-bg);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 9px;
+  color: var(--color-text-muted);
+  flex-wrap: wrap;
+}
+
+.hw-sticky-left,
+.hw-sticky-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.hw-sticky-model {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  font-size: 10px;
+}
+
+.hw-sticky-quant {
+  color: var(--color-text);
+}
+
+.hw-sticky-loader {
+  color: var(--color-accent);
+}
+
+.hw-sticky-usecase {
+  color: var(--color-text-secondary);
+}
+
+.hw-sticky-ctx,
+.hw-sticky-kv,
+.hw-sticky-fa,
+.hw-sticky-par {
+  color: var(--color-text-muted);
+}
+
+/* Decision card (4 always-open cards) */
+.hw-decision-card {
+  margin-top: 10px;
+  padding: 10px 11px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hw-decision-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+
+.hw-decision-card-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.hw-decision-card-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--color-accent);
+  color: var(--color-bg);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.hw-decision-card-desc {
+  font-size: 9px;
+  color: var(--color-text-muted);
+  margin-top: 1px;
+}
+
+.hw-provenance-chip {
+  font-size: 8px;
+  padding: 2px 6px;
+  border-radius: 99px;
+  background: rgba(99, 179, 237, 0.12);
+  color: #63b3ed;
+  border: 1px solid rgba(99, 179, 237, 0.2);
+  white-space: nowrap;
+}
+
+.hw-decision-card-content {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Decision tiles (tile selectors for context, KV, speed) */
+.hw-decision-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 5px;
+}
+
+.hw-decision-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.15);
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.hw-decision-tile span {
+  font-size: 7px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.hw-decision-tile:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.hw-decision-tile-active {
+  border-color: var(--color-accent);
+  background: rgba(99, 179, 237, 0.08);
+  box-shadow:
+    0 0 0 1px rgba(99, 179, 237, 0.2),
+    0 2px 6px rgba(0, 0, 0, 0.18);
+  color: var(--color-text);
+}
+
+.hw-decision-tile-active span {
+  color: color-mix(in srgb, var(--color-accent) 60%, var(--color-text));
+}
+
+.hw-tile-star {
+  color: #fbbf24 !important;
+}
+
+.hw-tile-warn {
+  color: #f59e0b !important;
+}
+
+.hw-tile-tag {
+  color: var(--color-text-muted);
+}
+
+/* Custom input row (for context size) */
+.hw-decision-custom-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+.hw-decision-custom-row input {
+  width: 80px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--color-text);
+  font-size: 9px;
+}
+
+.hw-decision-custom-row input:focus {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+/* Vision card select/browse */
+.hw-decision-card-content select {
+  flex: 1;
+  min-width: 0;
+}
+
+.hw-decision-browse-btn {
+  font-size: 9px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.15);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.hw-decision-browse-btn:hover {
+  color: var(--color-text-secondary);
+}
+
+/* All settings drawer */
+.hw-all-settings {
+  margin-top: 10px;
+}
+
+.hw-all-settings-toggle {
+  font-size: 9px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+}
+
+.hw-all-settings-toggle:hover {
+  color: var(--color-text-secondary);
+}
+
+.hw-all-settings-panel {
+  display: none;
+  margin-top: 6px;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.hw-all-settings-panel.open {
+  display: block;
+}
+
 /* Hardware summary card */
 
 .hardware-summary {
