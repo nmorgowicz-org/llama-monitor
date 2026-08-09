@@ -3718,7 +3718,10 @@ export function updateAdvisor() {
     const paramB = arch.paramB || m.paramB || 0;
     if (!name && !paramB) { box.style.display = 'none'; return; }
 
-    const hasMtp = (baseArch.mtpDepth || 0) > 0 || /mtp/i.test(name);
+    // MTP capability is authoritative only from introspected architecture/profile
+    // metadata. Artifact names (including finetunes/distillations) are never a
+    // model-property fallback.
+    const hasMtp = (baseArch.mtpDepth || 0) > 0;
     const body = {
       name,
       param_b: paramB,
