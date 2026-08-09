@@ -16,7 +16,7 @@ const root = path.resolve(__dirname, "..");
 const contractPath = path.join(root, "tests", "ui", "core", "fixtures", "spawn-wizard-control-contract.json");
 const fixturePath = path.join(root, 'docs/plans/evidence/spawn-wizard-guided-pro/fixture-freeze.json');
 
-const { CONTROLS, assertQuickValueCoverage } = await import(
+const { CONTROLS, PRESENTATION_CONTROLS, assertQuickValueCoverage, validatePresentationDescriptors } = await import(
   path.join(root, "static", "js", "features", "spawn-wizard-groups.js")
 );
 
@@ -28,6 +28,16 @@ try {
 } catch (err) {
   console.error(`✗ ${err.message}`);
   failed = true;
+}
+
+for (const loader of ['llama_cpp', 'rapid_mlx']) {
+  const result = validatePresentationDescriptors(loader);
+  if (!result.ok) {
+    console.error(`✗ presentation descriptors invalid for ${loader}: ${result.errors.join('; ')}`);
+    failed = true;
+  } else {
+    console.log(`✓ presentation descriptors (${loader}): ${result.controls.length} canonical mounts`);
+  }
 }
 
 const html = fs.readFileSync(path.join(root, "static", "index.html"), "utf-8");
@@ -76,6 +86,7 @@ const mapping = {
   'spawn-rapid-completion-batch-size':['completion_batch_size'],'spawn-rapid-auto-tool-choice':['auto_tool_choice'],
   'spawn-rapid-speculative-enabled':['speculative_config']
 };
+const descriptorById = new Map(PRESENTATION_CONTROLS.map(control => [control.id, control]));
 for (const control of CONTROLS) if (!(control.id in mapping)) throw new Error(`missing explicit mapping: ${control.id}`);
 const groupMembership = Object.fromEntries(CONTROLS.map(c => [c.id, groupFiles.flatMap(file => {
   const text = fs.readFileSync(file, 'utf8');
@@ -83,13 +94,24 @@ const groupMembership = Object.fromEntries(CONTROLS.map(c => [c.id, groupFiles.f
     .filter(m => m[2].includes(`'${c.id}'`)).map(m => `${path.basename(file)}:${m[1]}`);
 })]));
 const generatedContract = {
-  schema_version: 1,
+  schema_version: 2,
   generated_from: [
     'static/js/features/spawn-wizard-groups.js::CONTROLS',
     'static/js/features/spawn-wizard-llama-ia.js::GROUPS',
     'static/js/features/spawn-wizard-mlx-ia.js::GROUPS',
   ],
   controls: CONTROLS.map((control) => ({
+    ...(() => {
+      const descriptor = descriptorById.get(control.id);
+      return {
+        semantic_id: descriptor.semanticId,
+        mount_id: descriptor.mountId,
+        mount_kind: descriptor.mountKind,
+        guided_placement: descriptor.guidedPlacement,
+        pro_category: descriptor.proCategory,
+        aliases: descriptor.aliases,
+      };
+    })(),
     id: control.id,
     loaders: control.loaders,
     classification: classificationFor(control),

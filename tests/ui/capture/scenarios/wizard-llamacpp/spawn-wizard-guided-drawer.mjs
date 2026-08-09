@@ -24,14 +24,21 @@ export default async function(ctx) {
 
     const state = await page.evaluate(async () => {
         const mod = await import('/js/features/spawn-wizard.js');
+        const registry = await import('/js/features/spawn-wizard-groups.js');
         mod.wizardState.vram.available = 64 * 1024 * 1024 * 1024;
         mod.wizardState.model.paramB = 8;
         mod.wizardState.model.modelBytes = 4_920_000_000;
         mod.selectWizardEngine('llama_cpp', true);
         mod.showStep(1);
-        return mod.wizardState.engine.selected;
+        return {
+            selected: mod.wizardState.engine.selected,
+            llamaDescriptors: registry.validatePresentationDescriptors('llama_cpp'),
+            rapidDescriptors: registry.validatePresentationDescriptors('rapid_mlx'),
+        };
     });
-    if (state !== 'llama_cpp') throw new Error(`Expected llama.cpp, got ${state}`);
+    if (state.selected !== 'llama_cpp' || !state.llamaDescriptors.ok || !state.rapidDescriptors.ok) {
+        throw new Error(`Invalid presentation registry: ${JSON.stringify(state)}`);
+    }
     await sleep(500);
 
     const inspectDrawer = async (expectedEngine) => page.evaluate((engine) => {

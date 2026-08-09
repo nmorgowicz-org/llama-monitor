@@ -1348,6 +1348,10 @@ Every static-JS phase also runs `rtk npm run validate-js`, `rtk npm run lint`, a
 - Reworking every Preset Editor visual solely to resemble the wizard.
 - Completing unrelated Phase 11–14 Rapid roadmap work.
 
+### Phase 4 descriptor milestone (2026-08-09)
+
+`controlsForView()` now returns validated semantic/mount descriptors for all 46 canonical controls (28 llama.cpp, 18 Rapid-MLX), including category, Guided placement, aliases, and search text. Schema-2 control-contract evidence and `validate-wizard-groups.mjs` enforce descriptor uniqueness/completeness. The remaining Phase 4 gate is the full cross-view state/update and payload/preset projection contract.
+
 <a id="terra-coordinator-handoff"></a>
 
 ## 23. Terra handoff prompt

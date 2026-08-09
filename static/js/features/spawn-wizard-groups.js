@@ -94,12 +94,73 @@ export const CONTROLS = [
   { id: 'spawn-rapid-speculative-enabled', loaders: ['rapid_mlx'], group: 'companions', nested: 'companions', critical: false, view: 'both' },
 ];
 
+// Phase 4 presentation descriptors are derived once from the canonical
+// control registry. They describe placement/search/ownership only; payload,
+// defaults, capability, and effective-value semantics remain in the backend
+// adapters and wizardState. A descriptor's mountId is stable across view
+// changes, so relocation can move the owner without creating a second control.
+const RAPID_GROUP_CATEGORY = {
+  'active-memory': 'Memory & context',
+  'retained-cache': 'Memory & context',
+  scheduler: 'Performance',
+  sampling: 'Generation & reasoning',
+  protocol: 'Tools & conversation formatting',
+  'tool-integration': 'Tools & conversation formatting',
+  companions: 'Advanced',
+  thinking: 'Generation & reasoning',
+};
+
+function llamaCategory(id) {
+  if (id === 'spawn-context-size' || id.startsWith('spawn-cache-type') || id === 'spawn-kv-unified' || id === 'spawn-fit-enable' || id === 'spawn-fit-target' || id === 'spawn-cache-mode' || id === 'spawn-cache-ram') return 'Memory & context';
+  if (id === 'hw-quant-select' || id === 'hw-mmproj-select') return 'Model & compatibility';
+  if (id.includes('spec') || id.includes('draft') || id === 'spawn-gpu-layers' || id.includes('batch') || id.includes('thread') || id.includes('flash') || id.includes('tensor') || id === 'spawn-prio' || id === 'spawn-parallel-slots' || id === 'spawn-n-cpu-moe') return 'Performance';
+  if (id === 'spawn-mlock') return 'Advanced';
+  return 'Advanced';
+}
+
+function descriptorForControl(control) {
+  const loader = control.loaders[0];
+  const category = loader === 'rapid_mlx' ? (RAPID_GROUP_CATEGORY[control.group] || 'Advanced') : llamaCategory(control.id);
+  const labelWords = control.id.replace(/^hw-/, '').replace(/^spawn-/, '').split('-');
+  const aliases = [control.id, ...labelWords, control.group].filter(Boolean);
+  const mountKind = control.effective ? 'read-only-status' : 'setting-control';
+  return Object.freeze({
+    ...control,
+    semanticId: control.id,
+    mountId: `${loader}:${control.id}`,
+    mountKind,
+    guidedPlacement: control.view === 'card' ? 'decision' : 'drawer',
+    proCategory: category,
+    aliases: [...new Set(aliases)],
+    searchText: aliases.join(' '),
+  });
+}
+
+export const PRESENTATION_CONTROLS = Object.freeze(CONTROLS.map(descriptorForControl));
+
+export function validatePresentationDescriptors(loader) {
+  const controls = PRESENTATION_CONTROLS.filter(c => c.loaders.includes(loader));
+  const errors = [];
+  const semanticIds = new Set();
+  const mountIds = new Set();
+  controls.forEach(control => {
+    if (semanticIds.has(control.semanticId)) errors.push(`duplicate semanticId: ${control.semanticId}`);
+    if (mountIds.has(control.mountId)) errors.push(`duplicate mountId: ${control.mountId}`);
+    semanticIds.add(control.semanticId);
+    mountIds.add(control.mountId);
+    if (!control.mountKind || !['setting-control', 'read-only-status'].includes(control.mountKind)) errors.push(`invalid mountKind: ${control.id}`);
+    if (!control.guidedPlacement || !['decision', 'drawer'].includes(control.guidedPlacement)) errors.push(`invalid Guided placement: ${control.id}`);
+    if (!control.proCategory || !control.aliases?.length || !control.searchText) errors.push(`incomplete descriptor: ${control.id}`);
+  });
+  return { ok: errors.length === 0, controls, errors };
+}
+
 export function controlsForView(loader, view) {
-  return CONTROLS.filter(c => c.loaders.includes(loader) && (view === 'pro' || c.view === view || c.view === 'both'));
+ return PRESENTATION_CONTROLS.filter(c => c.loaders.includes(loader) && (view === 'pro' || c.view === view || c.view === 'both'));
 }
 
 export function controlsForLoader(loader) {
-  return CONTROLS.filter(c => c.loaders.includes(loader));
+ return PRESENTATION_CONTROLS.filter(c => c.loaders.includes(loader));
 }
 
 // I2 lint: every Quick-tier control must carry a quickValue, or it can never
