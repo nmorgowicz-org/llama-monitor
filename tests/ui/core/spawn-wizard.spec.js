@@ -943,8 +943,15 @@ test('Pro shell switches the canonical settings without duplicating controls', a
   await page.selectOption('#view-mode-select', 'pro');
   await expect(page.locator('#pro-layout')).toBeVisible();
   await expect(page.locator('#pro-rail-nav .pro-rail-item')).toHaveCount(7);
-  await expect(page.locator('#hw-decision-ctx')).toBeHidden();
+  await expect(page.locator('#pro-controls-host #hw-decision-ctx')).toBeVisible();
   await expect(page.locator('#pro-controls-host #spawn-advanced-fields')).toBeAttached();
+  for (const id of [
+    'spawn-temperature', 'spawn-reasoning-mode', 'spawn-output-mode',
+    'spawn-port', 'spawn-extra-args',
+  ]) {
+    await expect(page.locator(`#pro-controls-host #${id}`)).toHaveCount(1);
+  }
+  await expect(page.locator('[id="spawn-temperature"]')).toHaveCount(1);
 
   await page.keyboard.press('ControlOrMeta+k');
   await expect(page.locator('#pro-filter-input')).toBeFocused();

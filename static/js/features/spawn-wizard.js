@@ -203,6 +203,53 @@ const PRO_CATEGORIES = [
 ];
 
 const PRO_WRAPPER_IDS = ['spawn-advanced-fields', 'spawn-rapid-advanced-fields'];
+const PRO_RELOCATED_SELECTORS = [
+  '#hw-decision-ctx', '#hw-decision-kv', '#hw-decision-vision', '#hw-decision-speed',
+  '#wizard-step-1 > .wizard-main > .sampling-params-section',
+];
+const PRO_RELOCATED_FIELD_IDS = ['hw-quant-select', 'spawn-kv-unified', 'hw-mtp-depth'];
+const PRO_DECISION_SURFACES = [
+  { selector: '#hw-decision-ctx', category: 'Memory & context', controls: ['spawn-context-size'] },
+  { selector: '#hw-decision-kv', category: 'Memory & context', controls: ['spawn-cache-type-k', 'spawn-cache-type-v'] },
+  { selector: '#hw-decision-vision', category: 'Model & compatibility', controls: ['hw-mmproj-select'] },
+  { selector: '#hw-decision-speed', category: 'Performance', controls: ['hw-use-mtp'] },
+];
+const proOriginalPositions = new Map();
+
+function _rememberProPosition(node) {
+  if (!node || proOriginalPositions.has(node)) return;
+  proOriginalPositions.set(node, { parent: node.parentElement, next: node.nextSibling });
+}
+
+function _moveProSurfaces(host) {
+  document.querySelectorAll(PRO_RELOCATED_SELECTORS.join(',')).forEach(node => {
+    _rememberProPosition(node);
+    host.appendChild(node);
+  });
+  PRO_RELOCATED_FIELD_IDS.forEach(id => {
+    const control = document.getElementById(id);
+    const field = control?.closest('.hardware-field, .hw-field, .sampling-field, .kv-inline-row, .hardware-row');
+    if (field && !host.contains(field)) {
+      _rememberProPosition(field);
+      host.appendChild(field);
+    }
+  });
+  PRO_DECISION_SURFACES.forEach(surface => {
+    const card = document.querySelector(surface.selector);
+    if (!card) return;
+    card.dataset.proCategory = surface.category;
+    card.dataset.proControlIds = surface.controls.join(' ');
+    card.dataset.proSearchText = `${surface.category} ${surface.controls.join(' ')}`;
+  });
+}
+
+function _restoreProSurfaces() {
+  for (const [node, position] of proOriginalPositions) {
+    if (!position.parent) continue;
+    if (position.next?.parentNode === position.parent) position.parent.insertBefore(node, position.next);
+    else position.parent.appendChild(node);
+  }
+}
 
 function _proFieldForControl(control) {
   return control?.closest('.hardware-field, .sampling-field, .kv-inline-row, .hardware-row, .hw-field') || control;
@@ -218,12 +265,13 @@ function _refreshProControls() {
   const fields = [...host.querySelectorAll('[data-pro-category]')];
   fields.forEach(field => {
     const control = field.querySelector('input, select, textarea');
-    const descriptor = descriptors.find(item => item.id === control?.id);
-    const entry = descriptor ? settingStateRegistry.entries?.get?.(descriptor.semanticId) : null;
-    const text = `${field.textContent || ''} ${control?.id || ''}`.toLowerCase();
-    const visible = (!modifiedOnly || entry?.dirty) && (!query || text.includes(query));
+    const controlIds = (field.dataset.proControlIds || control?.id || '').split(/\s+/).filter(Boolean);
+    const fieldDescriptors = descriptors.filter(item => controlIds.includes(item.id));
+    const dirty = fieldDescriptors.some(item => settingStateRegistry.entries?.get?.(item.semanticId)?.dirty);
+    const text = `${field.textContent || ''} ${field.dataset.proSearchText || ''} ${controlIds.join(' ')}`.toLowerCase();
+    const visible = (!modifiedOnly || dirty) && (!query || text.includes(query));
     field.classList.toggle('pro-search-hidden', !visible);
-    field.classList.toggle('pro-modified', !!entry?.dirty);
+    field.classList.toggle('pro-modified', dirty);
   });
 }
 
@@ -279,7 +327,7 @@ function _initProShell() {
   document.getElementById('pro-reset-all')?.addEventListener('click', () => {
     const loader = wizardState.engine.selected || 'llama_cpp';
     controlsForView(loader, 'pro').forEach(descriptor => settingStateRegistry.reset(descriptor.semanticId));
-    document.getElementById('pro-controls-host')?.querySelectorAll('input, select, textarea').forEach(control => {
+  document.querySelectorAll('input, select, textarea').forEach(control => {
       control.dispatchEvent(new Event('input', { bubbles: true }));
       control.dispatchEvent(new Event('change', { bubbles: true }));
     });
@@ -296,11 +344,6 @@ function renderProLayout(mode = wizardState.viewMode) {
   const isPro = mode === 'pro';
   const guidedSurface = document.querySelector('.hw-guided-old-layout');
   const stickyBar = document.getElementById('hw-sticky-bar');
-  const guidedSampling = document.querySelectorAll(
-    '#wizard-step-1 > .wizard-main > .wizard-section-title,' +
-    '#wizard-step-1 > .wizard-main > .wizard-section-desc,' +
-    '#wizard-step-1 > .wizard-main > .sampling-params-section',
-  );
   // The Pro surface is a view over the same controls, not a section appended
   // below Guided's cards. Move the shell out of the legacy wrapper once and
   // keep the identity strip as the shared context header while Pro is active.
@@ -309,10 +352,9 @@ function renderProLayout(mode = wizardState.viewMode) {
       (stickyBar || guidedSurface).after(layout);
     }
     if (guidedSurface) guidedSurface.style.display = 'none';
-    guidedSampling.forEach(section => { section.style.display = 'none'; });
   } else if (guidedSurface) {
     guidedSurface.style.display = 'block';
-    guidedSampling.forEach(section => { section.style.display = ''; });
+    _restoreProSurfaces();
   }
   layout.style.display = isPro ? '' : 'none';
   document.querySelectorAll('#hw-decision-ctx, #hw-decision-kv, #hw-decision-vision, #hw-decision-speed')
@@ -333,6 +375,8 @@ function renderProLayout(mode = wizardState.viewMode) {
   });
 
   if (isPro) {
+    _moveProSurfaces(host);
+    host.querySelectorAll('.hw-decision-card').forEach(card => { card.style.display = ''; });
     // Pro is the explicit power-user view: every canonical category is
     // expanded so search/scroll-spy has a real target and no setting is
     // hidden behind Guided's profile disclosure state.

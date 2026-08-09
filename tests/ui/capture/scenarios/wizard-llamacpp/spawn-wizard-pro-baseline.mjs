@@ -31,13 +31,32 @@ async function openPro(page, baseUrl) {
 export default async function({ page, baseUrl }) {
     await openPro(page, baseUrl);
 
-    await captureShot(page, 'spawn-wizard-pro-shell.png', {
+  await captureShot(page, 'spawn-wizard-pro-shell.png', {
         fullPage: true,
         runtimeTag: 'llamacpp-local',
         expandSelector: '.wizard-body',
-    });
+  });
 
-    await page.evaluate(() => document.querySelectorAll('#pro-rail-nav .pro-rail-item')[2]?.click());
+  // Exercise every Pro category so each pane has fresh screenshot coverage.
+  const categoryShots = [
+    [0, 'spawn-wizard-pro-rail-model.png'],
+    [1, 'spawn-wizard-pro-rail-memory.png'],
+    [3, 'spawn-wizard-pro-rail-generation.png'],
+    [4, 'spawn-wizard-pro-rail-tools.png'],
+    [5, 'spawn-wizard-pro-rail-network.png'],
+    [6, 'spawn-wizard-pro-rail-advanced.png'],
+  ];
+  for (const [index, name] of categoryShots) {
+    await page.evaluate((i) => document.querySelectorAll('#pro-rail-nav .pro-rail-item')[i]?.click(), index);
+    await sleep(150);
+    await captureShot(page, name, {
+      fullPage: true,
+      runtimeTag: 'llamacpp-local',
+      expandSelector: '.wizard-body',
+    });
+  }
+
+  await page.evaluate(() => document.querySelectorAll('#pro-rail-nav .pro-rail-item')[2]?.click());
     await sleep(200);
     await captureShot(page, 'spawn-wizard-pro-rail-performance.png', {
         fullPage: true,
@@ -70,16 +89,50 @@ export default async function({ page, baseUrl }) {
         expandSelector: '.wizard-body',
     });
 
-    await page.evaluate(() => document.getElementById('pro-reset-all')?.click());
-    await sleep(150);
-    await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+  await page.evaluate(() => document.getElementById('pro-reset-all')?.click());
+  await sleep(150);
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
     await captureShot(page, 'spawn-wizard-pro-reset-light.png', {
         fullPage: true,
         runtimeTag: 'llamacpp-local',
-        expandSelector: '.wizard-body',
-    });
+    expandSelector: '.wizard-body',
+  });
 
-    await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+  await page.evaluate(() => {
+    const modified = document.getElementById('pro-modified-only');
+    if (modified?.checked) modified.click();
+  });
+  await page.evaluate(() => document.querySelector('#hw-kv-tiles [data-kv="q4_0"]')?.click());
+  await sleep(150);
+  await page.evaluate(() => document.querySelectorAll('[data-toast-close]').forEach(button => button.click()));
+  await captureShot(page, 'spawn-wizard-pro-agentic-q4-warning.png', {
+    fullPage: true,
+    runtimeTag: 'llamacpp-local',
+    expandSelector: '.wizard-body',
+  });
+
+  await page.evaluate(async () => {
+    const { showStep } = await import('/js/features/spawn-wizard.js');
+    showStep(0);
+    document.querySelector('.usecase-card[data-usecase="roleplay"]')?.click();
+    showStep(1);
+    const select = document.getElementById('view-mode-select');
+    if (select?.value !== 'pro') {
+      select.value = 'pro';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+  await sleep(2500);
+  await page.evaluate(() => document.querySelectorAll('[data-toast-close]').forEach(button => button.click()));
+  await sleep(100);
+  await captureShot(page, 'spawn-wizard-pro-roleplay-q4-baseline.png', {
+    fullPage: true,
+    runtimeTag: 'llamacpp-local',
+    expandSelector: '.wizard-body',
+  });
+
+  await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
     await page.evaluate(() => document.getElementById('pro-layout')?.scrollIntoView({ block: 'start', behavior: 'instant' }));
     await sleep(200);
     await captureShot(page, 'spawn-wizard-pro-narrow.png', {

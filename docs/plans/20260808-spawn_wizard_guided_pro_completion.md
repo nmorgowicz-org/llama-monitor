@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Created | 2026-08-08 |
-| Status | Phase 4 complete; prior evidence, provenance, CSS, and capture milestones verified |
+| Status | Phase 8 llama.cpp Pro panes complete; Phase 9 Rapid-MLX Pro parity remains |
 | Scope | Complete the three-step Spawn Wizard for llama.cpp/GGUF and Rapid-MLX with Guided and Pro views, trustworthy capture evidence, introspection-backed recommendations, and documentation closure |
 | Primary design source | [`../archive/rapid-mlx/20260806-spawn_wizard_uiux_redesign.md`](../archive/rapid-mlx/20260806-spawn_wizard_uiux_redesign.md) |
 | Phase-router context | [`20260718-final_rapidmlx_followups_execution.md`](20260718-final_rapidmlx_followups_execution.md), Phase 10 |
@@ -1396,3 +1396,6 @@ decisions, a power user can find and edit every applicable setting quickly in Pr
 never changes the configuration, both backends tell the truth about what is requested and effective,
 the launch/preset/API paths agree, and a fresh harness run produces an auditable set of realistic
 screenshots that matches the documentation.
+### Phase 8 milestone update (2026-08-09)
+
+Phase 8 llama.cpp Pro panes are complete. The Pro surface now relocates sampling/reasoning, structured-output, network, extra-argument, MTP-depth, decision-card, and compatibility controls into one canonical seven-category surface. Decision cards carry category/search/dirty metadata, and reset dispatches canonical controls. Fresh release-built G8 evidence is recorded in `docs/screenshots/artifacts/wizard-llamacpp/spawn-wizard-pro-baseline--receipt.json` with model, memory, performance, generation, tools, network, advanced, agentic q4 warning, roleplay q4, modified/reset, search, and narrow captures. Focused Pro Playwright passes; clippy, 2272 Rust tests, JS validation/lint, diff check, and release build pass.

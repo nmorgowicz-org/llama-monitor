@@ -36,6 +36,7 @@
 export const CONTROLS = [
   // ── llama.cpp: Quick-tier (disabled at Quick profile) ─────────────────
   { id: 'spawn-context-size', loaders: ['llama_cpp'], critical: true, view: 'card' },
+  { id: 'hw-mtp-depth', loaders: ['llama_cpp'], critical: false, view: 'both' },
   { id: 'spawn-batch-size', loaders: ['llama_cpp'], critical: true, view: 'both' },
   { id: 'spawn-gpu-layers', loaders: ['llama_cpp'], disableOnQuick: true, quickValue: 'auto', critical: true, view: 'both' },
 
@@ -50,6 +51,22 @@ export const CONTROLS = [
   // is a §2.6 scenario axis and must be Balanced on the MLX side (plan §2.8
   // cross-cutting note).
   { id: 'spawn-parallel-slots', loaders: ['llama_cpp'], critical: true, view: 'both' },
+
+  // Generation, structured output, access, and escape-hatch controls live in
+  // the same Tune step and are relocated into Pro's canonical pane.
+  ...[
+    'spawn-temperature', 'spawn-top-p', 'spawn-min-p', 'spawn-repeat-penalty',
+    'spawn-presence-penalty', 'spawn-top-k', 'spawn-max-tokens', 'spawn-seed',
+    'spawn-enable-thinking', 'spawn-preserve-thinking', 'spawn-reasoning-mode',
+    'spawn-reasoning-budget',
+  ].map(id => ({ id, loaders: ['llama_cpp'], critical: false, view: 'both' })),
+  ...[
+    'spawn-output-mode', 'spawn-grammar', 'spawn-json-schema', 'spawn-tool-call-format',
+  ].map(id => ({ id, loaders: ['llama_cpp'], critical: false, view: 'both' })),
+  ...[
+    'spawn-port', 'spawn-bind-host', 'spawn-alias', 'spawn-api-key',
+  ].map(id => ({ id, loaders: ['llama_cpp'], critical: false, view: 'both' })),
+  { id: 'spawn-extra-args', loaders: ['llama_cpp'], critical: false, view: 'both' },
 
   // ── llama.cpp: Advanced (#spawn-advanced-fields) ──────────────────────
   { id: 'spawn-ubatch-size', loaders: ['llama_cpp'], critical: false, view: 'both' },
@@ -113,7 +130,11 @@ const RAPID_GROUP_CATEGORY = {
 function llamaCategory(id) {
   if (id === 'spawn-context-size' || id.startsWith('spawn-cache-type') || id === 'spawn-kv-unified' || id === 'spawn-fit-enable' || id === 'spawn-fit-target' || id === 'spawn-cache-mode' || id === 'spawn-cache-ram') return 'Memory & context';
   if (id === 'hw-quant-select' || id === 'hw-mmproj-select') return 'Model & compatibility';
-  if (id.includes('spec') || id.includes('draft') || id === 'spawn-gpu-layers' || id.includes('batch') || id.includes('thread') || id.includes('flash') || id.includes('tensor') || id === 'spawn-prio' || id === 'spawn-parallel-slots' || id === 'spawn-n-cpu-moe') return 'Performance';
+  if (id.startsWith('spawn-temperature') || id.startsWith('spawn-top-') || id.startsWith('spawn-min-p') || id.startsWith('spawn-repeat-') || id.startsWith('spawn-presence-') || id.startsWith('spawn-max-tokens') || id.startsWith('spawn-seed') || id.startsWith('spawn-enable-thinking') || id.startsWith('spawn-preserve-thinking') || id.startsWith('spawn-reasoning-')) return 'Generation & reasoning';
+  if (id === 'spawn-output-mode' || id === 'spawn-grammar' || id === 'spawn-json-schema' || id === 'spawn-tool-call-format') return 'Tools & conversation formatting';
+  if (id === 'spawn-port' || id === 'spawn-bind-host' || id === 'spawn-alias' || id === 'spawn-api-key') return 'Network & observability';
+  if (id === 'spawn-extra-args') return 'Advanced';
+  if (id.includes('spec') || id.includes('draft') || id === 'hw-mtp-depth' || id === 'spawn-gpu-layers' || id.includes('batch') || id.includes('thread') || id.includes('flash') || id.includes('tensor') || id === 'spawn-prio' || id === 'spawn-parallel-slots' || id === 'spawn-n-cpu-moe') return 'Performance';
   if (id === 'spawn-mlock') return 'Advanced';
   return 'Advanced';
 }
