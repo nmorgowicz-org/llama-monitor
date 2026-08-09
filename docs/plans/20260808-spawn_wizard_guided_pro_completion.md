@@ -27,6 +27,10 @@ Updated as milestones pass; this ledger records verified repository state, not i
 > The Coordinator reads this plan completely once; Builders and Verifiers read only the routed
 > sections for their assigned packet. Always begin with Phase 0, and do not advance without its gate.
 
+### Responsive modal sizing milestone (2026-08-09)
+
+Added a shared `modal-sizing.css` contract loaded after the modal surfaces. It replaces inline pixel widths and independent viewport caps with safe-area gutters, dynamic viewport dimensions, responsive shell widths, and a tall-screen height expansion for content-rich modals. Compact dialogs retain intrinsic sizing while all overlays can scroll on short viewports. Release-built evidence: `spawn-wizard-tier-matrix--llamacpp-local--guided.png` (1280x1400), `spawn-wizard-rapid-guided-baseline--rapidmlx-local--dark.png`, and settings/preset captures show centered shells without the prior tall-viewport backdrop bands. Validation: release build, clippy, 2272 Rust tests (26 ignored), JS validation/lint, diff check, and cargo fmt.
+
 ## 1. Why this plan exists
 
 ### Phase 4 milestone update (2026-08-09)

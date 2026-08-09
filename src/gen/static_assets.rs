@@ -19,6 +19,7 @@ pub const CSS_EVIDENCE_DRAWER: &str = include_str!("../../static/css/evidence-dr
 pub const CSS_LAYOUT: &str = include_str!("../../static/css/layout.css");
 pub const CSS_LOGS: &str = include_str!("../../static/css/logs.css");
 pub const CSS_MODAL_PREMIUM: &str = include_str!("../../static/css/modal-premium.css");
+pub const CSS_MODAL_SIZING: &str = include_str!("../../static/css/modal-sizing.css");
 pub const CSS_SETTINGS_MODAL: &str = include_str!("../../static/css/settings-modal.css");
 pub const CSS_SETUP_VIEW: &str = include_str!("../../static/css/setup-view.css");
 pub const CSS_SPAWN_WIZARD_BASE: &str = include_str!("../../static/css/spawn-wizard-base.css");

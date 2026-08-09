@@ -31,6 +31,7 @@
     <link rel="stylesheet" href="/css/spawn-wizard-theme.css">
     <link rel="stylesheet" href="/css/tune-panel.css">
     <link rel="stylesheet" href="/css/evidence-drawer.css">
+    <link rel="stylesheet" href="/css/modal-sizing.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap">
 <!-- Self-hosted vendor scripts (no CDN) -->
 <script src="/vendor/js/marked.min.js"></script>
@@ -2006,7 +2007,7 @@
 
 <!-- Template Manager Modal -->
 <div class="modal-overlay" id="template-manager-modal" style="z-index:1300;">
-    <div class="modal template-manager-modal" style="width:720px;">
+    <div class="modal template-manager-modal">
         <div class="modal-header">
             <h2>Personas (System Prompt Templates)</h2>
             <button type="button" class="modal-close" id="template-manager-close" aria-label="Close">&times;</button>
@@ -2472,7 +2473,7 @@
 
 <!-- File Browser Modal (z-index above all modals) -->
 <div class="modal-overlay" id="file-browser-modal" style="z-index:1300;">
-    <div class="modal file-browser-modal" style="width:560px;">
+    <div class="modal file-browser-modal">
         <div class="modal-header">
             <h2 id="fb-title">Browse Files</h2>
             <button type="button" class="modal-close" id="filebrowser-close" aria-label="Close">&times;</button>
@@ -5541,7 +5542,7 @@
 
 <!-- Settings Modal with Tabbed Navigation -->
 <div class="modal-overlay" id="settings-modal" aria-hidden="true" inert>
-    <div class="modal" style="width:720px;">
+    <div class="modal">
         <div class="modal-header">
             <h2>Settings<span class="dirty-indicator" aria-label="Unsaved changes"></span></h2>
             <button type="button" class="modal-close" id="settings-modal-close" aria-label="Close">&times;</button>
@@ -6339,7 +6340,7 @@
 
 <!-- Analytics Dashboard Modal -->
 <div class="modal-overlay" id="analytics-modal">
-    <div class="modal" style="width:960px;">
+    <div class="modal">
         <div class="modal-header">
             <h2>Analytics Dashboard</h2>
             <button type="button" class="modal-close" id="analytics-modal-close" aria-label="Close">&times;</button>
@@ -6461,7 +6462,7 @@
 
 <!-- Export Modal -->
 <div class="modal-overlay" id="export-modal">
-    <div class="modal" style="width:560px;">
+    <div class="modal">
         <div class="modal-header">
             <h2>Export Data</h2>
             <button type="button" class="modal-close" id="export-modal-close" aria-label="Close">&times;</button>

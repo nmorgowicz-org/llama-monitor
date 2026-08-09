@@ -1,0 +1,114 @@
+/* Shared responsive sizing for every modal surface. */
+:root {
+    --modal-viewport-gutter: clamp(16px, 2.5vh, 40px);
+    --modal-available-height: min(calc(100dvh - (2 * var(--modal-viewport-gutter))), 1600px);
+    --modal-available-width: min(calc(100dvw - (2 * var(--modal-viewport-gutter))), 1920px);
+}
+
+@supports not (height: 100dvh) {
+    :root {
+        --modal-available-height: min(calc(100vh - (2 * var(--modal-viewport-gutter))), 1600px);
+        --modal-available-width: min(calc(100vw - (2 * var(--modal-viewport-gutter))), 1920px);
+    }
+}
+
+/* The overlay can scroll on short displays without clipping the shell. */
+.modal-overlay,
+.keyboard-shortcut-overlay,
+.compact-confirm-overlay,
+.cat-mgr-overlay {
+    box-sizing: border-box;
+    padding: max(var(--modal-viewport-gutter), env(safe-area-inset-top))
+        max(var(--modal-viewport-gutter), env(safe-area-inset-right))
+        max(var(--modal-viewport-gutter), env(safe-area-inset-bottom))
+        max(var(--modal-viewport-gutter), env(safe-area-inset-left));
+    overflow: auto;
+}
+
+/* All named shells share live viewport ceilings. */
+.modal-overlay > .modal,
+.models-manager-shell,
+.template-manager-modal,
+.preset-editor-shell,
+.spawn-wizard-modal,
+.remote-agent-setup-modal,
+.llama-version-modal-shell,
+.rapid-mlx-modal-shell,
+.compact-confirm-modal,
+.shortcuts-modal {
+    box-sizing: border-box;
+    max-width: var(--modal-available-width);
+    max-height: var(--modal-available-height);
+}
+
+/* Preserve the intended relative width of each surface, without pixel locks. */
+.modal-overlay > .modal {
+    width: min(760px, var(--modal-available-width));
+}
+
+#template-manager-modal .template-manager-modal {
+    width: min(1120px, var(--modal-available-width));
+}
+
+#file-browser-modal .file-browser-modal,
+#export-modal > .modal,
+#config-modal > .modal {
+    width: min(760px, var(--modal-available-width));
+}
+
+#settings-modal > .modal {
+    width: min(960px, var(--modal-available-width));
+}
+
+#analytics-modal > .modal {
+    width: min(1200px, var(--modal-available-width));
+}
+
+#models-modal .models-manager-shell,
+.spawn-wizard-modal {
+    width: min(1800px, var(--modal-available-width));
+}
+
+#preset-modal .preset-editor-shell {
+    width: min(1040px, var(--modal-available-width));
+}
+
+#preset-modal.preset-editor--rapid-mlx .preset-editor-shell {
+    width: min(1200px, var(--modal-available-width));
+}
+
+#remote-agent-setup-modal .remote-agent-setup-modal {
+    width: min(680px, var(--modal-available-width));
+}
+
+#llama-version-modal .llama-version-modal-shell {
+    width: min(980px, var(--modal-available-width));
+}
+
+#rapid-mlx-modal .rapid-mlx-modal-shell {
+    width: min(960px, var(--modal-available-width));
+}
+
+.compact-confirm-modal {
+    width: min(560px, var(--modal-available-width));
+}
+
+/* Content-rich surfaces use additional height on tall desktop viewports. */
+@media (min-width: 821px) and (min-height: 1000px) {
+    #models-modal .models-manager-shell,
+    #template-manager-modal .template-manager-modal,
+    #preset-modal .preset-editor-shell,
+    #settings-modal > .modal,
+    #analytics-modal > .modal,
+    .spawn-wizard-modal {
+        height: min(var(--modal-available-height), 1600px);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .modal-overlay,
+    .keyboard-shortcut-overlay,
+    .compact-confirm-overlay {
+        scroll-behavior: auto;
+    }
+}
