@@ -138,7 +138,7 @@ impl SamplingCatalog {
     /// Get sampling modes for a model by family/architecture.
     ///
     /// # Args
-    /// - `name_or_repo`: model name or HF repo ID
+    /// - `name_or_repo`: retained for API compatibility; never used for model-property inference
     /// - `size_bytes`: model file size (for sizing hints)
     /// - `tags`: optional tags like "moe", "vision", "code"
     /// - `gguf_arch`: GGUF `general.architecture` (for finetune resolution)
@@ -147,7 +147,7 @@ impl SamplingCatalog {
     ///
     /// Returns the full mode list; first is the recommended default.
     pub fn modes_for_model(
-        name_or_repo: &str,
+        _name_or_repo: &str,
         _size_bytes: u64,
         _tags: &[String],
         gguf_arch: &str,
@@ -157,16 +157,12 @@ impl SamplingCatalog {
         let llama_coverage = BackendFieldCoverage::full();
         let rapid_coverage = BackendFieldCoverage::rapid_mlx_unqualified();
 
-        let lower = name_or_repo.to_ascii_lowercase();
         let arch_lower = gguf_arch.to_ascii_lowercase();
         let family_lower = arch_family.to_ascii_lowercase();
 
         // Qwen3.5 family: presets from https://unsloth.ai/docs/models/qwen3.5
-        let is_qwen35 = lower.contains("qwen3.5")
-            || lower.contains("qwen35")
-            || arch_lower == "qwen3_5"
-            || arch_lower == "qwen3.5"
-            || family_lower == "qwen3.5";
+        let is_qwen35 =
+            arch_lower == "qwen3_5" || arch_lower == "qwen3.5" || family_lower == "qwen3.5";
 
         if is_qwen35 {
             return Self::with_universal_omission_choices(
@@ -181,10 +177,7 @@ impl SamplingCatalog {
             arch_lower.as_str(),
             "qwen35" | "qwen35moe" | "qwen3_6" | "qwen3.6"
         );
-        let is_qwen36 = arch_is_qwen36
-            || family_lower == "qwen3.6"
-            || (lower.contains("qwen3.6") || lower.contains("qwen36") || lower.contains("qwopus"))
-                && (lower.contains("27b") || lower.contains("35b") || lower.contains("a3b"));
+        let is_qwen36 = arch_is_qwen36 || family_lower == "qwen3.6";
 
         if is_qwen36 {
             return Self::with_universal_omission_choices(
@@ -195,13 +188,10 @@ impl SamplingCatalog {
         }
 
         // Generic Qwen3 reasoning/distilled models
-        let is_qwen3_reasoning = lower.contains("qwen3")
-            && !is_qwen35
-            && !is_qwen36
-            && (lower.contains("reasoning")
-                || lower.contains("thinking")
-                || lower.contains("distill")
-                || lower.contains("coder-next"));
+        let is_qwen3_reasoning = matches!(
+            arch_lower.as_str(),
+            "qwen3_reasoning" | "qwen3_reasoning_moe"
+        ) || family_lower == "qwen3_reasoning";
         if is_qwen3_reasoning {
             return Self::with_universal_omission_choices(
                 Self::qwen3_reasoning_modes(llama_coverage.clone(), rapid_coverage.clone()),
@@ -211,7 +201,10 @@ impl SamplingCatalog {
         }
 
         // EXAONE 4.5: general-purpose vs OCR/document
-        if lower.contains("exaone-4.5") || lower.contains("exaone4.5") {
+        if matches!(
+            arch_lower.as_str(),
+            "exaone4_5" | "exaone4.5" | "exaone_4_5"
+        ) {
             return Self::with_universal_omission_choices(
                 Self::exaone45_modes(llama_coverage.clone(), rapid_coverage.clone()),
                 llama_coverage,
@@ -220,15 +213,7 @@ impl SamplingCatalog {
         }
 
         // Gemma4 family
-        let is_gemma4 = arch_lower == "gemma4"
-            || family_lower == "gemma4"
-            || (lower.contains("gemma-4") || lower.contains("gemma4"))
-                && (lower.contains("2b")
-                    || lower.contains("4b")
-                    || lower.contains("12b")
-                    || lower.contains("15b")
-                    || lower.contains("26b")
-                    || lower.contains("31b"));
+        let is_gemma4 = arch_lower == "gemma4" || family_lower == "gemma4";
         if is_gemma4 {
             return Self::with_universal_omission_choices(
                 Self::gemma4_modes(llama_coverage.clone(), rapid_coverage.clone()),
@@ -943,10 +928,10 @@ mod tests {
     #[test]
     fn qwen36_all_modes_visible() {
         let modes = SamplingCatalog::modes_for_model(
-            "Qwen3.6-30B-A3B",
+            "renamed-finetune.gguf",
             0,
             &[],
-            "",
+            "qwen3_6",
             "",
             crate::inference::InferenceBackend::LlamaCpp,
         );
@@ -974,10 +959,10 @@ mod tests {
     #[test]
     fn qwen35_all_modes() {
         let modes = SamplingCatalog::modes_for_model(
-            "Qwen3.5-122B-A10B-GGUF",
+            "renamed-qwen35.gguf",
             0,
             &[],
-            "",
+            "qwen3_5",
             "",
             crate::inference::InferenceBackend::LlamaCpp,
         );
@@ -989,10 +974,10 @@ mod tests {
     #[test]
     fn gemma4_three_modes() {
         let modes = SamplingCatalog::modes_for_model(
-            "gemma-4-26b-it",
+            "renamed-gemma4.gguf",
             0,
             &[],
-            "",
+            "gemma4",
             "",
             crate::inference::InferenceBackend::LlamaCpp,
         );
@@ -1023,12 +1008,26 @@ mod tests {
     }
 
     #[test]
-    fn rapid_mlx_coverage_is_honest() {
+    fn arbitrary_name_never_selects_family_modes_without_metadata() {
         let modes = SamplingCatalog::modes_for_model(
-            "Qwen3.6-30B-A3B",
+            "Qwen3.6-30B-A3B-renamed.gguf",
             0,
             &[],
             "",
+            "",
+            crate::inference::InferenceBackend::LlamaCpp,
+        );
+        assert!(modes.len() >= 6);
+        assert_eq!(modes[0].id, SamplingModeId::General);
+    }
+
+    #[test]
+    fn rapid_mlx_coverage_is_honest() {
+        let modes = SamplingCatalog::modes_for_model(
+            "renamed-rapid.gguf",
+            0,
+            &[],
+            "qwen3_6",
             "",
             crate::inference::InferenceBackend::RapidMlx,
         );
@@ -1046,10 +1045,10 @@ mod tests {
     fn unsloth_values_are_exact() {
         // Source: https://unsloth.ai/docs/models/qwen3.6
         let modes = SamplingCatalog::modes_for_model(
-            "Qwen3.6-30B-A3B",
+            "renamed-qwen36.gguf",
             0,
             &[],
-            "",
+            "qwen3_6",
             "",
             crate::inference::InferenceBackend::LlamaCpp,
         );
