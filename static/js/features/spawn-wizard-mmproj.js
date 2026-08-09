@@ -2,7 +2,7 @@
 // to auto-select the best local mmproj file for a model, the mmproj dropdown
 // section UI, and the "no local mmproj found" HuggingFace auto-search/manual
 // fetch/download flow.
-import { wizardState, scheduleVramUpdate, _modelStemForSearch, _hfFilesPost, _deriveMmprojSaveName, _inferFamilyFromName } from './spawn-wizard.js';
+import { wizardState, scheduleVramUpdate, _modelStemForSearch, _hfFilesPost, _deriveMmprojSaveName } from './spawn-wizard.js';
 import { formatBytes } from './spawn-wizard-format.js';
 import { showToast } from './toast.js';
 
@@ -19,9 +19,9 @@ function _mmprojQuantLabel(file) {
 }
 
 function _preferredMmprojQuant(modelFilename = '') {
-  const family = wizardState.model.family
-    || _inferFamilyFromName(wizardState.model.hfRepo || '')
-    || _inferFamilyFromName(modelFilename);
+  // Family is authoritative only when supplied by model metadata/profile. Do
+  // not infer a runtime capability or preferred projector from a filename.
+  const family = wizardState.model.family || '';
   if (family === 'qwen3.5' || family === 'qwen3.6') return 'F16';
   if (family === 'gemma4') return 'F16';
   return '';

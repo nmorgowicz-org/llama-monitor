@@ -34,6 +34,7 @@ import scenarioSpawnWizardRapidGuidedBaseline from './scenarios/wizard-rapidmlx/
 import scenarioSpawnWizardGif from './scenarios/wizard-llamacpp/spawn-wizard-gif.mjs';
 import scenarioSpawnWizardHfDownload from './scenarios/wizard-llamacpp/spawn-wizard-hf-download.mjs';
 import scenarioSpawnWizardTierMatrix from './scenarios/wizard-llamacpp/spawn-wizard-tier-matrix.mjs';
+import scenarioSpawnWizardMmprojSelection from './scenarios/wizard-llamacpp/spawn-wizard-mmproj-selection.mjs';
 import scenarioSpawnWizardRapidMlxGif from './scenarios/wizard-rapidmlx/spawn-wizard-rapid-mlx-gif.mjs';
 import scenarioRapidMlxRuntime from './scenarios/features/rapid-mlx-runtime.mjs';
 import scenarioRapidMlxLive from './scenarios/validation/rapid-mlx-live.mjs';
@@ -125,7 +126,8 @@ Scenarios:
      spawn-wizard-gif          Animated GIF walking through all setup wizard steps (llama.cpp path)
      spawn-wizard-rapid-mlx-gif  Animated GIF: Rapid-MLX engine, hardware controls, profile hints, spawn
      spawn-wizard-hf-download  HF download panel: idle options and simulated progress
-     spawn-wizard-tier-matrix  Hardware step at Quick/Balanced/Advanced tiers (registry disclosure)
+   spawn-wizard-tier-matrix  Hardware step at Quick/Balanced/Advanced tiers (registry disclosure)
+   spawn-wizard-mmproj-selection  Hardware vision/mmproj selector with typed recommendation evidence
      discussions             Chat template Discussions: Qwen (froggeric) and Gemma4 (google) feeds,
                             Create fix modal, and Lifecycle modal Discussions section
 
@@ -243,6 +245,13 @@ export const SCENARIOS = {
     'spawn-wizard-tier-matrix': {
         run: scenarioSpawnWizardTierMatrix, category: 'wizard-llamacpp', runtime: 'llamacpp-local',
         contract: { intent: 'Capture the current llama.cpp disclosure tier matrix.', expectedOutputs: ['spawn-wizard-tier-matrix--llamacpp-local--quick.png', 'spawn-wizard-tier-matrix--llamacpp-local--balanced.png', 'spawn-wizard-tier-matrix--llamacpp-local--advanced.png'] },
+    },
+    'spawn-wizard-mmproj-selection': {
+        run: scenarioSpawnWizardMmprojSelection, category: 'wizard-llamacpp', runtime: 'llamacpp-local',
+        contract: {
+            intent: 'Capture the llama.cpp hardware vision/mmproj selector with a typed family-backed recommendation.',
+            expectedOutputs: ['spawn-wizard-mmproj-selection--llamacpp-local--vision.png'],
+        },
     },
     'spawn-wizard-rapid-mlx-gif': {
         run: scenarioSpawnWizardRapidMlxGif, category: 'wizard-rapidmlx', runtime: 'rapidmlx-local',

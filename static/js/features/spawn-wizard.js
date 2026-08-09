@@ -339,8 +339,12 @@ export const wizardState = {
   arch: {
     nLayers: 0, nKvHeads: 0, headDim: 0,
     nGlobalAttnLayers: 0, localAttnWindow: 0, localKvHeads: 1,
+    globalHeadDim: 0, localHeadDim: 0, slidingWindow: 0,
+    nAttnLayers: 0, linearAttnStateBytes: 0,
     nExperts: 0, nExpertsUsed: 0, expertFraction: 0.65,
-    mtpDepth: 0, mmprojBytes: 0, paramB: 0,
+    mtpDepth: 0, mmprojBytes: 0, mmprojRequired: false, paramB: 0,
+    metadataStatus: 'unknown',
+    metadataReason: '',
   },
   hardware: {
     gpuLayers: 'auto', gpuLayersManual: null,
@@ -1834,31 +1838,6 @@ export function getAuthHeaders() {
 }
 
 
-// Infer model family slug from a name string (mirrors backend heuristics).
-export function _inferFamilyFromName(name) {
-  const lower = name.toLowerCase();
-  if (lower.includes('qwen3.6') || lower.includes('qwen3_6') || lower.includes('qwen36')) return 'qwen3.6';
-  if (lower.includes('qwen3.5') || lower.includes('qwen3_5') || lower.includes('qwen35')) return 'qwen3.5';
-  if (lower.includes('qwen3') || lower.includes('qwen-3') || lower.includes('qwen_3')) return 'qwen3';
-  if (lower.includes('qwen2.5') || lower.includes('qwen2_5') || lower.includes('qwen25')) return 'qwen2.5';
-  if (lower.includes('qwen')) return 'qwen';
-  if (lower.includes('gemma-4') || lower.includes('gemma_4') || lower.includes('gemma4')) return 'gemma4';
-  if (lower.includes('gemma-3') || lower.includes('gemma_3') || lower.includes('gemma3')) return 'gemma3';
-  if (lower.includes('gemma-2') || lower.includes('gemma_2') || lower.includes('gemma2')) return 'gemma2';
-  if (lower.includes('gemma')) return 'gemma';
-  if (lower.includes('llama-3.3') || lower.includes('llama3_3') || lower.includes('llama33')) return 'llama3.3';
-  if (lower.includes('llama-3.1') || lower.includes('llama3_1') || lower.includes('llama31')) return 'llama3.1';
-  if (lower.includes('llama-3') || lower.includes('llama3')) return 'llama3';
-  if (lower.includes('llama')) return 'llama';
-  if (lower.includes('mistral-large')) return 'mistral-large';
-  if (lower.includes('mistral-nemo') || lower.includes('nemo')) return 'mistral-nemo';
-  if (lower.includes('mistral') || lower.includes('mixtral')) return 'mistral';
-  if (lower.includes('deepseek')) return 'deepseek';
-  if (lower.includes('phi')) return 'phi';
-  return '';
-}
-
-
 export function showStep(index) {
   wizardState.currentStep = index;
 
@@ -2590,23 +2569,52 @@ export async function introspectHfFileMetadata(repoId, fname, sizeBytes) {
         hf_file_path: fname,
       }),
     });
-    if (!resp.ok) return false;
+    if (!resp.ok) {
+      wizardState.arch.metadataStatus = 'degraded';
+      wizardState.arch.metadataReason = `GGUF header request failed (${resp.status})`;
+      return false;
+    }
     const data = await resp.json();
     const m = data.introspected;
-    if (!m) return false;
+    if (!m) {
+      wizardState.arch.metadataStatus = 'degraded';
+      wizardState.arch.metadataReason = data.error || 'GGUF header metadata unavailable';
+      return false;
+    }
 
-    if (m.gguf_arch) wizardState.arch.ggufArch = m.gguf_arch;
+    if (m.n_ctx_train) wizardState.model.nCtxTrain = m.n_ctx_train;
+    if (m.gguf_arch) {
+      wizardState.arch.ggufArch = m.gguf_arch;
+      if (!wizardState.model.family) {
+        wizardState.model.family = String(m.gguf_arch).toLowerCase().replace(/_/g, '.');
+      }
+    }
     if (m.total_params_b != null && m.total_params_b > 0) wizardState.model.paramB = m.total_params_b;
     if (m.active_params_b != null) wizardState.model.activeParamsB = m.active_params_b;
     if (m.n_experts) wizardState.arch.nExperts = m.n_experts;
     if (m.n_experts_used) wizardState.arch.nExpertsUsed = m.n_experts_used;
     if (m.mtp_depth) wizardState.arch.mtpDepth = m.mtp_depth;
+    if (m.n_attn_layers) wizardState.arch.nAttnLayers = m.n_attn_layers;
+    if (m.linear_attn_state_bytes) wizardState.arch.linearAttnStateBytes = m.linear_attn_state_bytes;
+    if (m.n_global_attn_layers) wizardState.arch.nGlobalAttnLayers = m.n_global_attn_layers;
+    if (m.local_kv_heads) wizardState.arch.localKvHeads = m.local_kv_heads;
+    if (m.global_head_dim) wizardState.arch.globalHeadDim = m.global_head_dim;
+    if (m.local_head_dim) wizardState.arch.localHeadDim = m.local_head_dim;
+    if (m.sliding_window) {
+      wizardState.arch.slidingWindow = m.sliding_window;
+      wizardState.arch.localAttnWindow = m.sliding_window;
+    }
+    if (m.mmproj_required != null) wizardState.arch.mmprojRequired = !!m.mmproj_required;
+    wizardState.arch.metadataStatus = 'resolved';
+    wizardState.arch.metadataReason = 'Progressive GGUF header';
 
     // The pill row / effective defaults were already rendered off the earlier,
     // arch-less call — refresh now that a real gguf_arch is known.
     if (m.gguf_arch) _fetchAndApplyModelSamplingDefaults();
     return true;
-  } catch {
+  } catch (error) {
+    wizardState.arch.metadataStatus = 'degraded';
+    wizardState.arch.metadataReason = error?.message || 'GGUF header request failed';
     return false;
   }
 }
@@ -2619,36 +2627,6 @@ export function inferParamBFromName(name) {
   // If there's a pattern like "35B-A3B" or "122B-A10B", take the larger (total) param count
   const values = matches.map(m => parseFloat(m[1]));
   return Math.max(...values);
-}
-
-/// Parse MoE "AXB" active-parameter suffix from a filename.
-/// "35B-A3B" → { total: 35, active: 3 }
-/// "26B-A4B" → { total: 26, active: 4 }
-function parseMoeSuffix(name) {
-  // Match "NB-AMB" or "NB_AMB" patterns (N total, M active)
-  const m = name.match(/(\d+(?:\.\d+)?)[Bb][-_][Aa](\d+(?:\.\d+)?)[Bb]/i);
-  if (!m) return null;
-  return { total: parseFloat(m[1]), active: parseFloat(m[2]) };
-}
-
-/// Detect if a filename indicates MTP (multi-token prediction) heads.
-export function detectMtpFromName(name) {
-  const lower = name.toLowerCase();
-  return lower.includes('mtp') || lower.includes('multi-token') || lower.includes('multitokenprediction');
-}
-
-/// Detect mmproj filename for a model, given its path.
-/// Looks for a file matching common mmproj naming patterns in the same directory.
-function inferMmprojPath(modelPath) {
-  if (!modelPath) return null;
-  const dir = modelPath.replace(/[/\\][^/\\]+$/, '');
-  const basename = modelPath.split(/[/\\]/).pop() || '';
-
-  // Common pattern: strip quant suffix and add mmproj variants
-  // e.g. "Qwen3.6-27B-...-Q4_K_S.gguf" → "Qwen3.6-27B-UD-mmproj-BF16.gguf"
-  // We can't auto-locate without a dir scan, but we can suggest the pattern.
-  const stem = basename.replace(/-?(Q\d|IQ\d|F16|BF16|q\d)[^.]*\.gguf$/i, '');
-  return { dir, stem };
 }
 
 // ── Introspection ─────────────────────────────────────────────────────────────
@@ -2667,9 +2645,17 @@ export async function doIntrospect(path) {
   try {
     const headers = window.authHeaders ? { ...window.authHeaders(), 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
     const resp = await fetch('/api/model/introspect', { method: 'POST', headers, body: JSON.stringify({ model_path: path }) });
-    if (!resp.ok) return false;
+    if (!resp.ok) {
+      wizardState.arch.metadataStatus = 'degraded';
+      wizardState.arch.metadataReason = `GGUF metadata request failed (${resp.status})`;
+      return false;
+    }
     const data = await resp.json();
-    if (!data.ok || !data.metadata) return false;
+    if (!data.ok || !data.metadata) {
+      wizardState.arch.metadataStatus = 'degraded';
+      wizardState.arch.metadataReason = data.error || 'GGUF metadata unavailable';
+      return false;
+    }
 
     const m = data.metadata;
 
@@ -2680,12 +2666,29 @@ export async function doIntrospect(path) {
 
     // Merge arch state from GGUF metadata
     if (m.n_layers)       wizardState.arch.nLayers      = m.n_layers;
+    if (m.n_ctx_train)    wizardState.model.nCtxTrain   = m.n_ctx_train;
     if (m.n_kv_heads)     wizardState.arch.nKvHeads     = m.n_kv_heads;
     if (m.head_dim)       wizardState.arch.headDim       = m.head_dim;
     if (m.n_experts)      wizardState.arch.nExperts      = m.n_experts;
     if (m.n_experts_used) wizardState.arch.nExpertsUsed = m.n_experts_used;
     if (m.mtp_depth)      wizardState.arch.mtpDepth      = m.mtp_depth;
-    if (m.gguf_arch)      wizardState.arch.ggufArch      = m.gguf_arch;
+    if (m.n_attn_layers)  wizardState.arch.nAttnLayers  = m.n_attn_layers;
+    if (m.linear_attn_state_bytes) wizardState.arch.linearAttnStateBytes = m.linear_attn_state_bytes;
+    if (m.n_global_attn_layers) wizardState.arch.nGlobalAttnLayers = m.n_global_attn_layers;
+    if (m.local_kv_heads)  wizardState.arch.localKvHeads = m.local_kv_heads;
+    if (m.global_head_dim) wizardState.arch.globalHeadDim = m.global_head_dim;
+    if (m.local_head_dim)  wizardState.arch.localHeadDim = m.local_head_dim;
+    if (m.sliding_window) {
+      wizardState.arch.slidingWindow = m.sliding_window;
+      wizardState.arch.localAttnWindow = m.sliding_window;
+    }
+    if (m.mmproj_required != null) wizardState.arch.mmprojRequired = !!m.mmproj_required;
+    if (m.gguf_arch) {
+      wizardState.arch.ggufArch = m.gguf_arch;
+      if (!wizardState.model.family) {
+        wizardState.model.family = String(m.gguf_arch).toLowerCase().replace(/_/g, '.');
+      }
+    }
     // Backend-derived architecture label + active-param estimate (authoritative —
     // same computation the preset editor uses, so the wizard label matches it).
     if (m.architecture_kind) wizardState.arch.archKind = m.architecture_kind;
@@ -2693,6 +2696,8 @@ export async function doIntrospect(path) {
     // Exact per-layer byte sizes measured from the GGUF tensor directory (real data).
     if (m.bytes_per_layer != null) wizardState.arch.bytesPerLayer = m.bytes_per_layer;
     if (m.expert_bytes_per_layer != null) wizardState.arch.expertBytesPerLayer = m.expert_bytes_per_layer;
+    wizardState.arch.metadataStatus = 'resolved';
+    wizardState.arch.metadataReason = 'GGUF header metadata';
 
     // Re-fetch sampling defaults now that gguf_arch is known — the earlier call
     // (on hardware step entry) ran before introspection completed and sent an empty
@@ -2778,8 +2783,6 @@ export async function doIntrospect(path) {
         );
         if (browseResp.ok) {
           const bd = await browseResp.json();
-          const modelFilename2 = path.split(/[\\/]/).pop() || '';
-          const mainFamily = _inferFamilyFromName(modelFilename2);
           const MTP_HEAD_MAX_BYTES = 3_000_000_000; // >3 GB = full model, not an MTP head
           const drafts = (bd.entries || []).filter(e => {
             if (e.is_dir) return false;
@@ -2797,11 +2800,6 @@ export async function doIntrospect(path) {
                || n.includes('-mtp.')
                || /[-_]mtp[-_]/.test(n);
             if (!nameMatch) return false;
-            // Skip candidates from a different recognizable model family.
-            if (mainFamily) {
-              const candidateFamily = _inferFamilyFromName(e.name);
-              if (candidateFamily && candidateFamily !== mainFamily) return false;
-            }
             return true;
           });
           if (drafts.length) {
@@ -2879,7 +2877,9 @@ export async function doIntrospect(path) {
     scheduleVramUpdate();
     if (wizardState.model.paramB > 0) triggerQuantAdvisor();
     return true;
-  } catch {
+  } catch (error) {
+    wizardState.arch.metadataStatus = 'degraded';
+    wizardState.arch.metadataReason = error?.message || 'GGUF introspection failed';
     return false;
   }
 }
@@ -3219,55 +3219,11 @@ function bindHardwareToggleSwitch(labelEl, inputEl) {
 // ── Animated VRAM display ─────────────────────────────────────────────────────
 
 export function getEffectiveArch() {
-  const a = wizardState.arch;
-  // Apply heuristics when we have a model name, regardless of paramB.
-  // Named-family heuristics (coder-next, qwen3.6, gemma4, etc.) identify architecture
-  // solely from the filename — they don't need a known parameter count.
-  // Gating on paramB > 0 would skip DeltaNet nAttnLayers reduction for models whose
-  // GGUF lacks general.parameter_count and whose filename has no "NB" suffix.
-  const modelName = wizardState.model.path || wizardState.model.hfRepo;
-  if (modelName) {
-    const heuristicArch = buildHeuristicArch(modelName, wizardState.model.paramB);
-    // Named families (DeltaNet, sliding-window, etc.) set fields beyond the generic
-    // nLayers/nKvHeads/headDim — those are keyed on the filename, not paramB.
-    // The generic tier fallback relies on paramB: skip it when paramB = 0 to avoid
-    // replacing correct GGUF introspection values with a wrong size-tier guess.
-    const isNamedFamily =
-      heuristicArch.nAttnLayers > 0 ||
-      heuristicArch.localAttnWindow > 0 ||
-      heuristicArch.nGlobalAttnLayers > 0 ||
-      heuristicArch.linearAttnStateBytes > 0;
-    if (!isNamedFamily && wizardState.model.paramB <= 0) return a;
-
-    // For sliding-window models, GGUF head_dim is the global head_dim (e.g., 512),
-    // but local layers use a smaller dim (e.g., 256). Trust the heuristic head_dim
-    // in that case to avoid inflating KV cache.
-    const hasLocalAttn = heuristicArch.localAttnWindow > 0;
-    // For hybrid DeltaNet models (e.g. Qwen3-Coder-Next, Qwen3.6), llama-server
-    // introspection prints a different n_kv_heads than the raw GGUF binary stores.
-    // The heuristic value matches the GGUF binary; trust it for these families.
-    const isHybridDeltaNet = heuristicArch.nAttnLayers > 0 && heuristicArch.nAttnLayers < heuristicArch.nLayers;
-    return {
-      // Base from heuristic (includes sliding-window fields, MoE, MTP hints)
-      ...heuristicArch,
-      // Override with introspection-only fields
-      nLayers: a.nLayers || heuristicArch.nLayers,
-      nKvHeads: isHybridDeltaNet ? heuristicArch.nKvHeads : (a.nKvHeads || heuristicArch.nKvHeads),
-      // head_dim: heuristic for sliding-window models; introspection otherwise
-      headDim: hasLocalAttn
-        ? heuristicArch.headDim
-        : (a.headDim || heuristicArch.headDim),
-      // Preserve sliding-window + hybrid-attention from the heuristic
-      // unless introspection explicitly set them (non-zero).
-      nGlobalAttnLayers: a.nGlobalAttnLayers || heuristicArch.nGlobalAttnLayers,
-      localAttnWindow: a.localAttnWindow || heuristicArch.localAttnWindow,
-      localKvHeads: a.localKvHeads || heuristicArch.localKvHeads,
-      // Hybrid linear-attention (DeltaNet, etc.): preserve if set
-      nAttnLayers: a.nAttnLayers || heuristicArch.nAttnLayers,
-      linearAttnStateBytes: a.linearAttnStateBytes || heuristicArch.linearAttnStateBytes,
-    };
-  }
-  return a;
+  // Architecture and capability fields are authoritative only after local GGUF or
+  // progressive HF-header introspection. Unknown/degraded models intentionally return
+  // zero-valued fields so the estimator can report an unknown fit instead of guessing
+  // from a filename or repository label.
+  return { ...wizardState.arch };
 }
 
 export function getSizingArch() {
@@ -3282,7 +3238,19 @@ export function getSizingArch() {
   return arch;
 }
 
-export function buildHeuristicArch(name, paramB) {
+export function buildHeuristicArch(_name, _paramB) {
+  // Retained as a compatibility export for integrations that imported the old helper.
+  // Architecture properties must come from GGUF/MLX introspection; never infer them here.
+  return {
+    nLayers: 0, nKvHeads: 0, headDim: 0, nGlobalAttnLayers: 0,
+    localAttnWindow: 0, localKvHeads: 1, nAttnLayers: 0,
+    linearAttnStateBytes: 0, nExperts: 0, nExpertsUsed: 0,
+    expertFraction: 0, mtpDepth: 0, mmprojBytes: 0, paramB: 0,
+  };
+}
+/* Legacy filename/parameter heuristics removed from the active path. They remain below only
+ * as historical context until the next generated-source cleanup pass. */
+/*
   const lower = (name || '').toLowerCase();
 
   // ── Qwen3-Coder-Next: hybrid DeltaNet + MoE ──────────────────────────────
@@ -3392,6 +3360,7 @@ export function buildHeuristicArch(name, paramB) {
     paramB,
   };
 }
+*/
 
 async function estimateVramFull() {
   // Called from JS math; no server round-trip needed for the breakdown

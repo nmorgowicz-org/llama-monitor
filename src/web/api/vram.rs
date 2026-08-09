@@ -272,8 +272,11 @@ fn api_vram_estimate_breakdown(
                             meta.context_length.map(u64::from),
                         ),
                         Err(_) => (
+                            // A failed GGUF read is explicitly degraded. Keep only a
+                            // size-tier estimate; never infer architecture/capabilities from
+                            // the local filename.
                             crate::llama::vram_estimator::ModelArch::from_name_and_params(
-                                &model_path,
+                                "",
                                 crate::llama::vram_estimator::estimate_param_b_from_size(size, 4.85),
                             ),
                             crate::llama::vram_estimator::EstimateEvidence::Degraded,
@@ -301,11 +304,11 @@ fn api_vram_estimate_breakdown(
                                 crate::llama::vram_estimator::EstimateEvidence::Measured,
                                 meta.context_length.map(u64::from),
                             ),
-                            // Range-fetch failed (offline / gated / no range support): fall back
-                            // to the name heuristic so the caller still gets a (rougher) estimate.
+                            // Range-fetch failed (offline / gated / no range support): keep a
+                            // size-only degraded estimate; never guess from the HF filename.
                             Err(_) => (
                                 crate::llama::vram_estimator::ModelArch::from_name_and_params(
-                                    &hf_file_path,
+                                    "",
                                     crate::llama::vram_estimator::estimate_param_b_from_size(size, 4.85),
                                 ),
                                 crate::llama::vram_estimator::EstimateEvidence::Degraded,
@@ -894,29 +897,19 @@ use crate::llama::vram_estimator::gguf_arch_to_heuristic_name;
 /// for renamed finetunes like "Qwopus3.6").
 pub(crate) fn build_arch_from_body(
     body: &serde_json::Value,
-    model_name: &str,
+    _model_name: &str,
     param_b: f64,
 ) -> crate::llama::vram_estimator::ModelArch {
-    // Use the original model name (with size/MoE hints like "35B-A3B") as the
-    // primary heuristic source so MoE and scale are recognized.
-    let mut heuristic =
-        crate::llama::vram_estimator::ModelArch::from_name_and_params(model_name, param_b);
-
-    // If that yielded a weak/default-looking arch (no MoE, no hybrid, no sliding window),
-    // and we have a known GGUF architecture string, fall back to deriving from that.
+    // GGUF architecture is authoritative when supplied by introspection. With no
+    // metadata, retain only a size-tier estimate and mark the caller's result degraded;
+    // never infer model properties from a filename/repository label.
     let heuristic_name = body["gguf_arch"]
         .as_str()
+        .filter(|value| !value.trim().is_empty())
         .map(gguf_arch_to_heuristic_name)
-        .unwrap_or_else(|| model_name.to_string());
-
-    if heuristic.n_experts == 0
-        && !heuristic.is_hybrid_attn()
-        && !heuristic.has_local_attn()
-        && !heuristic.is_moe()
-    {
-        heuristic =
-            crate::llama::vram_estimator::ModelArch::from_name_and_params(&heuristic_name, param_b);
-    }
+        .unwrap_or_default();
+    let heuristic =
+        crate::llama::vram_estimator::ModelArch::from_name_and_params(&heuristic_name, param_b);
 
     let n_layers = body["n_layers"]
         .as_u64()
@@ -1410,7 +1403,7 @@ async fn mlx_hf_estimate_from_repo(
         }
         Err(_) => {
             let arch = crate::llama::vram_estimator::ModelArch::from_name_and_params(
-                repo_id,
+                "",
                 crate::llama::vram_estimator::estimate_param_b_from_size(size, 4.85),
             );
             Ok((
@@ -1702,8 +1695,8 @@ mod mlx_estimate_tests {
     }
 
     /// When model_path is an HF-repo-style alias (not a local directory), and model_size_bytes
-    /// is supplied, the endpoint must treat it as an HF repo and return a valid estimate using
-    /// name-heuristic fallback (since we can't reach HF in this unit test).
+    /// is supplied, the endpoint must treat it as an HF repo and return a valid degraded,
+    /// size-only estimate when config resolution is unavailable in the unit test.
     #[tokio::test]
     async fn vram_estimate_mlx_treats_hf_style_alias_in_model_path_as_repo() {
         let body = serde_json::json!({
@@ -1724,8 +1717,8 @@ mod mlx_estimate_tests {
         assert_eq!(response.status(), StatusCode::OK);
         let json: serde_json::Value = serde_json::from_slice(response.body()).unwrap();
         assert_eq!(json["ok"], serde_json::json!(true), "{json}");
-        // Evidence is "approximate" when HF config is fetched; "degraded" when
-        // config fetch fails and we fall back to the name heuristic.
+        // Evidence is "approximate" when HF config is fetched and "degraded" when
+        // config fetch fails and the endpoint can only use size-tier accounting.
         match json["evidence"].as_str() {
             Some("approximate") | Some("degraded") => {}
             Some(v) => panic!("unexpected evidence: {v}: {json}"),

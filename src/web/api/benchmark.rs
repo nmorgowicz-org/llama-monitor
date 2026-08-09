@@ -575,6 +575,18 @@ fn api_model_defaults(
                         "n_experts_used": model_meta.n_experts_used,
                         "mtp_depth": model_meta.mtp_depth,
                         "n_ctx_train": model_meta.n_ctx_train,
+                        "n_layers": model_meta.n_layers,
+                        "n_kv_heads": model_meta.n_kv_heads,
+                        "head_dim": model_meta.head_dim,
+                        "architecture_kind": model_meta.architecture_kind,
+                        "n_attn_layers": model_meta.n_attn_layers,
+                        "linear_attn_state_bytes": model_meta.linear_attn_state_bytes,
+                        "n_global_attn_layers": model_meta.n_global_attn_layers,
+                        "local_kv_heads": model_meta.local_kv_heads,
+                        "global_head_dim": model_meta.global_head_dim,
+                        "local_head_dim": model_meta.local_head_dim,
+                        "sliding_window": model_meta.sliding_window,
+                        "mmproj_required": model_meta.mmproj_required,
                     }));
                 }
 
@@ -594,6 +606,20 @@ fn api_model_defaults(
                     .first()
                     .map(|mode| mode.defaults.clone())
                     .unwrap_or_default();
+                let provenance = if introspected_meta.is_some() {
+                    "model-native"
+                } else if !gguf_arch.is_empty() || !arch_family.is_empty() {
+                    "qualified-profile"
+                } else {
+                    "unknown/degraded"
+                };
+                let provenance_evidence = if introspected_meta.is_some() {
+                    "Progressive GGUF header"
+                } else if !gguf_arch.is_empty() || !arch_family.is_empty() {
+                    "Caller-supplied qualified architecture/profile"
+                } else {
+                    "No authoritative model metadata was available"
+                };
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
@@ -613,6 +639,10 @@ fn api_model_defaults(
                         "reasoning_budget_message": defaults.reasoning_budget_message,
                         "modes": modes,
                         "introspected": introspected_meta,
+                        "provenance": provenance,
+                        "provenance_evidence": provenance_evidence,
+                        "degraded_reason": (provenance == "unknown/degraded")
+                            .then_some("GGUF header unavailable; universal safe defaults applied"),
                     }),
                 )))
             }
@@ -679,7 +709,6 @@ fn api_advise(
                     return Ok(unauthorized_api_token());
                 }
 
-                let name = body["name"].as_str().unwrap_or("");
                 let param_b = body["param_b"].as_f64().unwrap_or(0.0);
                 let context_size = body["context_size"].as_u64().unwrap_or(8192);
                 let ctk = body["ctk"].as_str().unwrap_or("q8_0");
@@ -689,7 +718,7 @@ fn api_advise(
                 let has_mtp = body["has_mtp"].as_bool().unwrap_or(false);
 
                 let arch =
-                    crate::llama::vram_estimator::ModelArch::from_name_and_params(name, param_b);
+                    crate::llama::vram_estimator::ModelArch::from_name_and_params("", param_b);
                 let suggestions = crate::llama::spawn_wizard::predict_perf_hints(
                     &arch,
                     context_size,
@@ -724,7 +753,6 @@ fn api_tune_ncpumoe(
                     return Ok(unauthorized_api_token());
                 }
 
-                let name = body["name"].as_str().unwrap_or("");
                 let param_b = body["param_b"].as_f64().unwrap_or(0.0);
                 let model_size_bytes = body["model_size_bytes"].as_u64().unwrap_or(0);
                 let available_vram_bytes = body["available_vram_bytes"].as_u64().unwrap_or(0);
@@ -734,7 +762,7 @@ fn api_tune_ncpumoe(
                 let is_unified_memory = body["is_unified_memory"].as_bool().unwrap_or(true);
 
                 let arch =
-                    crate::llama::vram_estimator::ModelArch::from_name_and_params(name, param_b);
+                    crate::llama::vram_estimator::ModelArch::from_name_and_params("", param_b);
 
                 // Instant estimate — same fit-search the VRAM bar uses, so they agree.
                 let recommended =

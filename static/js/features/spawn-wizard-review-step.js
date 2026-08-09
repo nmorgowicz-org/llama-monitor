@@ -133,8 +133,40 @@ export async function _fetchAndApplyModelSamplingDefaults() {
     // Server-side introspection succeeded for a not-yet-downloaded HF model — persist
     // the real architecture so later calls (and other UI reading wizardState.arch) don't
     // need to re-fetch it, and never fall through to a filename heuristic.
-    if (data.introspected?.gguf_arch && !wizardState.arch.ggufArch) {
-      wizardState.arch.ggufArch = data.introspected.gguf_arch;
+    if (data.introspected) {
+      const meta = data.introspected;
+      if (meta.n_ctx_train) wizardState.model.nCtxTrain = meta.n_ctx_train;
+      if (meta.n_layers) wizardState.arch.nLayers = meta.n_layers;
+      if (meta.n_kv_heads) wizardState.arch.nKvHeads = meta.n_kv_heads;
+      if (meta.head_dim) wizardState.arch.headDim = meta.head_dim;
+      if (meta.n_experts) wizardState.arch.nExperts = meta.n_experts;
+      if (meta.n_experts_used) wizardState.arch.nExpertsUsed = meta.n_experts_used;
+      if (meta.mtp_depth) wizardState.arch.mtpDepth = meta.mtp_depth;
+      if (meta.n_attn_layers) wizardState.arch.nAttnLayers = meta.n_attn_layers;
+      if (meta.linear_attn_state_bytes) wizardState.arch.linearAttnStateBytes = meta.linear_attn_state_bytes;
+      if (meta.n_global_attn_layers) wizardState.arch.nGlobalAttnLayers = meta.n_global_attn_layers;
+      if (meta.local_kv_heads) wizardState.arch.localKvHeads = meta.local_kv_heads;
+      if (meta.global_head_dim) wizardState.arch.globalHeadDim = meta.global_head_dim;
+      if (meta.local_head_dim) wizardState.arch.localHeadDim = meta.local_head_dim;
+      if (meta.sliding_window) {
+        wizardState.arch.slidingWindow = meta.sliding_window;
+        wizardState.arch.localAttnWindow = meta.sliding_window;
+      }
+      if (meta.mmproj_required != null) wizardState.arch.mmprojRequired = !!meta.mmproj_required;
+      if (meta.gguf_arch && !wizardState.arch.ggufArch) {
+        wizardState.arch.ggufArch = meta.gguf_arch;
+        if (!wizardState.model.family) {
+          wizardState.model.family = String(meta.gguf_arch).toLowerCase().replace(/_/g, '.');
+        }
+      }
+      if (meta.gguf_arch || meta.n_layers || meta.n_ctx_train) {
+        wizardState.arch.metadataStatus = 'resolved';
+        wizardState.arch.metadataReason = 'Progressive GGUF header';
+      }
+    }
+    if (data.provenance) {
+      wizardState.arch.metadataStatus = data.provenance === 'unknown/degraded' ? 'degraded' : 'resolved';
+      wizardState.arch.metadataReason = data.provenance_evidence || data.degraded_reason || '';
     }
     const h = wizardState.hardware;
     const effectiveCoverage = wizardState.engine.selected === 'rapid_mlx'
