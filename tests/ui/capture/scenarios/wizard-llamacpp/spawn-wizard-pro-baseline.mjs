@@ -31,7 +31,8 @@ async function openPro(page, baseUrl) {
 export default async function({ page, baseUrl }) {
     await openPro(page, baseUrl);
 
-  await captureShot(page, 'spawn-wizard-pro-shell.png', {
+ // INTENT: Pro shell shows the seven-category rail and active pane.
+ await captureShot(page, 'spawn-wizard-pro-shell.png', {
         fullPage: true,
         runtimeTag: 'llamacpp-local',
         expandSelector: '.wizard-body',
@@ -58,7 +59,8 @@ export default async function({ page, baseUrl }) {
 
   await page.evaluate(() => document.querySelectorAll('#pro-rail-nav .pro-rail-item')[2]?.click());
     await sleep(200);
-    await captureShot(page, 'spawn-wizard-pro-rail-performance.png', {
+ // INTENT: Performance category exposes llama.cpp performance controls.
+ await captureShot(page, 'spawn-wizard-pro-rail-performance.png', {
         fullPage: true,
         runtimeTag: 'llamacpp-local',
         expandSelector: '.wizard-body',
@@ -69,7 +71,8 @@ export default async function({ page, baseUrl }) {
         if (input) { input.value = 'batch'; input.dispatchEvent(new Event('input', { bubbles: true })); }
     });
     await sleep(150);
-    await captureShot(page, 'spawn-wizard-pro-search-batch.png', {
+ // INTENT: Pro search filters the canonical batch-size control.
+ await captureShot(page, 'spawn-wizard-pro-search-batch.png', {
         fullPage: true,
         runtimeTag: 'llamacpp-local',
         expandSelector: '.wizard-body',
@@ -83,7 +86,8 @@ export default async function({ page, baseUrl }) {
         document.querySelector('.pro-modified-only')?.click();
     });
     await sleep(150);
-    await captureShot(page, 'spawn-wizard-pro-modified-only.png', {
+ // INTENT: Modified-only view shows the edited canonical setting.
+ await captureShot(page, 'spawn-wizard-pro-modified-only.png', {
         fullPage: true,
         runtimeTag: 'llamacpp-local',
         expandSelector: '.wizard-body',
@@ -92,7 +96,8 @@ export default async function({ page, baseUrl }) {
   await page.evaluate(() => document.getElementById('pro-reset-all')?.click());
   await sleep(150);
   await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
-    await captureShot(page, 'spawn-wizard-pro-reset-light.png', {
+ // INTENT: Reset and light theme leave the canonical baseline readable.
+ await captureShot(page, 'spawn-wizard-pro-reset-light.png', {
         fullPage: true,
         runtimeTag: 'llamacpp-local',
     expandSelector: '.wizard-body',
@@ -106,7 +111,8 @@ export default async function({ page, baseUrl }) {
   await page.evaluate(() => document.querySelector('#hw-kv-tiles [data-kv="q4_0"]')?.click());
   await sleep(150);
   await page.evaluate(() => document.querySelectorAll('[data-toast-close]').forEach(button => button.click()));
-  await captureShot(page, 'spawn-wizard-pro-agentic-q4-warning.png', {
+ // INTENT: Agentic workload warns when Q4 KV cache is selected.
+ await captureShot(page, 'spawn-wizard-pro-agentic-q4-warning.png', {
     fullPage: true,
     runtimeTag: 'llamacpp-local',
     expandSelector: '.wizard-body',
@@ -126,7 +132,8 @@ export default async function({ page, baseUrl }) {
   await sleep(2500);
   await page.evaluate(() => document.querySelectorAll('[data-toast-close]').forEach(button => button.click()));
   await sleep(100);
-  await captureShot(page, 'spawn-wizard-pro-roleplay-q4-baseline.png', {
+ // INTENT: Roleplay workload shows the restored Q4 baseline state.
+ await captureShot(page, 'spawn-wizard-pro-roleplay-q4-baseline.png', {
     fullPage: true,
     runtimeTag: 'llamacpp-local',
     expandSelector: '.wizard-body',
@@ -135,7 +142,8 @@ export default async function({ page, baseUrl }) {
   await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
     await page.evaluate(() => document.getElementById('pro-layout')?.scrollIntoView({ block: 'start', behavior: 'instant' }));
     await sleep(200);
-    await captureShot(page, 'spawn-wizard-pro-narrow.png', {
+ // INTENT: Narrow Pro layout remains usable without horizontal clipping.
+ await captureShot(page, 'spawn-wizard-pro-narrow.png', {
         fullPage: true,
         runtimeTag: 'llamacpp-local',
         expandSelector: '.wizard-body',

@@ -38,7 +38,8 @@ async function openRapidPro(page, baseUrl) {
 export default async function ({ page, baseUrl }) {
   await openRapidPro(page, baseUrl);
 
-  await captureShot(page, 'spawn-wizard-rapid-pro-shell.png', {
+ // INTENT: Rapid Pro shell shows backend-native categories and active pane.
+ await captureShot(page, 'spawn-wizard-rapid-pro-shell.png', {
     fullPage: true,
     runtimeTag: 'rapidmlx-local',
     expandSelector: '.wizard-body',
@@ -77,7 +78,8 @@ export default async function ({ page, baseUrl }) {
     }
   });
   await sleep(150);
-  await captureShot(page, 'spawn-wizard-rapid-pro-retained-cache-edit.png', {
+ // INTENT: Retained-cache edit remains visible in Rapid Pro.
+ await captureShot(page, 'spawn-wizard-rapid-pro-retained-cache-edit.png', {
     fullPage: true,
     runtimeTag: 'rapidmlx-local',
     expandSelector: '.wizard-body',
@@ -91,7 +93,8 @@ export default async function ({ page, baseUrl }) {
     }
   });
   await sleep(150);
-  await captureShot(page, 'spawn-wizard-rapid-pro-search-cache.png', {
+ // INTENT: Rapid Pro search filters the retained-cache setting.
+ await captureShot(page, 'spawn-wizard-rapid-pro-search-cache.png', {
     fullPage: true,
     runtimeTag: 'rapidmlx-local',
     expandSelector: '.wizard-body',
@@ -106,7 +109,8 @@ export default async function ({ page, baseUrl }) {
     document.querySelector('.pro-modified-only')?.click();
   });
   await sleep(150);
-  await captureShot(page, 'spawn-wizard-rapid-pro-modified-only.png', {
+ // INTENT: Rapid modified-only view shows the edited canonical setting.
+ await captureShot(page, 'spawn-wizard-rapid-pro-modified-only.png', {
     fullPage: true,
     runtimeTag: 'rapidmlx-local',
     expandSelector: '.wizard-body',
@@ -117,7 +121,8 @@ export default async function ({ page, baseUrl }) {
     document.getElementById('spawn-rapid-speculative-enabled')?.click();
   });
   await sleep(200);
-  await captureShot(page, 'spawn-wizard-rapid-pro-companion-gated.png', {
+ // INTENT: Rapid companion gating is explicit for unavailable capability.
+ await captureShot(page, 'spawn-wizard-rapid-pro-companion-gated.png', {
     fullPage: true,
     runtimeTag: 'rapidmlx-local',
     expandSelector: '.wizard-body',
@@ -126,7 +131,8 @@ export default async function ({ page, baseUrl }) {
   await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
   await page.evaluate(() => document.getElementById('pro-layout')?.scrollIntoView({ behavior: 'instant', block: 'start' }));
   await sleep(200);
-  await captureShot(page, 'spawn-wizard-rapid-pro-narrow.png', {
+ // INTENT: Narrow Rapid Pro layout remains usable without clipping.
+ await captureShot(page, 'spawn-wizard-rapid-pro-narrow.png', {
     fullPage: true,
     runtimeTag: 'rapidmlx-local',
     expandSelector: '.wizard-body',

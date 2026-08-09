@@ -325,13 +325,13 @@ export const SCENARIOS = {
     'spawn-wizard-guided-drawer': {
         run: scenarioSpawnWizardGuidedDrawer, category: 'wizard-llamacpp', runtime: 'llamacpp-local',
         contract: {
-            intent: 'Verify the single canonical Guided settings drawer across llama.cpp and Rapid-MLX, including engine switching and honest Pro unavailability.',
+            intent: 'Verify the single canonical Guided settings drawer across llama.cpp and Rapid-MLX, including engine switching and honest Pro availability.',
             expectedOutputs: [
                 'spawn-wizard-guided-drawer--llamacpp-local--llama-closed.png',
                 'spawn-wizard-guided-drawer--llamacpp-local--llama-open.png',
                 'spawn-wizard-guided-drawer--rapidmlx-local--rapid-closed.png',
                 'spawn-wizard-guided-drawer--rapidmlx-local--rapid-open.png',
-                'spawn-wizard-guided-drawer--llamacpp-local--pro-unavailable.png',
+                'spawn-wizard-guided-drawer--llamacpp-local--pro-available.png',
             ],
         },
     },

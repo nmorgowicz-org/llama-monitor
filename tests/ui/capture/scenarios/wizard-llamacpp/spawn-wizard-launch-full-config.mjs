@@ -21,7 +21,8 @@ export default async function (ctx) {
   await page.waitForSelector('#wizard-step-2.active', { timeout: 10000 });
   await sleep(500);
   await page.evaluate(() => document.getElementById('spawn-full-config-drawer')?.scrollIntoView({ behavior: 'instant', block: 'start' }));
-  await captureShot(page, 'spawn-wizard-launch-full-config.png', {
+ // INTENT: Launch review shows requested and estimator-effective values.
+ await captureShot(page, 'spawn-wizard-launch-full-config.png', {
     fullPage: true,
     runtimeTag: 'llamacpp-local',
     expandSelector: '.wizard-body',
@@ -31,14 +32,16 @@ export default async function (ctx) {
     if (step) step.scrollTop = step.scrollHeight;
   });
   await sleep(250);
-  await captureShot(page, 'spawn-wizard-launch-full-config-details.png', {
+ // INTENT: Expanded launch review exposes the complete canonical config.
+ await captureShot(page, 'spawn-wizard-launch-full-config-details.png', {
     fullPage: true,
     runtimeTag: 'llamacpp-local',
     expandSelector: '#wizard-step-2',
   });
   await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
   await sleep(250);
-  await captureShot(page, 'spawn-wizard-launch-full-config-narrow.png', {
+ // INTENT: Narrow launch review keeps state labels readable without clipping.
+ await captureShot(page, 'spawn-wizard-launch-full-config-narrow.png', {
     fullPage: true,
     runtimeTag: 'llamacpp-local',
     expandSelector: '#wizard-step-2',

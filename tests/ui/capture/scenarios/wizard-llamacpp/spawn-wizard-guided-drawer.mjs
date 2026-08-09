@@ -173,8 +173,8 @@ export default async function(ctx) {
 
     await page.evaluate(() => document.getElementById('wizard-back-btn')?.click());
     await sleep(250);
-    // INTENT: The Pro selector is visibly unavailable and cannot mutate the active Guided view.
-    await captureShot(page, 'spawn-wizard-guided-drawer-pro-unavailable.png', { fullPage: true, runtimeTag: 'llamacpp-local', expandSelector: '.wizard-body' });
+    // INTENT: The Pro selector is available while the canonical Guided state remains active.
+    await captureShot(page, 'spawn-wizard-guided-drawer-pro-available.png', { fullPage: true, runtimeTag: 'llamacpp-local', expandSelector: '.wizard-body' });
  const workloadState = await page.evaluate(async () => {
      const { wizardState } = await import('/js/features/spawn-wizard.js');
      document.querySelector('.usecase-card[data-usecase="tool_research"]')?.click();
@@ -192,7 +192,7 @@ export default async function(ctx) {
         text: document.querySelector('#view-mode-select option[value="pro"]')?.textContent || '',
         workloadCards: document.querySelectorAll('.usecase-card[data-usecase]').length,
     }));
-    if (proState.value === 'pro' || !proState.optionDisabled || !/coming|later|unavailable|not implemented/i.test(proState.text) || proState.workloadCards !== 5) {
+    if (proState.value === 'pro' || proState.optionDisabled || !/pro/i.test(proState.text) || proState.workloadCards !== 5) {
         throw new Error(`Pro availability is not honest: ${JSON.stringify(proState)}`);
     }
 }

@@ -49,10 +49,15 @@ function main() {
         const scenarioIntent = text.match(/^\/\/ SCENARIO INTENT:\s*(.+)$/m)?.[1] || null;
         const scenarioPath = relative(SCENARIOS_DIR, file);
         const scenarioName = file.slice(file.lastIndexOf('/') + 1, -4);
-        const registered = SCENARIOS[scenarioName];
+        const expectedCategory = scenarioPath.startsWith('wizard-rapidmlx/') ? 'wizard-rapidmlx' : 'wizard-llamacpp';
+        // The llama and Rapid launch scenarios intentionally share a basename;
+        // resolve the Rapid registration by its group-qualified key.
+        const registryName = expectedCategory === 'wizard-rapidmlx' && scenarioName === 'spawn-wizard-launch-full-config'
+            ? 'spawn-wizard-rapid-launch-full-config'
+            : scenarioName;
+        const registered = SCENARIOS[registryName];
         if (strict && scenarioPath.includes('spawn-wizard')) {
             if (!registered) violations.push(`${scenarioPath} is not registered`);
-            const expectedCategory = scenarioPath.startsWith('wizard-rapidmlx/') ? 'wizard-rapidmlx' : 'wizard-llamacpp';
             if (registered && registered.category !== expectedCategory) {
                 violations.push(`${scenarioPath} registers category ${registered.category}, expected ${expectedCategory}`);
             }
@@ -69,9 +74,10 @@ function main() {
                     violations.push(`${scenarioPath}:${idx + 1} missing INTENT for ${m[2]}`);
                 }
                 if (strict && scenarioPath.includes('spawn-wizard') && !m[2].includes('${')) {
-                    const prior = seenWizardOutputs.get(m[2]);
+                    const outputKey = `${expectedCategory}:${m[2]}`;
+                    const prior = seenWizardOutputs.get(outputKey);
                     if (prior) violations.push(`${scenarioPath}:${idx + 1} duplicates ${m[2]} from ${prior}`);
-                    else seenWizardOutputs.set(m[2], `${scenarioPath}:${idx + 1}`);
+                    else seenWizardOutputs.set(outputKey, `${scenarioPath}:${idx + 1}`);
                 }
             }
         });

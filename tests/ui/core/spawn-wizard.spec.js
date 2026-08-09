@@ -361,11 +361,11 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
 
         await page.locator('#wizard-next-btn').click();
         await expect(page.locator('#rapid-hardware-panel')).toBeVisible();
-        // The MLX fit rail stays visible on the hardware step — hiding it was a
-        // defect fixed during the MLX presentation/IA redesign (only the
-        // llama.cpp-specific .wizard-main column is hidden for Rapid-MLX).
+        // Rapid-MLX keeps the shared main layout visible on the hardware step;
+        // backend-native controls live alongside the fit rail.
         await expect(page.locator('#wizard-step-1 > .hw-vram-sidebar')).toBeVisible();
-        await expect(page.locator('#wizard-step-1 > .wizard-main')).toBeHidden();
+        await expect(page.locator('#wizard-step-1 > .wizard-main')).toBeVisible();
+        await expect(page.locator('#wizard-step-1 #rapid-hardware-panel')).toBeVisible();
     });
 
     test('@in-memory-test typed Rapid-MLX sources round-trip unchanged and llama.cpp payloads exclude Rapid-MLX config', async ({ page }) => {

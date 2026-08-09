@@ -21,7 +21,8 @@ export default async function (ctx) {
   await page.waitForSelector('#wizard-step-2.active', { timeout: 10000 });
   await sleep(700);
   await page.evaluate(() => document.getElementById('spawn-full-config-drawer')?.scrollIntoView({ behavior: 'instant', block: 'start' }));
-  await captureShot(page, 'spawn-wizard-launch-full-config.png', {
+ // INTENT: Rapid launch review shows requested and runtime-effective values.
+ await captureShot(page, 'spawn-wizard-launch-full-config.png', {
     fullPage: true,
     runtimeTag: 'rapidmlx-local',
     expandSelector: '.wizard-body',
@@ -31,14 +32,16 @@ export default async function (ctx) {
     if (step) step.scrollTop = step.scrollHeight;
   });
   await sleep(250);
-  await captureShot(page, 'spawn-wizard-launch-full-config-details.png', {
+ // INTENT: Expanded Rapid launch review exposes the complete backend config.
+ await captureShot(page, 'spawn-wizard-launch-full-config-details.png', {
     fullPage: true,
     runtimeTag: 'rapidmlx-local',
     expandSelector: '#wizard-step-2',
   });
   await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
   await sleep(250);
-  await captureShot(page, 'spawn-wizard-launch-full-config-narrow.png', {
+ // INTENT: Narrow Rapid launch review remains readable without clipping.
+ await captureShot(page, 'spawn-wizard-launch-full-config-narrow.png', {
     fullPage: true,
     runtimeTag: 'rapidmlx-local',
     expandSelector: '#wizard-step-2',
