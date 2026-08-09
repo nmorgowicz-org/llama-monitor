@@ -216,8 +216,15 @@ export const SCENARIOS = {
     'spawn-wizard-pro-baseline': {
         run: scenarioSpawnWizardProBaseline, category: 'wizard-llamacpp', runtime: 'llamacpp-local',
         contract: {
-            intent: 'Preserve the current Pro-not-implemented state as evidence until Phase 7.',
-            expectedOutputs: ['spawn-wizard-pro-baseline--llamacpp-local--not-implemented.png'],
+            intent: 'Capture the active Pro shell, category rail, search, modified/reset state, and responsive presentation.',
+        expectedOutputs: [
+            'llamacpp-local--spawn-wizard-pro-shell.png',
+            'llamacpp-local--spawn-wizard-pro-rail-performance.png',
+            'llamacpp-local--spawn-wizard-pro-search-batch.png',
+            'llamacpp-local--spawn-wizard-pro-modified-only.png',
+            'llamacpp-local--spawn-wizard-pro-reset-light.png',
+            'llamacpp-local--spawn-wizard-pro-narrow.png',
+        ],
         },
     },
     'spawn-wizard-rapid-guided-baseline': {

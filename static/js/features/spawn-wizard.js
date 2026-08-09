@@ -192,6 +192,162 @@ export { _renderAllSettingsDrawer };
 
 export const settingStateRegistry = createSettingStateRegistry();
 
+const PRO_CATEGORIES = [
+  'Model & compatibility',
+  'Memory & context',
+  'Performance',
+  'Generation & reasoning',
+  'Tools & conversation formatting',
+  'Network & observability',
+  'Advanced',
+];
+
+const PRO_WRAPPER_IDS = ['spawn-advanced-fields', 'spawn-rapid-advanced-fields'];
+
+function _proFieldForControl(control) {
+  return control?.closest('.hardware-field, .sampling-field, .kv-inline-row, .hardware-row, .hw-field') || control;
+}
+
+function _refreshProControls() {
+  const host = document.getElementById('pro-controls-host');
+  if (!host) return;
+  const loader = wizardState.engine.selected || 'llama_cpp';
+  const descriptors = controlsForView(loader, 'pro');
+  const modifiedOnly = document.getElementById('pro-modified-only')?.checked;
+  const query = (document.getElementById('pro-filter-input')?.value || '').trim().toLowerCase();
+  const fields = [...host.querySelectorAll('[data-pro-category]')];
+  fields.forEach(field => {
+    const control = field.querySelector('input, select, textarea');
+    const descriptor = descriptors.find(item => item.id === control?.id);
+    const entry = descriptor ? settingStateRegistry.entries?.get?.(descriptor.semanticId) : null;
+    const text = `${field.textContent || ''} ${control?.id || ''}`.toLowerCase();
+    const visible = (!modifiedOnly || entry?.dirty) && (!query || text.includes(query));
+    field.classList.toggle('pro-search-hidden', !visible);
+    field.classList.toggle('pro-modified', !!entry?.dirty);
+  });
+}
+
+function _initProShell() {
+  const nav = document.getElementById('pro-rail-nav');
+  if (!nav || nav.dataset.bound === '1') return;
+  nav.dataset.bound = '1';
+  nav.replaceChildren();
+  PRO_CATEGORIES.forEach((category, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'pro-rail-item';
+    button.dataset.category = category;
+    button.textContent = category;
+    button.addEventListener('click', () => {
+      nav.querySelectorAll('.pro-rail-item').forEach(item => item.classList.toggle('active', item === button));
+      const target = document.querySelector(`#pro-controls-host [data-pro-category="${CSS.escape(category)}"]`);
+      const host = document.getElementById('pro-controls-host');
+      if (target && host) {
+        const behavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+        host.scrollTo({ top: Math.max(0, target.offsetTop - 8), behavior });
+      }
+    });
+    if (index === 0) button.classList.add('active');
+    nav.appendChild(button);
+  });
+  document.getElementById('pro-filter-input')?.addEventListener('input', _refreshProControls);
+  document.getElementById('pro-modified-only')?.addEventListener('change', _refreshProControls);
+  if (!document.documentElement.dataset.proShortcutBound) {
+    document.documentElement.dataset.proShortcutBound = '1';
+    document.addEventListener('keydown', event => {
+      const overlay = document.getElementById('spawn-wizard-overlay');
+      if (!overlay?.classList.contains('open')) return;
+      const target = event.target;
+      const typing = target?.matches?.('input, textarea, select, [contenteditable="true"]');
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k' && !typing) {
+        event.preventDefault();
+        document.getElementById('pro-filter-input')?.focus();
+        return;
+      }
+      if (event.key === 'Escape') {
+        const filter = document.getElementById('pro-filter-input');
+        if (filter?.value) {
+          event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation();
+          filter.value = '';
+          _refreshProControls();
+        }
+      }
+    }, true);
+  }
+  document.getElementById('pro-reset-all')?.addEventListener('click', () => {
+    const loader = wizardState.engine.selected || 'llama_cpp';
+    controlsForView(loader, 'pro').forEach(descriptor => settingStateRegistry.reset(descriptor.semanticId));
+    document.getElementById('pro-controls-host')?.querySelectorAll('input, select, textarea').forEach(control => {
+      control.dispatchEvent(new Event('input', { bubbles: true }));
+      control.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    _refreshProControls();
+  });
+}
+
+function renderProLayout(mode = wizardState.viewMode) {
+  const layout = document.getElementById('pro-layout');
+  const host = document.getElementById('pro-controls-host');
+  const drawerGroup = document.getElementById('all-settings-group');
+  if (!layout || !host || !drawerGroup) return;
+  _initProShell();
+  const isPro = mode === 'pro';
+  const guidedSurface = document.querySelector('.hw-guided-old-layout');
+  const stickyBar = document.getElementById('hw-sticky-bar');
+  const guidedSampling = document.querySelectorAll(
+    '#wizard-step-1 > .wizard-main > .wizard-section-title,' +
+    '#wizard-step-1 > .wizard-main > .wizard-section-desc,' +
+    '#wizard-step-1 > .wizard-main > .sampling-params-section',
+  );
+  // The Pro surface is a view over the same controls, not a section appended
+  // below Guided's cards. Move the shell out of the legacy wrapper once and
+  // keep the identity strip as the shared context header while Pro is active.
+  if (isPro) {
+    if (guidedSurface?.contains(layout)) {
+      (stickyBar || guidedSurface).after(layout);
+    }
+    if (guidedSurface) guidedSurface.style.display = 'none';
+    guidedSampling.forEach(section => { section.style.display = 'none'; });
+  } else if (guidedSurface) {
+    guidedSurface.style.display = 'block';
+    guidedSampling.forEach(section => { section.style.display = ''; });
+  }
+  layout.style.display = isPro ? '' : 'none';
+  document.querySelectorAll('#hw-decision-ctx, #hw-decision-kv, #hw-decision-vision, #hw-decision-speed')
+    .forEach(card => { card.style.display = isPro ? 'none' : ''; });
+  const drawer = document.getElementById('all-settings-drawer');
+  if (drawer) drawer.style.display = isPro ? 'none' : '';
+
+  PRO_WRAPPER_IDS.forEach(id => {
+    const wrapper = document.getElementById(id);
+    if (!wrapper) return;
+    if (isPro) {
+      wrapper.style.display = '';
+      host.appendChild(wrapper);
+    } else {
+      wrapper.style.display = '';
+      drawerGroup.appendChild(wrapper);
+    }
+  });
+
+  if (isPro) {
+    // Pro is the explicit power-user view: every canonical category is
+    // expanded so search/scroll-spy has a real target and no setting is
+    // hidden behind Guided's profile disclosure state.
+    host.querySelectorAll('details').forEach(details => { details.open = true; });
+    const loader = wizardState.engine.selected || 'llama_cpp';
+    controlsForView(loader, 'pro').forEach(descriptor => {
+      const control = document.getElementById(descriptor.id);
+      const field = _proFieldForControl(control);
+      if (field) field.dataset.proCategory = descriptor.proCategory;
+    });
+    applyEffectiveLocks(host);
+    _refreshProControls();
+  }
+}
+
 // ── View mode toggle ────────────────────────────────────────────────────────
 
 function _initViewMode() {
@@ -211,18 +367,13 @@ function _initViewMode() {
 
   select.addEventListener('change', () => {
     const newMode = select.value;
-    if (newMode === 'pro' && select.querySelector('option[value="pro"]')?.disabled) {
-      select.value = 'guided';
-      return;
-    }
     try { sessionStorage.setItem('wizard_view_mode', newMode); } catch {}
     wizardState.viewMode = newMode;
-    // Phase 10b: When Pro layout is implemented, render it here
-    // For now, only Guided mode is active
-    if (newMode === 'pro') {
-      // TODO: renderProLayout();
-      console.log('[WIZARD] Pro mode selected (not yet implemented)');
-    }
+    renderProLayout(newMode);
+    const status = document.getElementById('view-mode-status');
+    if (status) status.textContent = newMode === 'pro'
+      ? 'Power-user controls'
+      : 'Guided defaults + All settings drawer';
   });
 }
 
@@ -1890,6 +2041,7 @@ export function showStep(index) {
   if (index === 1) {
     _applyPendingRestore();
     _renderAllSettingsDrawer();
+    renderProLayout(wizardState.viewMode);
     // Initialize Option A (Guided) decision cards on first step 2 visit
     if (!window._guidedCardsInitialized) {
       initGuidedCards();
@@ -2267,7 +2419,10 @@ function renderEngineSelection() {
   // selection (hidden via .engine-rapid-mlx CSS when MLX is active), so this
   // is always enabled — mirrors configureMlxWizardIA's build-once guard.
   configureLlamaWizardIA(dom.overlay, true, wizardState.profile);
-  if (wizardState.currentStep === 1) _renderAllSettingsDrawer();
+  if (wizardState.currentStep === 1) {
+    _renderAllSettingsDrawer();
+    renderProLayout(wizardState.viewMode);
+  }
 
   // Expose IA data on window for Pro renderer and other consumers
   window.spawnWizardLlamaIA = { GROUPS: window._llamaGroups || [], SUPERSECTIONS: window._llamaSupersections || [] };

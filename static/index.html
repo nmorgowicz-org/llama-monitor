@@ -29,6 +29,7 @@
     <link rel="stylesheet" href="/css/logs.css">
     <link rel="stylesheet" href="/css/spawn-wizard-base.css">
     <link rel="stylesheet" href="/css/spawn-wizard-theme.css">
+    <link rel="stylesheet" href="/css/spawn-wizard-pro.css">
     <link rel="stylesheet" href="/css/tune-panel.css">
     <link rel="stylesheet" href="/css/evidence-drawer.css">
     <link rel="stylesheet" href="/css/modal-sizing.css">
@@ -3531,9 +3532,9 @@
                 <label for="view-mode-select">View:</label>
                 <select id="view-mode-select">
                     <option value="guided" selected>Guided</option>
-                    <option value="pro" disabled>Pro (coming in a later phase)</option>
+                    <option value="pro">Pro</option>
                 </select>
-                <span class="view-mode-status" id="view-mode-status">Pro available in a later phase</span>
+                <span class="view-mode-status" id="view-mode-status">Power-user controls</span>
             </div>
             <button type="button" class="wizard-close" id="spawn-wizard-close" aria-label="Close">&times;</button>
         </div>
@@ -4762,6 +4763,32 @@
                             <div class="depth-sweep-results" id="wizard-depth-sweep-results"></div>
                         </div>
                     </details>
+
+                    <!-- Phase 7: shared Pro presentation over the same controls -->
+                    <div class="pro-layout" id="pro-layout" style="display:none;">
+                        <aside class="pro-rail" aria-label="Pro setting categories">
+                            <div class="pro-rail-header">
+                                <span class="pro-rail-title">Pro settings</span>
+                                <span class="pro-rail-kb-shortcut">⌘K</span>
+                            </div>
+                            <nav class="pro-rail-nav" id="pro-rail-nav"></nav>
+                            <div class="pro-rail-footer">Same canonical settings as Guided</div>
+                        </aside>
+                        <section class="pro-pane" aria-label="Power-user settings">
+                            <div class="pro-header-bar">
+                                <label class="pro-filter" for="pro-filter-input">
+                                    <span aria-hidden="true">⌕</span>
+                                    <input id="pro-filter-input" class="pro-filter-input" type="search" placeholder="Search settings…" autocomplete="off">
+                                </label>
+                                <label class="pro-modified-only">
+                                    <input id="pro-modified-only" type="checkbox">
+                                    <span class="pro-modified-only-label">Modified only</span>
+                                </label>
+                                <button type="button" class="pro-reset-all" id="pro-reset-all">Reset tune settings</button>
+                            </div>
+                            <div class="pro-controls-grid" id="pro-controls-host"></div>
+                        </section>
+                    </div>
 
                     <!-- M4: All settings drawer -->
                     <div class="all-settings-drawer" id="all-settings-drawer" style="display:none;">

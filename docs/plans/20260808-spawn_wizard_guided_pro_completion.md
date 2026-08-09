@@ -1385,6 +1385,10 @@ Use this prompt for the Coordinator, replacing `<N>` with the next open phase:
 
 Phase 4 is complete in the current tree: canonical setting state and update pipeline, backend-safe Guided relocation, five workload intents, and legacy profile retirement are implemented and release-built. G4 and tier captures pass at original resolution; focused Playwright hardware-control checks pass. The next work is Phase 7 Pro, not additional Phase 4 scope.
 
+### Phase 7A Pro shell milestone (2026-08-09)
+
+Implemented and release-built the shared Pro presentation over canonical controls: seven-category rail, active-section navigation, search filter, modified-only filter, resolved-default reset, Guided/Pro relocation without duplicate inputs, and responsive dark/light/narrow styling. Added focused Playwright coverage for switching, canonical ownership, filtering, modified state, reset, and return to Guided. Replaced the stale Pro-not-implemented capture with a strict manifest-backed scenario producing shell, rail, search, modified-only, light/reset, and narrow evidence. Fresh outside-sandbox capture completed at allowed realistic viewports; visual inspection found the Pro surface reachable and the category pane usable. Phase 7A remains implementation-complete pending the broader Rapid-MLX Pro parity work in Phase 9 and final verification gates.
+
 ## 24. Completion definition
 
 The work is complete when a novice can choose a model and make only the few backend-relevant Guided

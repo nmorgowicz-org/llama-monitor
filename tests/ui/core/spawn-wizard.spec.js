@@ -904,7 +904,7 @@ test('MTP defaults on only when resolved metadata proves built-in heads', async 
   await expect(page.locator('#hw-decision-speed .hw-speed-label').first()).toContainText('MTP heads detected');
 });
 
-    test('MTP remains unavailable when metadata resolves without built-in heads', async ({ page }) => {
+test('MTP remains unavailable when metadata resolves without built-in heads', async ({ page }) => {
       await page.goto('/');
       await page.waitForLoadState('networkidle');
 
@@ -923,9 +923,56 @@ test('MTP defaults on only when resolved metadata proves built-in heads', async 
       await expect(page.locator('input[name="hw-speed"][value="on"]')).toBeDisabled();
       await expect(page.locator('#hw-decision-speed .hw-speed-label').first()).toContainText('unavailable for this model');
       await expect(page.locator('#hw-use-mtp')).not.toBeChecked();
-    });
+});
 
-    test('review step exposes structured output and full sampling defaults', async ({ page }) => {
+test('Pro shell switches the canonical settings without duplicating controls', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForLoadState('networkidle');
+
+  await page.evaluate(async () => {
+    const { openSpawnWizard, wizardState } = await import('/js/features/spawn-wizard.js');
+    openSpawnWizard();
+    wizardState.model.source = 'local';
+    wizardState.model.path = '/tmp/pro-shell-model.gguf';
+    wizardState.model.paramB = 7;
+    wizardState.model.modelBytes = 4 * 1024 * 1024 * 1024;
+  });
+  await page.locator('#wizard-next-btn').click();
+  await expect(page.locator('#wizard-step-1')).toHaveClass(/active/);
+
+  await page.selectOption('#view-mode-select', 'pro');
+  await expect(page.locator('#pro-layout')).toBeVisible();
+  await expect(page.locator('#pro-rail-nav .pro-rail-item')).toHaveCount(7);
+  await expect(page.locator('#hw-decision-ctx')).toBeHidden();
+  await expect(page.locator('#pro-controls-host #spawn-advanced-fields')).toBeAttached();
+
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(page.locator('#pro-filter-input')).toBeFocused();
+
+  await page.locator('#pro-filter-input').fill('batch');
+  expect(await page.locator('#pro-controls-host .pro-search-hidden').count()).toBeGreaterThan(0);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#pro-filter-input')).toHaveValue('');
+  await page.locator('#spawn-batch-size').evaluate((input) => {
+    input.value = '1024';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  // The wizard's sticky identity/memory bars can overlap the toolbar at this
+  // viewport; exercise the real label while preserving that layout.
+  await page.locator('.pro-modified-only').evaluate((label) => label.click());
+  expect(await page.locator('#pro-controls-host .pro-modified').count()).toBeGreaterThan(0);
+  await page.locator('#pro-reset-all').dispatchEvent('click');
+  await expect(page.locator('#spawn-batch-size')).toHaveValue('2048');
+
+  await page.locator('#view-mode-select').evaluate((select) => {
+    select.value = 'guided';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await expect(page.locator('#pro-layout')).toBeHidden();
+  await expect(page.locator('#hw-decision-ctx')).toBeVisible();
+});
+
+test('review step exposes structured output and full sampling defaults', async ({ page }) => {
         await page.goto('/');
         await page.waitForLoadState('networkidle');
 

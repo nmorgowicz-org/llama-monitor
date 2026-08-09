@@ -23,6 +23,7 @@ pub const CSS_MODAL_SIZING: &str = include_str!("../../static/css/modal-sizing.c
 pub const CSS_SETTINGS_MODAL: &str = include_str!("../../static/css/settings-modal.css");
 pub const CSS_SETUP_VIEW: &str = include_str!("../../static/css/setup-view.css");
 pub const CSS_SPAWN_WIZARD_BASE: &str = include_str!("../../static/css/spawn-wizard-base.css");
+pub const CSS_SPAWN_WIZARD_PRO: &str = include_str!("../../static/css/spawn-wizard-pro.css");
 pub const CSS_SPAWN_WIZARD_THEME: &str = include_str!("../../static/css/spawn-wizard-theme.css");
 pub const CSS_TOKENS: &str = include_str!("../../static/css/tokens.css");
 pub const CSS_TUNE_PANEL: &str = include_str!("../../static/css/tune-panel.css");

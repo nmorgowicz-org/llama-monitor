@@ -1,0 +1,132 @@
+/* Phase 7 Pro shell: one rail over the same canonical controls as Guided. */
+.pro-layout {
+    display: flex;
+    flex-direction: row;
+    gap: 0;
+    min-height: 480px;
+    margin: 0 0 16px;
+    border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--color-bg-elevated, #1a1f28);
+}
+
+.pro-rail {
+    flex: 0 0 214px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 14px 10px;
+    border-right: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+    background: color-mix(in srgb, var(--color-bg-elevated, #1a1f28) 92%, var(--color-accent) 8%);
+}
+
+.pro-rail-header,
+.pro-header-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pro-rail-header {
+    justify-content: space-between;
+    padding: 0 6px 12px;
+}
+
+.pro-rail-title {
+    color: var(--color-text, #e5e7eb);
+    font-size: 0.85rem;
+    font-weight: 750;
+}
+
+.pro-rail-nav {
+    display: grid;
+    gap: 4px;
+    overflow: auto;
+}
+
+.pro-rail-item {
+    width: 100%;
+    padding: 8px 9px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--color-text-muted, #9ca3af);
+    background: transparent;
+    text-align: left;
+    font-size: 0.74rem;
+    cursor: pointer;
+}
+
+.pro-rail-item:hover,
+.pro-rail-item.active {
+    color: var(--color-text, #e5e7eb);
+    border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.pro-rail-footer {
+    margin-top: auto;
+    padding: 12px 6px 0;
+    color: var(--color-text-muted, #9ca3af);
+    font-size: 0.66rem;
+}
+
+.pro-pane {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+}
+
+.pro-header-bar {
+    flex-wrap: wrap;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+}
+
+.pro-filter {
+    display: flex;
+    flex: 1 1 220px;
+    align-items: center;
+    gap: 5px;
+}
+
+.pro-controls-grid {
+    display: block;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    padding: 12px;
+}
+
+#pro-controls-host > [id] {
+    margin-bottom: 14px;
+}
+
+#pro-controls-host .pro-search-hidden {
+    display: none !important;
+}
+
+@media (max-width: 820px) {
+    .pro-layout {
+        flex-direction: column;
+    }
+
+    .pro-rail {
+        flex-basis: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+    }
+
+    .pro-rail-nav {
+        display: flex;
+        overflow-x: auto;
+    }
+
+    .pro-rail-item {
+        flex: 0 0 auto;
+        width: auto;
+        white-space: nowrap;
+    }
+}
