@@ -264,7 +264,7 @@ This guidance is also shown in the preset editor.
 
 ### Step 1: Hardware — Review & settings
 
-![Step 4 — Parameters](../screenshots/spawn-wizard--llamacpp-local--hardware-parameters.png)
+![Hardware parameters](../screenshots/spawn-wizard--llamacpp-local--hardware-parameters.png)
 
 Merged into the Hardware step alongside the tuning controls above. Shows a human-readable
 review of all selected parameters. Health checks:
