@@ -31,6 +31,10 @@ Updated as milestones pass; this ledger records verified repository state, not i
 
 Added a shared `modal-sizing.css` contract loaded after the modal surfaces. It replaces inline pixel widths and independent viewport caps with safe-area gutters, dynamic viewport dimensions, responsive shell widths, and a tall-screen height expansion for content-rich modals. Compact dialogs retain intrinsic sizing while all overlays can scroll on short viewports. Release-built evidence: `spawn-wizard-tier-matrix--llamacpp-local--guided.png` (1280x1400), `spawn-wizard-rapid-guided-baseline--rapidmlx-local--dark.png`, and settings/preset captures show centered shells without the prior tall-viewport backdrop bands. Validation: release build, clippy, 2272 Rust tests (26 ignored), JS validation/lint, diff check, and cargo fmt.
 
+### Guided MTP capability preflight (2026-08-09)
+
+The Guided speed decision now waits for resolved model metadata before enabling built-in MTP. Resolved models with `mtp_depth` advertise the detected head count; resolved models without heads, degraded metadata, and unknown metadata remain unavailable instead of claiming a platform-only default. The stale UI test was updated with enabled and unavailable assertions; focused MTP Playwright coverage passes against the release build. This is a Phase 5 hard-gate repair recorded before the next planned Phase 7 Pro work.
+
 ## 1. Why this plan exists
 
 ### Phase 4 milestone update (2026-08-09)

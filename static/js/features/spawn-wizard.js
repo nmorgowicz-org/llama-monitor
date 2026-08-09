@@ -36,7 +36,7 @@ import { configureMlxWizardIA, applyMlxTierVisibility } from './spawn-wizard-mlx
 import { configureLlamaWizardIA, applyLlamaTierVisibility } from './spawn-wizard-llama-ia.js';
 import { controlsForLoader, controlsForView, applyEffectiveLocks } from './spawn-wizard-groups.js';
 import { createSettingStateRegistry } from './spawn-wizard-setting-state.js';
-import { initGuidedCards } from './spawn-wizard-guided.js';
+import { initGuidedCards, refreshGuidedCapabilityCards } from './spawn-wizard-guided.js';
 import {
   _platformInfo,
   setWizardPlatformInfo,
@@ -2657,12 +2657,14 @@ export async function doIntrospect(path) {
     if (!resp.ok) {
       wizardState.arch.metadataStatus = 'degraded';
       wizardState.arch.metadataReason = `GGUF metadata request failed (${resp.status})`;
+      refreshGuidedCapabilityCards();
       return false;
     }
     const data = await resp.json();
     if (!data.ok || !data.metadata) {
       wizardState.arch.metadataStatus = 'degraded';
       wizardState.arch.metadataReason = data.error || 'GGUF metadata unavailable';
+      refreshGuidedCapabilityCards();
       return false;
     }
 
@@ -2707,6 +2709,8 @@ export async function doIntrospect(path) {
     if (m.expert_bytes_per_layer != null) wizardState.arch.expertBytesPerLayer = m.expert_bytes_per_layer;
     wizardState.arch.metadataStatus = 'resolved';
     wizardState.arch.metadataReason = 'GGUF header metadata';
+    refreshGuidedCapabilityCards();
+    if (wizardState.currentStep === 1) renderMtpSection();
 
     // Re-fetch sampling defaults now that gguf_arch is known — the earlier call
     // (on hardware step entry) ran before introspection completed and sent an empty
@@ -2889,6 +2893,7 @@ export async function doIntrospect(path) {
   } catch (error) {
     wizardState.arch.metadataStatus = 'degraded';
     wizardState.arch.metadataReason = error?.message || 'GGUF introspection failed';
+    refreshGuidedCapabilityCards();
     return false;
   }
 }

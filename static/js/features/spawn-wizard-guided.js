@@ -8,6 +8,49 @@ export function initGuidedCards() {
   wireVisionCard();
   wireSpeedBoost();
   wireStickyBar();
+  refreshGuidedCapabilityCards();
+}
+
+// Keep the primary speed decision truthful while metadata is loading. The
+// initial state is deliberately unavailable; only resolved model metadata can
+// advertise built-in MTP heads. External draft-model and n-gram paths remain
+// separate choices and must not be presented as MTP capability.
+export function refreshGuidedCapabilityCards() {
+  const onRadio = document.querySelector('input[name="hw-speed"][value="on"]');
+  const offRadio = document.querySelector('input[name="hw-speed"][value="off"]');
+  const label = onRadio?.closest('.hw-speed-option');
+  const text = label?.querySelector('.hw-speed-label');
+  if (!onRadio || !label || !text) return;
+
+  const status = wizardState.arch?.metadataStatus || 'unknown';
+  const mtpDepth = Number(wizardState.arch?.mtpDepth || 0);
+  const resolved = status === 'resolved';
+  const eligible = resolved && mtpDepth > 0;
+
+  if (eligible) {
+    text.textContent = `On — MTP heads detected (${mtpDepth})`;
+    label.title = 'Model-native MTP heads are available.';
+  } else if (resolved) {
+    text.textContent = 'On — unavailable for this model';
+    label.title = 'This model has no introspected built-in MTP heads.';
+  } else if (status === 'degraded') {
+    text.textContent = 'On — unavailable (metadata unresolved)';
+    label.title = 'Resolve model metadata before enabling built-in MTP.';
+  } else {
+    text.textContent = 'On — checking model capability';
+    label.title = 'Waiting for model-native metadata.';
+  }
+
+  onRadio.disabled = !eligible;
+  onRadio.setAttribute('aria-disabled', String(!eligible));
+  if (!eligible && !onRadio.dataset.userConfigured) {
+    onRadio.checked = false;
+    if (offRadio) offRadio.checked = true;
+    if (wizardState.hardware) wizardState.hardware.mtpEnabled = false;
+  } else if (eligible && !onRadio.dataset.userConfigured && !offRadio?.dataset.userConfigured) {
+    onRadio.checked = true;
+    if (wizardState.hardware) wizardState.hardware.mtpEnabled = true;
+  }
 }
 
 // Card 1: Context size tiles sync with #spawn-context-size
@@ -121,6 +164,7 @@ function wireSpeedBoost() {
 
   radios.forEach(radio => {
     radio.addEventListener('change', () => {
+      radio.dataset.userConfigured = '1';
       const value = radio.value;
       if (mtpCheckbox) {
         mtpCheckbox.checked = value === 'on';

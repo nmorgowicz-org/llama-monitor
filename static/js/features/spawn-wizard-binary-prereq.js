@@ -49,7 +49,7 @@ export async function _checkBinaryPrereq() {
     // MTP is now enabled by default on all platforms including Metal.
     // Users can disable if quality issues arise on their hardware.
     if (!_mtpUserConfigured) {
-      wizardState.hardware.mtpEnabled = true;
+      wizardState.hardware.mtpEnabled = Number(wizardState.arch?.mtpDepth || 0) > 0;
       const mtpCheck = document.getElementById('hw-use-mtp');
       const mtpDepthRow = document.getElementById('hw-mtp-depth-row');
       if (mtpCheck) mtpCheck.checked = wizardState.hardware.mtpEnabled;

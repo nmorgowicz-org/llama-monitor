@@ -883,7 +883,7 @@ await page.locator('#spawn-fit-enable').evaluate((el) => { el.value = 'true'; el
         expect(moeLayout.fieldBottom).toBeGreaterThanOrEqual(moeLayout.actionsBottom);
     });
 
-    test('MTP enabled by default on all platforms including Metal', async ({ page }) => {
+test('MTP defaults on only when resolved metadata proves built-in heads', async ({ page }) => {
         await page.goto('/');
         await page.waitForLoadState('networkidle');
 
@@ -892,15 +892,37 @@ await page.locator('#spawn-fit-enable').evaluate((el) => { el.value = 'true'; el
             openSpawnWizard();
             wizardState.model.source = 'local';
             wizardState.model.path = '/tmp/Qwen3.6-27B-MTP-Q4_K_M.gguf';
-            wizardState.model.paramB = 27;
-            wizardState.model.modelBytes = 16 * 1024 * 1024 * 1024;
-            wizardState.arch.mtpDepth = 1;
+    wizardState.model.paramB = 27;
+    wizardState.model.modelBytes = 16 * 1024 * 1024 * 1024;
+    wizardState.arch.mtpDepth = 1;
+    wizardState.arch.metadataStatus = 'resolved';
         });
 
         await page.locator('#wizard-next-btn').click();
 
-        await expect(page.locator('#hw-mtp-section')).toBeVisible();
-        await expect(page.locator('#hw-use-mtp')).toBeChecked({ checked: true });
+  await expect(page.locator('#hw-use-mtp')).toBeChecked({ checked: true });
+  await expect(page.locator('#hw-decision-speed .hw-speed-label').first()).toContainText('MTP heads detected');
+});
+
+    test('MTP remains unavailable when metadata resolves without built-in heads', async ({ page }) => {
+      await page.goto('/');
+      await page.waitForLoadState('networkidle');
+
+      await page.evaluate(async () => {
+        const { openSpawnWizard, wizardState } = await import('/js/features/spawn-wizard.js');
+        openSpawnWizard();
+        wizardState.model.source = 'local';
+        wizardState.model.path = '/tmp/model-without-mtp-Q4_K_M.gguf';
+        wizardState.model.paramB = 7;
+        wizardState.model.modelBytes = 4 * 1024 * 1024 * 1024;
+        wizardState.arch.metadataStatus = 'resolved';
+        wizardState.arch.mtpDepth = 0;
+      });
+
+      await page.locator('#wizard-next-btn').click();
+      await expect(page.locator('input[name="hw-speed"][value="on"]')).toBeDisabled();
+      await expect(page.locator('#hw-decision-speed .hw-speed-label').first()).toContainText('unavailable for this model');
+      await expect(page.locator('#hw-use-mtp')).not.toBeChecked();
     });
 
     test('review step exposes structured output and full sampling defaults', async ({ page }) => {
