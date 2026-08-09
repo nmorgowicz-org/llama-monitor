@@ -144,7 +144,8 @@ Each new step folds in the old steps it absorbed:
 Opens with a profile + use-case selection screen (wizard-step-0), then engine selection and
 model source input on the same step:
 
-- **Guided setup**: the legacy Quick/Balanced/Advanced profile selector is retired. Guided keeps safe defaults visible and exposes every applicable setting through the canonical All settings drawer; the Pro selector is visibly unavailable until its implementation phase.
+- **Guided setup**: safe defaults and workload-specific recommendations stay visible, with every applicable control reachable through the canonical All settings drawer.
+- **Pro setup**: the power-user view exposes one searchable seven-category surface (Model & compatibility, Memory & context, Performance, Generation & reasoning, Tools & conversation formatting, Network & observability, and Advanced). Switching Guided/Pro relocates the same canonical controls without changing state; modified-only filtering and resolved-default reset operate on that shared state.
 Guided disclosure keeps safe defaults visible; every applicable control is reachable in the canonical All settings drawer.
 - **Workload cards** map to typed `workload_scenario` values sent to the backend VRAM estimator.
 
@@ -251,7 +252,10 @@ not int8, the summary shows "INT4 → INT8 (reasoning profile)" to make the over
 ### Step 2: Launch
 
 Network, security, and advanced launch flags, followed by spawn submission and start-up
-monitoring. Preset save/load options are available here.
+monitoring. The expandable **Full config** review is the canonical launch summary:
+llama.cpp rows identify requested and estimator-effective values; Rapid-MLX rows identify
+requested values and runtime-effective command-preview evidence. Preset save/load options
+are available here.
 
 ## Engine selection
 

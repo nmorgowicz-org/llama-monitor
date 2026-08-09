@@ -36,10 +36,11 @@ source), **Hardware** (tuning, VRAM breakdown, and the pre-launch review), and *
 
 ![Step 1 — Profile selection](../screenshots/spawn-wizard--llamacpp-local--model-profiles.png)
 
-The user selects a **hardware profile** (Quick / Balanced / Advanced) and a **use case**.
+The user chooses a workload/use-case recommendation and an inference engine.
 
-There is no "Workstation" profile — the wizard recognizes exactly three profile values
-(`quick` / `balanced` / `advanced`, `static/js/features/spawn-wizard.js`). The profile drives
+The legacy profile names are retained only as compatibility metadata; they are not a user
+selection. Guided and Pro now share canonical state, while each engine exposes its own
+backend-native control registry.
 the control-tier registry in `static/js/features/spawn-wizard-groups.js`'s `CONTROLS` table,
 which is the single source of truth for two independent behaviors per control:
 
