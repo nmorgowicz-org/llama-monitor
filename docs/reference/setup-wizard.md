@@ -147,7 +147,7 @@ Gemma 4 is detected; older Gemma families keep their embedded template.
 
 ---
 
-### Step 2: Hardware — Tuning & memory
+### Step 1: Hardware — Tuning & memory
 
 ![Step 3 — VRAM breakdown and hardware tuning](../screenshots/spawn-wizard--llamacpp-local--hardware-vram.png)
 
@@ -262,7 +262,7 @@ This guidance is also shown in the preset editor.
 
 ---
 
-### Step 2: Hardware — Review & settings
+### Step 1: Hardware — Review & settings
 
 ![Step 4 — Parameters](../screenshots/spawn-wizard--llamacpp-local--hardware-parameters.png)
 
@@ -285,9 +285,9 @@ This step also includes:
 
 ---
 
-### Step 2: Hardware — Save as preset
+### Step 2: Launch — Save as preset and Full config
 
-![Step 5 — Summary](../screenshots/spawn-wizard--llamacpp-local--launch-summary.png)
+![Launch Full config](../screenshots/spawn-wizard--llamacpp-local--launch-summary.png)
 
 Also part of the merged Hardware step. Displays every flag that will be saved with the preset
 in a table format. The user can save the configuration as a named preset before proceeding
