@@ -3585,27 +3585,9 @@
             <div class="wizard-step active" id="wizard-step-0">
                 <div class="wizard-main">
                     <div>
-                        <div class="wizard-section-title">Setup profile</div>
-                        <div class="wizard-section-desc">Controls how many options appear on the hardware page. You can change this later.</div>
+                        <div class="wizard-section-title">Guided setup</div>
+                        <div class="wizard-section-desc">Safe defaults stay in view. Open the View menu for the power-user Pro surface when it becomes available.</div>
                     </div>
-                    <div class="profile-cards">
-                        <div class="profile-card" data-profile="quick">
-                            <div class="profile-card-radio">⚡</div>
-                            <div class="profile-card-name">Quick</div>
-                            <div class="profile-card-desc">Auto-tune everything. Context, GPU layers, and batch are set for you — no knobs to turn.</div>
-                        </div>
-                        <div class="profile-card selected" data-profile="balanced">
-                            <div class="profile-card-radio">⚖️</div>
-                            <div class="profile-card-name">Balanced</div>
-                            <div class="profile-card-desc">Recommended defaults with room to adjust context, KV cache type, and threads.</div>
-                        </div>
-                        <div class="profile-card" data-profile="advanced">
-                            <div class="profile-card-radio">🛠️</div>
-                            <div class="profile-card-name">Advanced</div>
-                            <div class="profile-card-desc">Full control: MoE CPU offload, tensor split, speculative decoding, batch tuning, and more.</div>
-                        </div>
-                    </div>
-                    <div class="profile-seg-hint" id="profile-seg-hint">Guided tuning with sensible defaults. Recommended for most setups.</div>
 
                     <!-- Use-case selector: affects KV quant recommendations and warnings -->
                     <div class="wizard-section-title">What are you running this for?</div>
@@ -3615,6 +3597,13 @@
                             <div class="usecase-body">
                                 <div class="usecase-name">Agentic / RAG</div>
                                 <div class="usecase-desc">Tool calling, agents, retrieval. q8_0 KV minimum for coherent context.</div>
+                            </div>
+                        </div>
+                        <div class="usecase-card" data-usecase="tool_research" tabindex="0" role="button">
+                            <span class="usecase-icon">🔎</span>
+                            <div class="usecase-body">
+                                <div class="usecase-name">Tool / research agent</div>
+                                <div class="usecase-desc">Long-running retrieval and tool loops with room for parallel requests.</div>
                             </div>
                         </div>
                         <div class="usecase-card" data-usecase="general" tabindex="0" role="button">
@@ -3629,6 +3618,13 @@
                             <div class="usecase-body">
                                 <div class="usecase-name">Roleplay / creative</div>
                                 <div class="usecase-desc">Fiction, long narratives. Context beats precision — q4_0 KV accepted.</div>
+                            </div>
+                        </div>
+                        <div class="usecase-card" data-usecase="batch_eval" tabindex="0" role="button">
+                            <span class="usecase-icon">📊</span>
+                            <div class="usecase-body">
+                                <div class="usecase-name">Deterministic batch / eval</div>
+                                <div class="usecase-desc">Repeatable, greedy evaluation runs with predictable scheduling.</div>
                             </div>
                         </div>
                     </div>

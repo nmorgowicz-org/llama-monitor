@@ -245,7 +245,7 @@ export const SCENARIOS = {
     },
     'spawn-wizard-tier-matrix': {
         run: scenarioSpawnWizardTierMatrix, category: 'wizard-llamacpp', runtime: 'llamacpp-local',
-        contract: { intent: 'Capture the current llama.cpp disclosure tier matrix.', expectedOutputs: ['spawn-wizard-tier-matrix--llamacpp-local--quick.png', 'spawn-wizard-tier-matrix--llamacpp-local--balanced.png', 'spawn-wizard-tier-matrix--llamacpp-local--advanced.png'] },
+        contract: { intent: 'Confirm legacy Quick/Balanced/Advanced disclosure is retired and capture the single Guided surface.', expectedOutputs: ['spawn-wizard-tier-matrix--llamacpp-local--guided.png'] },
     },
     'spawn-wizard-mmproj-selection': {
         run: scenarioSpawnWizardMmprojSelection, category: 'wizard-llamacpp', runtime: 'llamacpp-local',

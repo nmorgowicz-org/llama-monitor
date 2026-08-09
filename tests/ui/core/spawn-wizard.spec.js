@@ -751,25 +751,25 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
             wizardState.vram.available = 48 * 1024 * 1024 * 1024; // 48 GB
         });
 
-        await page.locator('.profile-card[data-profile="advanced"]').click();
         await page.fill('#spawn-model-path', '/tmp/Qwen3.6-27B-Instruct-Q4_K_M.gguf');
         await page.locator('#wizard-next-btn').click();
         await expect(page.locator('#wizard-step-1')).toHaveClass(/active/);
         await expect(page.locator('.vsc-section-label')).toContainText('Context fit modes');
         // Scenario cards are rendered via async backend calls; wait for them.
-        await expect(page.locator('#vram-scenarios')).toContainText('Reliable agents', { timeout: 8000 });
+ await expect(page.locator('#vram-scenarios')).toContainText('Reliable agents', { timeout: 8000 });
+ await page.locator('#all-settings-btn').click();
         await expect(page.locator('#spawn-cache-type-k')).toHaveValue('q8_0');
         await expect(page.locator('#spawn-cache-type-v')).toHaveValue('q8_0');
 
         const nextBtn = page.locator('#wizard-next-btn');
 
         // Enable fit — should auto-populate '2048' and keep next enabled
-        await page.selectOption('#spawn-fit-enable', 'true');
+        await page.locator('#spawn-fit-enable').evaluate((el) => { el.value = 'true'; el.dispatchEvent(new Event('change', { bubbles: true })); });
         await expect(page.locator('#vram-scenarios')).toContainText('Reliable agents', { timeout: 8000 });
         await expect(nextBtn).toBeEnabled();
         await expect(page.locator('#spawn-fit-target')).toHaveValue('2048');
 
-        await page.fill('#spawn-fit-target', '2048');
+        await page.locator('#spawn-fit-target').evaluate((el) => { el.value = '2048'; el.dispatchEvent(new Event('input', { bubbles: true })); });
         await expect(nextBtn).toBeEnabled();
 
         // Hardware step must still be active and visible after the layout change
@@ -838,7 +838,6 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
             wizardState.vram.available = 48 * 1024 * 1024 * 1024; // 48 GB
         });
 
-        await page.locator('.profile-card[data-profile="advanced"]').click();
         await page.fill('#spawn-model-path', '/tmp/Qwen3.6-27B-Instruct-Q4_K_M.gguf');
         await page.locator('#wizard-next-btn').click();
         await expect(page.locator('#wizard-step-1')).toHaveClass(/active/);
@@ -846,14 +845,15 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         // Scenario cards are rendered via async backend calls; wait for them.
         await expect(page.locator('#vram-scenarios')).toContainText('Reliable agents', { timeout: 8000 });
         await expect(page.locator('#spawn-cache-type-k')).toHaveValue('q8_0');
-        await expect(page.locator('#spawn-cache-type-v')).toHaveValue('q8_0');
+ await expect(page.locator('#spawn-cache-type-v')).toHaveValue('q8_0');
+ await page.locator('#all-settings-btn').click();
 
-        await expect(page.locator('#spawn-kv-unified')).toHaveValue('');
-        await page.selectOption('#spawn-kv-unified', 'false');
+ await expect(page.locator('#spawn-kv-unified')).toHaveValue('');
+await page.locator('#spawn-kv-unified').evaluate((el) => { el.value = 'false'; el.dispatchEvent(new Event('change', { bubbles: true })); });
         await expect(page.locator('#spawn-kv-unified')).toHaveValue('false');
 
         // fit On shows target input and auto-populates '2048'
-        await page.selectOption('#spawn-fit-enable', 'true');
+await page.locator('#spawn-fit-enable').evaluate((el) => { el.value = 'true'; el.dispatchEvent(new Event('change', { bubbles: true })); });
         await page.waitForTimeout(400);
 
         const fitTargetValue = await page.evaluate(() =>

@@ -175,12 +175,24 @@ export default async function(ctx) {
     await sleep(250);
     // INTENT: The Pro selector is visibly unavailable and cannot mutate the active Guided view.
     await captureShot(page, 'spawn-wizard-guided-drawer-pro-unavailable.png', { fullPage: true, runtimeTag: 'llamacpp-local', expandSelector: '.wizard-body' });
-    const proState = await page.evaluate(() => ({
+ const workloadState = await page.evaluate(async () => {
+     const { wizardState } = await import('/js/features/spawn-wizard.js');
+     document.querySelector('.usecase-card[data-usecase="tool_research"]')?.click();
+     const selected = document.querySelector('.usecase-card[data-usecase="tool_research"]')?.classList.contains('selected');
+     const scenario = wizardState.hardware.workloadScenario;
+     document.querySelector('.usecase-card[data-usecase="agentic"]')?.click();
+     return { selected, scenario };
+ });
+ if (!workloadState.selected || workloadState.scenario !== 'tool_research_agent') {
+     throw new Error(`Workload intent did not map to backend scenario: ${JSON.stringify(workloadState)}`);
+ }
+ const proState = await page.evaluate(() => ({
         value: document.getElementById('view-mode-select')?.value,
         optionDisabled: document.querySelector('#view-mode-select option[value="pro"]')?.disabled,
         text: document.querySelector('#view-mode-select option[value="pro"]')?.textContent || '',
+        workloadCards: document.querySelectorAll('.usecase-card[data-usecase]').length,
     }));
-    if (proState.value === 'pro' || !proState.optionDisabled || !/coming|later|unavailable|not implemented/i.test(proState.text)) {
+    if (proState.value === 'pro' || !proState.optionDisabled || !/coming|later|unavailable|not implemented/i.test(proState.text) || proState.workloadCards !== 5) {
         throw new Error(`Pro availability is not honest: ${JSON.stringify(proState)}`);
     }
 }

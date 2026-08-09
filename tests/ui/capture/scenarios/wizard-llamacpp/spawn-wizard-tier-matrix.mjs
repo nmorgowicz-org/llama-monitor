@@ -1,14 +1,9 @@
 // Scenario: spawn-wizard-tier-matrix (plan §5 Phase 4b item 3).
-// SCENARIO INTENT: Capture the current legacy disclosure tiers as diagnostic evidence only.
-// Captures the llama.cpp hardware step at Quick / Balanced / Advanced so
-// applyProfileVisibility()'s registry-driven tier disclosure — which no
-// other capture scenario exercises across all three profiles — has visual
-// coverage.
+// SCENARIO INTENT: Confirm the legacy Quick/Balanced/Advanced disclosure axis
+// is retired and capture the single Guided hardware surface.
 import { loadAppDocument } from '../../harness/browser.mjs';
 import { sleep } from '../../harness/paths.mjs';
 import { captureShot } from '../../harness/shot.mjs';
-
-const PROFILES = ['quick', 'balanced', 'advanced'];
 
 export default async function(ctx) {
     const { page, baseUrl } = ctx;
@@ -53,21 +48,22 @@ export default async function(ctx) {
     });
     await sleep(300);
 
-    for (const profile of PROFILES) {
-        await page.evaluate((p) => {
-            (document.querySelector(`.profile-card[data-profile="${p}"]`))?.click();
-        }, profile);
-        await sleep(300);
-        await page.evaluate(() => {
-            document.querySelector('.wizard-body')?.scrollTo({ top: 0, behavior: 'instant' });
-        });
-        await sleep(200);
-        await captureShot(page, `spawn-wizard-tier-matrix-${profile}.png`, {
-            fullPage: true,
-            runtimeTag: 'llamacpp-local',
-            expandSelector: '.wizard-body',
-        });
+    const state = await page.evaluate(() => ({
+        legacyCards: document.querySelectorAll('.profile-card[data-profile]').length,
+        view: document.getElementById('view-mode-select')?.value,
+    }));
+    if (state.legacyCards || state.view !== 'guided') {
+        throw new Error(`Legacy disclosure axis still reachable: ${JSON.stringify(state)}`);
     }
+    await page.evaluate(() => {
+        document.querySelector('.wizard-body')?.scrollTo({ top: 0, behavior: 'instant' });
+    });
+    await sleep(200);
+    await captureShot(page, 'spawn-wizard-tier-matrix-guided.png', {
+        fullPage: true,
+        runtimeTag: 'llamacpp-local',
+        expandSelector: '.wizard-body',
+    });
 
     console.log('[CAPTURE] Scenario "spawn-wizard-tier-matrix" complete.');
 }

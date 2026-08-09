@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Created | 2026-08-08 |
-| Status | Phase 4 in progress; prior evidence, provenance, CSS, and capture milestones verified |
+| Status | Phase 4 complete; prior evidence, provenance, CSS, and capture milestones verified |
 | Scope | Complete the three-step Spawn Wizard for llama.cpp/GGUF and Rapid-MLX with Guided and Pro views, trustworthy capture evidence, introspection-backed recommendations, and documentation closure |
 | Primary design source | [`../archive/rapid-mlx/20260806-spawn_wizard_uiux_redesign.md`](../archive/rapid-mlx/20260806-spawn_wizard_uiux_redesign.md) |
 | Phase-router context | [`20260718-final_rapidmlx_followups_execution.md`](20260718-final_rapidmlx_followups_execution.md), Phase 10 |
@@ -31,7 +31,7 @@ Updated as milestones pass; this ledger records verified repository state, not i
 
 ### Phase 4 milestone update (2026-08-09)
 
-The shared Guided drawer now uses a canonical `SettingStateRegistry` for resolved defaults, dirty/provenance, effective/pending state, reset, snapshots, and async resolved-default updates. A single overlay-level input/change pipeline syncs canonical controls and refreshes VRAM, context, guardrails, and drawer counts. G4 asserts the state shape and reset semantics in addition to descriptor validity, backend relocation, duplicate-ID protection, payload/preset parity, and honest Pro unavailability. Fresh release-built G4 evidence is recorded in `docs/screenshots/artifacts/wizard-llamacpp/spawn-wizard-guided-drawer--receipt.json` with five original-resolution screenshots. Validation passed: release build, clippy, 2272 Rust tests (26 ignored), JS validation/lint, descriptor validation, diff check, and the strict G4 capture. Remaining Phase 4 work is retirement of legacy Quick/Balanced/Advanced disclosure.
+The shared Guided drawer now uses a canonical `SettingStateRegistry` for resolved defaults, dirty/provenance, effective/pending state, reset, snapshots, and async resolved-default updates. A single overlay-level input/change pipeline syncs canonical controls and refreshes VRAM, context, guardrails, and drawer counts. Guided now owns the disclosure axis: the legacy Quick/Balanced/Advanced cards and persistence path are retired, while the backward-compatible payload profile remains fixed to `balanced`; five workload intents map to typed backend scenarios, including tool/research and deterministic batch/eval. G4 asserts the state shape and reset semantics in addition to descriptor validity, backend relocation, duplicate-ID protection, payload/preset parity, workload mapping, duplicate IDs, and honest Pro unavailability. Fresh release-built G4 evidence is recorded in `docs/screenshots/artifacts/wizard-llamacpp/spawn-wizard-guided-drawer--receipt.json` with five original-resolution screenshots, and the tier capture now proves the legacy axis is absent. Validation passed: release build, clippy, 2272 Rust tests (26 ignored), JS validation/lint, descriptor validation, diff check, and the strict G4/tier captures. Phase 4 implementation gates are complete; retain the ledger as in progress until the coordinator records the final commit boundary.
 
 The 2026-08-06 redesign describes the right destination: one three-step wizard with a default
 Guided view and a power-user Pro view over the same controls and state. The current repository does
@@ -1372,6 +1372,10 @@ Use this prompt for the Coordinator, replacing `<N>` with the next open phase:
 > proceed to Phase `<N+1>` until the phase hard gate is evidenced in source, behavior, tests, and fresh
 > capture receipts. Do not commit, push, or update old Phase 10 completion status without Coordinator
 > authority.
+
+### Phase 4 final boundary (2026-08-09)
+
+Phase 4 is complete in the current tree: canonical setting state and update pipeline, backend-safe Guided relocation, five workload intents, and legacy profile retirement are implemented and release-built. G4 and tier captures pass at original resolution; focused Playwright hardware-control checks pass. The next work is Phase 7 Pro, not additional Phase 4 scope.
 
 ## 24. Completion definition
 

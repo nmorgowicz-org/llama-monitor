@@ -268,8 +268,10 @@ import {
 // consumed by the backend VRAM estimator.
 const USE_CASE_TO_PROFILE = {
   agentic: 'interactive_coding_agent',
+  tool_research: 'tool_research_agent',
   general: 'general_chat',
   roleplay: 'roleplay_storytelling',
+  batch_eval: 'deterministic_batch_eval',
 };
 
 // The one concrete thing a use-case should change on llama.cpp: how hard the KV cache is
@@ -284,8 +286,10 @@ const USE_CASE_TO_PROFILE = {
 // recommendation.
 const USE_CASE_TO_KV_DTYPE = {
   agentic: 'q8_0',
+  tool_research: 'q8_0',
   general: 'q8_0',
   roleplay: 'q4_0',
+  batch_eval: 'q8_0',
 };
 
 
@@ -552,9 +556,7 @@ export function initSpawnWizard() {
   bindHfSearchControls();
   bindQuantizerEditor();
   bindWizardHfToken();
-   restoreProfile();
-   applyProfileVisibility();
-   updateProfileHint();
+  applyGuidedVisibility();
    refreshEngineAvailability();
 
   initHfBrowseWidgets();
@@ -912,7 +914,6 @@ function cacheDom() {
   dom.footerHint = document.getElementById('wizard-footer-hint');
 
   // Step 1
-  dom.profileCards  = dom.overlay?.querySelectorAll('.profile-card[data-profile]');
   dom.usecaseCards  = dom.overlay?.querySelectorAll('.usecase-card[data-usecase]');
 
   // Step 2
@@ -1179,20 +1180,6 @@ function bindEvents() {
     }
   });
   dom.closeWizardBtn?.addEventListener('click', closeSpawnWizard);
-
-  // Profile cards (segmented control)
-  dom.profileCards?.forEach(card => {
-    card.setAttribute('tabindex', '0'); card.setAttribute('role', 'button');
-    card.addEventListener('click', () => {
-      wizardState.profile = card.dataset.profile;
-      dom.profileCards.forEach(c => c.classList.remove('selected'));
-      card.classList.add('selected');
-      updateProfileHint();
-      persistProfile(); applyProfileVisibility();
-      refreshStepGuardrails();
-    });
-    card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click(); } });
-  });
 
    // Use-case cards map to workload_scenario strings for backend VRAM estimation.
    dom.usecaseCards?.forEach(card => {
@@ -2101,53 +2088,21 @@ function _populateKvCacheOptions() {
   fillSelect(vSelect);
 }
 
-// ── Profile & use-case ────────────────────────────────────────────────────────
+// ── Guided disclosure & use-case ─────────────────────────────────────────────
 
-function persistProfile() { try { localStorage.setItem('spawn_wizard_profile', wizardState.profile); } catch {} }
-function restoreProfile() {
-  try {
-    const s = localStorage.getItem('spawn_wizard_profile');
-    if (s && ['quick','balanced','advanced'].includes(s)) wizardState.profile = s;
-  } catch {}
-  dom.profileCards?.forEach(c => c.classList.toggle('selected', c.dataset.profile === wizardState.profile));
-}
-const PROFILE_HINTS = {
-  quick:    'Fully auto-tuned — we pick safe defaults based on your hardware. No knobs to turn.',
-  balanced: 'Guided tuning with sensible defaults. Recommended for most setups.',
-  advanced: 'Full control over all parameters, including MoE tuning, KV cache quant, and multi-GPU.',
-};
-
-function updateProfileHint() {
-  const el = document.getElementById('profile-seg-hint');
-  if (el) el.textContent = PROFILE_HINTS[wizardState.profile] ?? '';
-}
-
-function applyProfileVisibility() {
-  const isQ = wizardState.profile === 'quick';
-  // Advanced-tuning groups stay visible (collapsed) on every profile — only
-  // their open/closed state follows the profile via the registry (plan
-  // §2.8/§5 Phase 4 item 4), so Quick/Balanced users can still reach
-  // batch/threads/MoE tuning without switching profiles first.
-  applyLlamaTierVisibility(dom.overlay, wizardState.profile);
-
-  // Registry-driven (plan §3.1/§2.8): Quick-tier llama.cpp controls write
-  // their quickValue then disable, replacing the three hardcoded dom.*
-  // references this function used to carry. I2 is enforced offline by
-  // assertQuickValueCoverage() (spawn-wizard-groups.js), not on every call.
+// Guided is the only disclosure axis. Keep the legacy profile value in the
+// payload for backward-compatible launch/preset contracts, but never let a
+// stored Quick/Balanced/Advanced preference change controls or overwrite edits.
+function applyGuidedVisibility() {
+  wizardState.profile = 'balanced';
+  applyLlamaTierVisibility(dom.overlay, 'balanced');
   controlsForLoader('llama_cpp').forEach(control => {
     if (!control.disableOnQuick) return;
     const el = document.getElementById(control.id);
-    if (!el) return;
-    if (isQ) {
-      if (control.quickValue !== undefined) el.value = control.quickValue;
-      el.disabled = true;
-    } else {
-      el.disabled = false;
-    }
+    if (el) el.disabled = false;
   });
-
   if (wizardState.engine.selected === 'rapid_mlx') {
-    applyMlxTierVisibility(dom.overlay, wizardState.profile);
+    applyMlxTierVisibility(dom.overlay, 'balanced');
   }
 }
 
