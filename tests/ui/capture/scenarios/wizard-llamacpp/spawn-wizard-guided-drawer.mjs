@@ -87,6 +87,10 @@ export default async function(ctx) {
     await sleep(200);
     snapshot = await inspectDrawer('llama_cpp');
     if (snapshot.changed < 1) throw new Error(`Changed count did not update: ${JSON.stringify(snapshot)}`);
+    const llamaPayloadBeforeSwitch = await page.evaluate(async () => {
+        const { buildSpawnPayload } = await import('/js/features/spawn-wizard.js');
+        return buildSpawnPayload();
+    });
     await page.evaluate(() => document.getElementById('all-settings-btn')?.click());
     await sleep(250);
     snapshot = await inspectDrawer('llama_cpp');
@@ -130,6 +134,16 @@ export default async function(ctx) {
     snapshot = await inspectDrawer('llama_cpp');
     if (!snapshot.activeMounted || !snapshot.inactiveHidden || snapshot.duplicateIds.length) {
         throw new Error(`Mixed backend controls after switch-back: ${JSON.stringify(snapshot)}`);
+    }
+    const parity = await page.evaluate(async () => {
+        const { buildSpawnPayload, buildPresetPayload } = await import('/js/features/spawn-wizard.js');
+        return { payload: buildSpawnPayload(), preset: buildPresetPayload() };
+    });
+    if (JSON.stringify(parity.payload) !== JSON.stringify(llamaPayloadBeforeSwitch)) {
+        throw new Error('Canonical llama.cpp payload changed across backend presentation switches');
+    }
+    if (parity.preset.batch_size !== 1024) {
+        throw new Error(`Preset projection lost the canonical drawer edit: ${parity.preset.batch_size}`);
     }
 
     await page.evaluate(() => document.getElementById('wizard-back-btn')?.click());

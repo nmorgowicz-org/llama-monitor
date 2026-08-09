@@ -1350,7 +1350,7 @@ Every static-JS phase also runs `rtk npm run validate-js`, `rtk npm run lint`, a
 
 ### Phase 4 descriptor milestone (2026-08-09)
 
-`controlsForView()` now returns validated semantic/mount descriptors for all 46 canonical controls (28 llama.cpp, 18 Rapid-MLX), including category, Guided placement, aliases, and search text. Schema-2 control-contract evidence and `validate-wizard-groups.mjs` enforce descriptor uniqueness/completeness. The remaining Phase 4 gate is the full cross-view state/update and payload/preset projection contract.
+`controlsForView()` now returns validated semantic/mount descriptors for all 46 canonical controls (28 llama.cpp, 18 Rapid-MLX), including category, Guided placement, aliases, and search text. Schema-2 control-contract evidence and `validate-wizard-groups.mjs` enforce descriptor uniqueness/completeness. The G4 Playwright capture now also asserts canonical llama payload deep-equality after Rapid-MLX switch-away/switch-back and verifies the drawer edit survives `buildPresetPayload()`. The remaining Phase 4 gate is the full cross-view state/update contract.
 
 <a id="terra-coordinator-handoff"></a>
 
