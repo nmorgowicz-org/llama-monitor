@@ -3530,8 +3530,9 @@
                 <label for="view-mode-select">View:</label>
                 <select id="view-mode-select">
                     <option value="guided" selected>Guided</option>
-                    <option value="pro">Pro</option>
+                    <option value="pro" disabled>Pro (coming in a later phase)</option>
                 </select>
+                <span class="view-mode-status" id="view-mode-status">Pro available in a later phase</span>
             </div>
             <button type="button" class="wizard-close" id="spawn-wizard-close" aria-label="Close">&times;</button>
         </div>
@@ -4497,16 +4498,6 @@
                           </div>
                       </div>
 
-                     <!-- All settings drawer -->
-                     <div class="hw-all-settings" id="hw-all-settings">
-                         <button type="button" class="hw-all-settings-toggle" id="hw-all-settings-toggle">
-                             ⚙ All settings (23)
-                         </button>
-                         <div class="hw-all-settings-panel" id="hw-all-settings-panel">
-                             <!-- Advanced fields relocated here by JS -->
-                         </div>
-                     </div>
-
                      <!-- Old advanced fields wrapper: hidden for Option A -->
                      <div class="advanced-only" id="spawn-advanced-fields" style="display:none;">
                          <div class="wizard-section-title">Advanced options</div>
@@ -4780,6 +4771,7 @@
                         <button type="button" class="all-settings-btn" id="all-settings-btn">
                             <span class="all-settings-label">⚙ All settings</span>
                             <span class="all-settings-count" id="all-settings-count">0</span>
+                            <span class="all-settings-changed" id="all-settings-changed">0 changed</span>
                         </button>
                         <div class="all-settings-body" id="all-settings-body" style="display:none;">
                             <div class="all-settings-group" id="all-settings-group">

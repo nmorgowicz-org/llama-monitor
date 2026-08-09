@@ -125,21 +125,60 @@ function _renderAllSettingsDrawer() {
   const drawer = document.getElementById('all-settings-drawer');
   const btn = document.getElementById('all-settings-btn');
   const countEl = document.getElementById('all-settings-count');
+  const changedEl = document.getElementById('all-settings-changed');
   const body = document.getElementById('all-settings-body');
-  if (!drawer || !btn || !countEl) return;
+  const group = document.getElementById('all-settings-group');
+  if (!drawer || !btn || !countEl || !changedEl || !body || !group) return;
 
   const loader = wizardState.engine.selected || 'llama_cpp';
   const settings = controlsForView(loader, 'guided').filter(control => control.view !== 'card');
   countEl.textContent = String(settings.length);
 
-  // Toggle
-  btn.addEventListener('click', () => {
-    const isOpen = body.style.display === 'block';
-    body.style.display = isOpen ? 'none' : 'block';
+  // The IA engines own the canonical rows; the shared drawer only relocates
+  // their wrapper, never clones individual inputs or creates proxy controls.
+  const sourceId = loader === 'rapid_mlx' ? 'spawn-rapid-advanced-fields' : 'spawn-advanced-fields';
+  const source = document.getElementById(sourceId);
+  ['spawn-advanced-fields', 'spawn-rapid-advanced-fields'].forEach(id => {
+    const candidate = document.getElementById(id);
+    if (candidate && id !== sourceId) candidate.style.display = 'none';
   });
+  if (source && source.parentElement !== group) {
+    group.appendChild(source);
+  }
+  if (source) source.style.display = loader === 'rapid_mlx' ? 'block' : '';
+  drawer.style.display = source ? '' : 'none';
+
+  const refreshChangedCount = () => {
+    const changed = settings.reduce((n, control) => {
+      const field = document.getElementById(control.id);
+      if (!field) return n;
+      if (field.type === 'checkbox') return n + (field.checked !== field.defaultChecked ? 1 : 0);
+      if (field.tagName === 'SELECT') {
+        const baseline = field.dataset.wizDefault ?? Array.from(field.options).find(option => option.defaultSelected)?.value ?? field.options[0]?.value ?? '';
+        return n + (field.value !== baseline ? 1 : 0);
+      }
+      return n + (field.value !== field.defaultValue ? 1 : 0);
+    }, 0);
+    changedEl.textContent = `${changed} changed`;
+    changedEl.dataset.count = String(changed);
+  };
+  refreshChangedCount();
+  group._refreshAllSettingsChanged = refreshChangedCount;
+
+  // Toggle
+  if (btn.dataset.bound !== '1') {
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', () => {
+      const isOpen = body.style.display === 'block';
+      body.style.display = isOpen ? 'none' : 'block';
+      btn.setAttribute('aria-expanded', String(!isOpen));
+    });
+    group.addEventListener('input', () => group._refreshAllSettingsChanged?.());
+    group.addEventListener('change', () => group._refreshAllSettingsChanged?.());
+  }
 
   // Initially hide
-  if (body) body.style.display = 'none';
+  if (!btn.getAttribute('aria-expanded')) btn.setAttribute('aria-expanded', 'false');
 }
 
 export { _renderAllSettingsDrawer };
@@ -153,14 +192,20 @@ function _initViewMode() {
   // Restore from sessionStorage
   try {
     const saved = sessionStorage.getItem('wizard_view_mode');
-    if (saved === 'pro') {
+    if (saved === 'pro' && !select.querySelector('option[value="pro"]')?.disabled) {
       wizardState.viewMode = 'pro';
       select.value = 'pro';
+    } else if (saved === 'pro') {
+      sessionStorage.removeItem('wizard_view_mode');
     }
   } catch {}
 
   select.addEventListener('change', () => {
     const newMode = select.value;
+    if (newMode === 'pro' && select.querySelector('option[value="pro"]')?.disabled) {
+      select.value = 'guided';
+      return;
+    }
     try { sessionStorage.setItem('wizard_view_mode', newMode); } catch {}
     wizardState.viewMode = newMode;
     // Phase 10b: When Pro layout is implemented, render it here
@@ -2258,6 +2303,7 @@ function renderEngineSelection() {
   // selection (hidden via .engine-rapid-mlx CSS when MLX is active), so this
   // is always enabled — mirrors configureMlxWizardIA's build-once guard.
   configureLlamaWizardIA(dom.overlay, true, wizardState.profile);
+  if (wizardState.currentStep === 1) _renderAllSettingsDrawer();
 
   // Expose IA data on window for Pro renderer and other consumers
   window.spawnWizardLlamaIA = { GROUPS: window._llamaGroups || [], SUPERSECTIONS: window._llamaSupersections || [] };

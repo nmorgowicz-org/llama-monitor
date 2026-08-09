@@ -7,7 +7,6 @@ export function initGuidedCards() {
   wireKvTiles();
   wireVisionCard();
   wireSpeedBoost();
-  wireAllSettingsDrawer();
   wireStickyBar();
 }
 
@@ -136,20 +135,6 @@ function wireSpeedBoost() {
       const checked = mtpCheckbox.checked;
       const radio = document.querySelector(`input[name="hw-speed"][value="${checked ? 'on' : 'off'}"]`);
       if (radio) radio.checked = true;
-    });
-  }
-}
-
-// All settings drawer toggle
-function wireAllSettingsDrawer() {
-  const toggle = document.getElementById('hw-all-settings-toggle');
-  const panel = document.getElementById('hw-all-settings-panel');
-
-  if (toggle && panel) {
-    toggle.addEventListener('click', () => {
-      panel.classList.toggle('open');
-      const isOpen = panel.classList.contains('open');
-      toggle.textContent = isOpen ? '⚙ All settings (23) ▲' : '⚙ All settings (23)';
     });
   }
 }

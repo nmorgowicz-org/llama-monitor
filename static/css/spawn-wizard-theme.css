@@ -4093,6 +4093,15 @@
   font-size: 10px;
   font-weight: 600;
 }
+.all-settings-changed {
+  color: var(--color-text-muted, #94a3b8);
+  font-size: 10px;
+}
+.view-mode-status {
+  color: var(--color-text-muted, #94a3b8);
+  font-size: 10px;
+  white-space: nowrap;
+}
 .all-settings-body {
   margin-top: 10px;
   padding: 10px;
@@ -5755,14 +5764,14 @@
 .rapid-mlx-config-toggle input[type="checkbox"] { accent-color:#8b5cf6; width:14px; height:14px; }
 .rapid-mlx-config-toggle.disabled { opacity:0.45; cursor:not-allowed; }
 
-.engine-rapid-mlx #wizard-step-1.active { grid-template-columns:minmax(0,1fr); }
+.engine-rapid-mlx #wizard-step-1.active { grid-template-columns:minmax(0,1fr) auto; }
 .engine-rapid-mlx #wizard-step-1 > .wizard-sidebar { display:none; }
 /* The MLX fit rail (hw-vram-sidebar) stays visible here — the server estimate is
    calculated for Rapid-MLX the same as llama.cpp, and hiding it was a defect, not
    a design choice. Only the llama.cpp-specific wizard-main children are hidden;
    rapid-hardware-panel now lives inside .wizard-main (Phase 0.2 re-parent) so it
    must be excluded from this rule instead of the whole column being hidden. */
-.engine-rapid-mlx #wizard-step-2 > .wizard-main > :not(.rapid-hardware-panel) { display:none; }
+.engine-rapid-mlx #wizard-step-1 > .wizard-main > :not(.rapid-hardware-panel):not(.all-settings-drawer) { display:none; }
 .engine-rapid-mlx .rapid-hardware-panel { width:auto; margin:0; }
 
 [data-theme="light"] .wizard-engine-section { background:linear-gradient(145deg,#f5f8ff,#fff); }

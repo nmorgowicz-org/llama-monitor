@@ -35,6 +35,7 @@ import scenarioSpawnWizardGif from './scenarios/wizard-llamacpp/spawn-wizard-gif
 import scenarioSpawnWizardHfDownload from './scenarios/wizard-llamacpp/spawn-wizard-hf-download.mjs';
 import scenarioSpawnWizardTierMatrix from './scenarios/wizard-llamacpp/spawn-wizard-tier-matrix.mjs';
 import scenarioSpawnWizardMmprojSelection from './scenarios/wizard-llamacpp/spawn-wizard-mmproj-selection.mjs';
+import scenarioSpawnWizardGuidedDrawer from './scenarios/wizard-llamacpp/spawn-wizard-guided-drawer.mjs';
 import scenarioSpawnWizardRapidMlxGif from './scenarios/wizard-rapidmlx/spawn-wizard-rapid-mlx-gif.mjs';
 import scenarioRapidMlxRuntime from './scenarios/features/rapid-mlx-runtime.mjs';
 import scenarioRapidMlxLive from './scenarios/validation/rapid-mlx-live.mjs';
@@ -251,6 +252,19 @@ export const SCENARIOS = {
         contract: {
             intent: 'Capture the llama.cpp hardware vision/mmproj selector with a typed family-backed recommendation.',
             expectedOutputs: ['spawn-wizard-mmproj-selection--llamacpp-local--vision.png'],
+        },
+    },
+    'spawn-wizard-guided-drawer': {
+        run: scenarioSpawnWizardGuidedDrawer, category: 'wizard-llamacpp', runtime: 'llamacpp-local',
+        contract: {
+            intent: 'Verify the single canonical Guided settings drawer across llama.cpp and Rapid-MLX, including engine switching and honest Pro unavailability.',
+            expectedOutputs: [
+                'spawn-wizard-guided-drawer--llamacpp-local--llama-closed.png',
+                'spawn-wizard-guided-drawer--llamacpp-local--llama-open.png',
+                'spawn-wizard-guided-drawer--rapidmlx-local--rapid-closed.png',
+                'spawn-wizard-guided-drawer--rapidmlx-local--rapid-open.png',
+                'spawn-wizard-guided-drawer--llamacpp-local--pro-unavailable.png',
+            ],
         },
     },
     'spawn-wizard-rapid-mlx-gif': {
