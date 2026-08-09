@@ -4923,6 +4923,10 @@
 .spawn-full-config-drawer > #preset-params-table { padding: 0 10px 10px; }
 [data-theme="light"] .spawn-full-config-drawer { background: color-mix(in srgb, var(--color-surface, #fff) 94%, transparent); }
 [data-theme="light"] .spawn-config-state-legend { color: var(--color-text-muted, #64748b); }
+@media (max-width: 620px) {
+  .spawn-full-config-summary { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .spawn-config-state-legend { text-align: left; }
+}
 .summary-list-header {
   font-size: 10px;
   font-weight: 700;

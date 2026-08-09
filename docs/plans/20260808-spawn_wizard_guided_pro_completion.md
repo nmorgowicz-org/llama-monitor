@@ -1407,3 +1407,7 @@ Rapid-MLX Pro parity is complete in the current tree. The seven-category Pro sur
 ### Phase 10 milestone update (2026-08-09)
 
 Launch/review convergence is complete for the current wizard surfaces. Step 3 now has one canonical, expandable Full config review shared by both engines, with explicit requested, estimator-effective, and runtime-effective labeling; llama.cpp points to the VRAM estimator while Rapid-MLX points to the backend command preview. The existing canonical payload/protected-credential tests cover save and launch projections, including fields moved through Guided and Pro panes. Fresh release-built G10 launch receipts are recorded at `docs/screenshots/artifacts/wizard-llamacpp/spawn-wizard-launch-full-config--receipt.json` and `docs/screenshots/artifacts/wizard-rapidmlx/spawn-wizard-rapid-launch-full-config--receipt.json`. Focused Full config Playwright verification, JS validation/lint, release build, and screenshot captures pass.
+
+### Phase 11 responsive milestone (2026-08-09)
+
+The new Full config surface has responsive hardening: state labels stack cleanly below 620px, light-theme overrides remain readable, and fresh llama.cpp/Rapid-MLX narrow captures show the review content without horizontal clipping. The focused Playwright contract now checks narrow `scrollWidth` against the viewport; both engine launch receipts include desktop, detail, and 430px narrow evidence. Broader axe/accessibility and cross-surface hardening remains the next planned Phase 11 gate.

@@ -286,6 +286,7 @@ export const SCENARIOS = {
     expectedOutputs: [
       'llamacpp-local--spawn-wizard-launch-full-config.png',
       'spawn-wizard-launch-full-config--llamacpp-local--details.png',
+      'spawn-wizard-launch-full-config--llamacpp-local--narrow.png',
     ],
   },
 },
@@ -298,6 +299,7 @@ export const SCENARIOS = {
     expectedOutputs: [
       'rapidmlx-local--spawn-wizard-launch-full-config.png',
       'rapidmlx-local--spawn-wizard-launch-full-config-details.png',
+      'rapidmlx-local--spawn-wizard-launch-full-config-narrow.png',
     ],
   },
 },

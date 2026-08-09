@@ -1040,6 +1040,13 @@ test('Launch Full config review labels requested and effective state', async ({ 
   });
   await expect(page.locator('#spawn-full-config-state')).toContainText('runtime-effective');
   await expect(page.locator('#preset-params-table .summary-state').last()).toContainText('requested');
+  await page.setViewportSize({ width: 430, height: 900 });
+  await expect(page.locator('#spawn-full-config-drawer')).toBeVisible();
+  const narrowLayout = await page.locator('#wizard-step-2').evaluate((step) => ({
+    scrollWidth: step.scrollWidth,
+    clientWidth: step.clientWidth,
+  }));
+  expect(narrowLayout.scrollWidth).toBeLessThanOrEqual(narrowLayout.clientWidth + 1);
 });
 
 test('review step exposes structured output and full sampling defaults', async ({ page }) => {

@@ -36,4 +36,11 @@ export default async function (ctx) {
     runtimeTag: 'rapidmlx-local',
     expandSelector: '#wizard-step-2',
   });
+  await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
+  await sleep(250);
+  await captureShot(page, 'spawn-wizard-launch-full-config-narrow.png', {
+    fullPage: true,
+    runtimeTag: 'rapidmlx-local',
+    expandSelector: '#wizard-step-2',
+  });
 }
