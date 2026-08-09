@@ -757,11 +757,15 @@ async function _fetchRapidMlxModelProfile(modelId) {
   if (!modelId || modelId.trim().length < 2) {
     wizardState.model.rapidMlxProfile = null;
     wizardState.model.rapidMlxUnifiedProfile = null;
+    wizardState.arch.metadataStatus = 'unknown';
+    wizardState.arch.metadataReason = 'Rapid-MLX model identity is missing';
     return;
   }
   if (wizardState.engine.selected !== 'rapid_mlx') {
     wizardState.model.rapidMlxProfile = null;
     wizardState.model.rapidMlxUnifiedProfile = null;
+    wizardState.arch.metadataStatus = 'unknown';
+    wizardState.arch.metadataReason = 'Rapid-MLX is not selected';
     return;
   }
   try {
@@ -791,10 +795,18 @@ async function _fetchRapidMlxModelProfile(modelId) {
       wizardState.model.rapidMlxUnifiedProfile = null;
     }
 
+    const hasEvidence = !!wizardState.model.rapidMlxProfile || !!wizardState.model.rapidMlxUnifiedProfile;
+    wizardState.arch.metadataStatus = hasEvidence ? 'resolved' : 'degraded';
+    wizardState.arch.metadataReason = hasEvidence
+      ? 'Rapid-MLX model profile'
+      : 'Rapid-MLX profile unavailable; safe defaults retained';
+
     _renderRapidMlxProfileHints();
   } catch {
     wizardState.model.rapidMlxProfile = null;
     wizardState.model.rapidMlxUnifiedProfile = null;
+    wizardState.arch.metadataStatus = 'degraded';
+    wizardState.arch.metadataReason = 'Rapid-MLX profile request failed; safe defaults retained';
     _renderRapidMlxProfileHints();
   }
 }

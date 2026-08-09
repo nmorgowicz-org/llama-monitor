@@ -318,6 +318,7 @@ export const wizardState = {
     hfTokenSet: false,
     rapidMlxSource: null,
     rapidMlxProfile: null,          // live profile from rapid-mlx info <model>
+    rapidMlxUnifiedProfile: null,   // qualified profile with effective recommendations
     rapidMlxMllm: true,              // --mllm toggle (vision enabled by default when available)
     rapidMlxEmbeddingModel: null,    // --embedding-model repo ID/alias
     delivery: 'local_file', // 'local_file' | 'imported_local' | 'stream_hf' | 'downloaded_hf'

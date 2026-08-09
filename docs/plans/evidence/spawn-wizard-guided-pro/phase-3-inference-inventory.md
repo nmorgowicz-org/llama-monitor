@@ -16,6 +16,7 @@ the entries below are not treated as completion evidence.
 | `src/web/api/benchmark.rs` | Uses `from_name_and_params` when architecture metadata absent | Heuristic fallback | Mark degraded and constrain fallback to estimator-only, never capability/default claims |
 | `src/web/api/vram.rs` | Uses name/parameter heuristic when no GGUF metadata exists | Estimator fallback | Keep only as explicitly degraded estimate with provenance; never feed MTP/vision/runtime claims |
 | `src/web/api/models.rs` | Builds architecture from GGUF architecture plus name/params | Mixed | Ensure real GGUF metadata wins and name fallback cannot populate capability claims |
+| `static/js/features/spawn-wizard-rapid-mlx.js` | Rapid profile/unified-profile responses drive parser, vision, and speculative recommendations | Repaired | Profile success/failure now updates shared metadata status/reason with safe degraded copy |
 
 Next repair packet must add source-backed tests for local GGUF, streamed-HF GGUF, and MLX config
 metadata, then remove each unsafe recommendation/capability fallback from the closure set.
