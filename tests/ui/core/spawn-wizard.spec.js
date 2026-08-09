@@ -8,6 +8,7 @@
 // These tests assume the app is running and the spawn wizard is accessible.
 
 import { test, expect } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
 
 test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
     test('@in-memory-test engine classifier leaves bare HF repos ambiguous and recognizes GGUF inventory', async ({ page }) => {
@@ -1047,6 +1048,39 @@ test('Launch Full config review labels requested and effective state', async ({ 
     clientWidth: step.clientWidth,
   }));
   expect(narrowLayout.scrollWidth).toBeLessThanOrEqual(narrowLayout.clientWidth + 1);
+});
+
+test('Phase 11 axe and keyboard checks cover Guided, Pro, and Launch', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForLoadState('networkidle');
+  await page.evaluate(async () => {
+    const { openSpawnWizard, wizardState, selectWizardEngine, showStep } = await import('/js/features/spawn-wizard.js');
+    openSpawnWizard();
+    wizardState.model.source = 'local';
+    wizardState.model.path = '/tmp/phase11-a11y-model.gguf';
+    wizardState.model.paramB = 8;
+    wizardState.model.modelBytes = 4 * 1024 * 1024 * 1024;
+    selectWizardEngine('llama_cpp', true);
+    showStep(1);
+  });
+  const serious = (result) => result.violations.filter(({ impact }) => impact === 'serious' || impact === 'critical');
+  expect(serious(await new AxeBuilder({ page }).include('#spawn-wizard-overlay').analyze())).toEqual([]);
+
+  await page.locator('#view-mode-select').focus();
+  await expect(page.locator('#view-mode-select')).toBeFocused();
+  await page.selectOption('#view-mode-select', 'pro');
+  await expect(page.locator('#pro-layout')).toBeVisible();
+  expect(serious(await new AxeBuilder({ page }).include('#spawn-wizard-overlay').analyze())).toEqual([]);
+
+  await page.evaluate(async () => {
+    const { wizardState, selectWizardEngine, showStep } = await import('/js/features/spawn-wizard.js');
+    wizardState.model.path = '/tmp/phase11-a11y-rapid';
+    selectWizardEngine('rapid_mlx', true);
+    showStep(2);
+  });
+  await page.locator('.spawn-full-config-summary').press('Enter');
+  await expect(page.locator('#spawn-full-config-drawer')).toBeVisible();
+  expect(serious(await new AxeBuilder({ page }).include('#spawn-wizard-overlay').analyze())).toEqual([]);
 });
 
 test('review step exposes structured output and full sampling defaults', async ({ page }) => {

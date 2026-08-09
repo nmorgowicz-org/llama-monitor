@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Created | 2026-08-08 |
-| Status | Phase 10 launch/review convergence complete; awaiting human acceptance stop |
+| Status | Phase 11 responsive/accessibility hardening complete; Phase 12 documentation closure remains |
 | Scope | Complete the three-step Spawn Wizard for llama.cpp/GGUF and Rapid-MLX with Guided and Pro views, trustworthy capture evidence, introspection-backed recommendations, and documentation closure |
 | Primary design source | [`../archive/rapid-mlx/20260806-spawn_wizard_uiux_redesign.md`](../archive/rapid-mlx/20260806-spawn_wizard_uiux_redesign.md) |
 | Phase-router context | [`20260718-final_rapidmlx_followups_execution.md`](20260718-final_rapidmlx_followups_execution.md), Phase 10 |
@@ -1411,3 +1411,7 @@ Launch/review convergence is complete for the current wizard surfaces. Step 3 no
 ### Phase 11 responsive milestone (2026-08-09)
 
 The new Full config surface has responsive hardening: state labels stack cleanly below 620px, light-theme overrides remain readable, and fresh llama.cpp/Rapid-MLX narrow captures show the review content without horizontal clipping. The focused Playwright contract now checks narrow `scrollWidth` against the viewport; both engine launch receipts include desktop, detail, and 430px narrow evidence. Broader axe/accessibility and cross-surface hardening remains the next planned Phase 11 gate.
+
+### Phase 11 completion update (2026-08-09)
+
+Phase 11 accessibility hardening is complete for the current wizard surfaces. Added the test-only `@axe-core/playwright` gate for Guided, Pro, and Launch states; serious/critical violations are now zero. Fixed the discovered form labeling defects (`hw-ctx-custom`, `hw-vision-select`) and made the scrollable launch preview keyboard-focusable with an accessible region label. The focused gate also verifies keyboard focus and narrow no-clipping behavior against the release build. Phase 12 documentation/screenshot closure remains.

@@ -4428,8 +4428,8 @@
                                  <button type="button" class="hw-decision-tile hw-ctx-tile-model-max" data-ctx="262144" title="262k — model training limit">262k <span class="hw-tile-tag">Max</span></button>
                              </div>
                              <div class="hw-decision-custom-row">
-                                 <span class="hw-decision-custom-label">or type ▸</span>
-                                 <input type="number" id="hw-ctx-custom" min="512" step="512" value="131072" title="Custom context size">
+                                 <label for="hw-ctx-custom" class="hw-decision-custom-label">Custom context size</label>
+                                 <input type="number" id="hw-ctx-custom" min="512" step="512" value="131072">
                                  <span class="hw-decision-custom-hint" id="hw-ctx-custom-hint">KV cost at this size: —</span>
                              </div>
                          </div>
@@ -4464,7 +4464,8 @@
                          </div>
                          <div class="hw-decision-card-desc">Multimodal projector (mmproj). Required for vision models.</div>
                          <div class="hw-decision-card-content">
-                             <select id="hw-vision-select" title="Vision projector file">
+                         <label for="hw-vision-select" class="hw-decision-custom-label">Vision projector file</label>
+                         <select id="hw-vision-select">
                                  <option value="" selected>( none — text only )</option>
                              </select>
                              <button type="button" id="hw-vision-browse-btn" class="hw-decision-browse-btn">Browse…</button>
@@ -5131,7 +5132,7 @@
                         </div>
                     </div>
                     <!-- Config preview card — populated by JS when entering this step -->
-                    <div class="spawn-config-card" id="spawn-config-card" style="display:none;"></div>
+<div class="spawn-config-card" id="spawn-config-card" role="region" aria-label="Launch configuration preview" tabindex="0" style="display:none;"></div>
                     <button type="button" class="btn-wizard-primary" id="spawn-server-btn">
                         Start server
                     </button>
