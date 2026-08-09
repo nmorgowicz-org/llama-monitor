@@ -30,13 +30,19 @@ export default async function(ctx) {
         mod.wizardState.model.modelBytes = 4_920_000_000;
         mod.selectWizardEngine('llama_cpp', true);
         mod.showStep(1);
+        const stateRegistry = mod.settingStateRegistry;
+        const llamaSettings = registry.controlsForView('llama_cpp', 'guided').filter(control => control.view !== 'card');
+        const entries = stateRegistry.snapshot(llamaSettings);
         return {
             selected: mod.wizardState.engine.selected,
             llamaDescriptors: registry.validatePresentationDescriptors('llama_cpp'),
             rapidDescriptors: registry.validatePresentationDescriptors('rapid_mlx'),
+            stateEntries: entries.length,
+            dirtyEntries: entries.filter(entry => entry.dirty).length,
+            stateShape: entries.every(entry => ['resolvedDefault', 'value', 'dirty', 'provenance', 'effective', 'pending'].every(key => key in entry)),
         };
     });
-    if (state.selected !== 'llama_cpp' || !state.llamaDescriptors.ok || !state.rapidDescriptors.ok) {
+    if (state.selected !== 'llama_cpp' || !state.llamaDescriptors.ok || !state.rapidDescriptors.ok || state.stateEntries < 1 || !state.stateShape) {
         throw new Error(`Invalid presentation registry: ${JSON.stringify(state)}`);
     }
     await sleep(500);
@@ -85,6 +91,25 @@ export default async function(ctx) {
         if (input) { input.value = '1024'; input.dispatchEvent(new Event('input', { bubbles: true })); }
     });
     await sleep(200);
+    const dirtyState = await page.evaluate(async () => {
+        const mod = await import('/js/features/spawn-wizard.js');
+        const groups = await import('/js/features/spawn-wizard-groups.js');
+        const descriptor = groups.controlsForView('llama_cpp', 'guided').find(control => control.id === 'spawn-batch-size');
+        const registry = mod.settingStateRegistry;
+        const entry = registry.entries.get(descriptor.semanticId);
+        const editedValue = entry?.value;
+        registry.setResolvedDefault(descriptor.semanticId, '2048');
+        const preservedDirtyEdit = entry?.value === editedValue && entry?.dirty && entry?.provenance === 'user';
+        registry.reset(descriptor.semanticId);
+        const resetValue = document.getElementById('spawn-batch-size')?.value;
+        const resetToResolved = resetValue === '2048' && !entry?.dirty && entry?.provenance === 'resolved';
+        const input = document.getElementById('spawn-batch-size');
+        if (input) { input.value = editedValue; input.dispatchEvent(new Event('input', { bubbles: true })); }
+        return { preservedDirtyEdit, resetToResolved };
+    });
+    if (!dirtyState.preservedDirtyEdit || !dirtyState.resetToResolved) {
+        throw new Error(`Setting registry lost dirty/resolved state: ${JSON.stringify(dirtyState)}`);
+    }
     snapshot = await inspectDrawer('llama_cpp');
     if (snapshot.changed < 1) throw new Error(`Changed count did not update: ${JSON.stringify(snapshot)}`);
     const llamaPayloadBeforeSwitch = await page.evaluate(async () => {

@@ -29,6 +29,10 @@ Updated as milestones pass; this ledger records verified repository state, not i
 
 ## 1. Why this plan exists
 
+### Phase 4 milestone update (2026-08-09)
+
+The shared Guided drawer now uses a canonical `SettingStateRegistry` for resolved defaults, dirty/provenance, effective/pending state, reset, snapshots, and async resolved-default updates. G4 asserts the state shape and reset semantics in addition to descriptor validity, backend relocation, duplicate-ID protection, payload/preset parity, and honest Pro unavailability. Fresh release-built G4 evidence is recorded in `docs/screenshots/artifacts/wizard-llamacpp/spawn-wizard-guided-drawer--receipt.json` with five original-resolution screenshots. Validation passed: release build, clippy, 2272 Rust tests (26 ignored), JS validation/lint, descriptor validation, diff check, and the strict G4 capture. Remaining Phase 4 work is the shared cross-view update pipeline and retirement of legacy Quick/Balanced/Advanced disclosure.
+
 The 2026-08-06 redesign describes the right destination: one three-step wizard with a default
 Guided view and a power-user Pro view over the same controls and state. The current repository does
 not implement that destination, despite several documents and commit-status notes saying that it

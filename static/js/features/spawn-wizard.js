@@ -35,6 +35,7 @@ export { openCardPanel };
 import { configureMlxWizardIA, applyMlxTierVisibility } from './spawn-wizard-mlx-ia.js';
 import { configureLlamaWizardIA, applyLlamaTierVisibility } from './spawn-wizard-llama-ia.js';
 import { controlsForLoader, controlsForView, applyEffectiveLocks } from './spawn-wizard-groups.js';
+import { createSettingStateRegistry } from './spawn-wizard-setting-state.js';
 import { initGuidedCards } from './spawn-wizard-guided.js';
 import {
   _platformInfo,
@@ -133,6 +134,7 @@ function _renderAllSettingsDrawer() {
   const loader = wizardState.engine.selected || 'llama_cpp';
   const settings = controlsForView(loader, 'guided').filter(control => control.view !== 'card');
   countEl.textContent = String(settings.length);
+  settingStateRegistry.mount(group, settings);
 
   // The IA engines own the canonical rows; the shared drawer only relocates
   // their wrapper, never clones individual inputs or creates proxy controls.
@@ -149,21 +151,7 @@ function _renderAllSettingsDrawer() {
   drawer.style.display = source ? '' : 'none';
 
   const refreshChangedCount = () => {
-    const changed = settings.reduce((n, control) => {
-      const field = document.getElementById(control.id);
-      if (!field) return n;
-      const baseline = field.dataset.wizDefault ?? field.dataset.allSettingsDefault;
-      if (field.type === 'checkbox') {
-        const resolvedDefault = baseline ?? (field.dataset.allSettingsDefault = field.checked ? '1' : '0');
-        return n + ((field.checked ? '1' : '0') !== resolvedDefault ? 1 : 0);
-      }
-      if (field.tagName === 'SELECT') {
-        const resolvedDefault = baseline ?? (field.dataset.allSettingsDefault = field.value);
-        return n + (field.value !== resolvedDefault ? 1 : 0);
-      }
-      const resolvedDefault = baseline ?? (field.dataset.allSettingsDefault = field.value);
-      return n + (field.value !== resolvedDefault ? 1 : 0);
-    }, 0);
+    const changed = settingStateRegistry.changedCount(settings);
     changedEl.textContent = `${changed} changed`;
     changedEl.dataset.count = String(changed);
   };
@@ -178,8 +166,14 @@ function _renderAllSettingsDrawer() {
       body.style.display = isOpen ? 'none' : 'block';
       btn.setAttribute('aria-expanded', String(!isOpen));
     });
-    group.addEventListener('input', () => group._refreshAllSettingsChanged?.());
-    group.addEventListener('change', () => group._refreshAllSettingsChanged?.());
+    group.addEventListener('input', event => {
+      settingStateRegistry.syncControl(event.target);
+      group._refreshAllSettingsChanged?.();
+    });
+    group.addEventListener('change', event => {
+      settingStateRegistry.syncControl(event.target);
+      group._refreshAllSettingsChanged?.();
+    });
   }
 
   // Initially hide
@@ -187,6 +181,8 @@ function _renderAllSettingsDrawer() {
 }
 
 export { _renderAllSettingsDrawer };
+
+export const settingStateRegistry = createSettingStateRegistry();
 
 // ── View mode toggle ────────────────────────────────────────────────────────
 

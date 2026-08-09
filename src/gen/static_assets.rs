@@ -142,6 +142,8 @@ pub const FEATURES_SPAWN_WIZARD_RAPID_MLX_JS: &str =
     include_str!("../../static/js/features/spawn-wizard-rapid-mlx.js");
 pub const FEATURES_SPAWN_WIZARD_REVIEW_STEP_JS: &str =
     include_str!("../../static/js/features/spawn-wizard-review-step.js");
+pub const FEATURES_SPAWN_WIZARD_SETTING_STATE_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-setting-state.js");
 pub const FEATURES_SPAWN_WIZARD_SPAWN_JS: &str =
     include_str!("../../static/js/features/spawn-wizard-spawn.js");
 pub const FEATURES_SPAWN_WIZARD_STICKY_VRAM_JS: &str =
