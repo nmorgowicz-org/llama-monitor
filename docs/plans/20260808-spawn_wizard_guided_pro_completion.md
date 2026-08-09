@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Created | 2026-08-08 |
-| Status | Phase 8 llama.cpp Pro panes complete; Phase 9 Rapid-MLX Pro parity remains |
+| Status | Phase 9 Rapid-MLX Pro parity complete; awaiting human acceptance stop |
 | Scope | Complete the three-step Spawn Wizard for llama.cpp/GGUF and Rapid-MLX with Guided and Pro views, trustworthy capture evidence, introspection-backed recommendations, and documentation closure |
 | Primary design source | [`../archive/rapid-mlx/20260806-spawn_wizard_uiux_redesign.md`](../archive/rapid-mlx/20260806-spawn_wizard_uiux_redesign.md) |
 | Phase-router context | [`20260718-final_rapidmlx_followups_execution.md`](20260718-final_rapidmlx_followups_execution.md), Phase 10 |
@@ -1399,3 +1399,7 @@ screenshots that matches the documentation.
 ### Phase 8 milestone update (2026-08-09)
 
 Phase 8 llama.cpp Pro panes are complete. The Pro surface now relocates sampling/reasoning, structured-output, network, extra-argument, MTP-depth, decision-card, and compatibility controls into one canonical seven-category surface. Decision cards carry category/search/dirty metadata, and reset dispatches canonical controls. Fresh release-built G8 evidence is recorded in `docs/screenshots/artifacts/wizard-llamacpp/spawn-wizard-pro-baseline--receipt.json` with model, memory, performance, generation, tools, network, advanced, agentic q4 warning, roleplay q4, modified/reset, search, and narrow captures. Focused Pro Playwright passes; clippy, 2272 Rust tests, JS validation/lint, diff check, and release build pass.
+
+### Phase 9 milestone update (2026-08-09)
+
+Rapid-MLX Pro parity is complete in the current tree. The seven-category Pro surface now exposes backend-native Model, Memory & context, Performance, Generation & reasoning, Tools & conversation formatting, Network & observability, and Advanced panes; shared access controls remain available to both loaders, while compatibility copy explicitly identifies MLX-native artifacts and avoids llama.cpp-only quant/mmproj claims. Effective-state and effective-KV evidence, retained-cache editing, parser/profile evidence, companion trust/unavailable gating, cache search, modified-only filtering, and narrow layout are covered by the fresh receipt `docs/screenshots/artifacts/wizard-rapidmlx/spawn-wizard-rapid-pro-baseline--receipt.json` and its 13 original-resolution captures. Focused release-built Rapid-MLX Pro Playwright verification passes; JS validation/lint and diff checks pass. This phase is ready for the human acceptance stop.

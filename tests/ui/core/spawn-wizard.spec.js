@@ -979,6 +979,40 @@ test('Pro shell switches the canonical settings without duplicating controls', a
   await expect(page.locator('#hw-decision-ctx')).toBeVisible();
 });
 
+test('Rapid-MLX Pro keeps backend-native controls and shared access settings', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForLoadState('networkidle');
+  await page.evaluate(async () => {
+    const { openSpawnWizard, wizardState, selectWizardEngine, showStep } = await import('/js/features/spawn-wizard.js');
+    openSpawnWizard();
+    wizardState.model.source = 'local';
+    wizardState.model.path = '/tmp/rapid-pro-model';
+    wizardState.model.paramB = 7;
+    wizardState.model.modelBytes = 4 * 1024 * 1024 * 1024;
+    selectWizardEngine('rapid_mlx', true);
+    showStep(1);
+  });
+  await expect(page.locator('#wizard-step-1')).toHaveClass(/active/);
+  await page.selectOption('#view-mode-select', 'pro');
+  await expect(page.locator('#view-mode-select')).toHaveValue('pro');
+  await expect(page.locator('#pro-layout')).toBeVisible();
+  await expect(page.locator('#pro-controls-host #spawn-rapid-advanced-fields')).toBeAttached();
+  await expect(page.locator('#pro-controls-host #spawn-advanced-fields')).toBeHidden();
+  for (const id of [
+    'spawn-kv-cache-dtype', 'spawn-retained-cache-mib', 'spawn-rapid-max-num-seqs',
+    'spawn-rapid-tool-call-parser', 'spawn-rapid-reasoning-parser',
+    'spawn-rapid-auto-tool-choice', 'spawn-port', 'spawn-bind-host',
+  ]) {
+    await expect(page.locator(`#pro-controls-host #${id}`)).toHaveCount(1);
+  }
+  await expect(page.locator('#pro-controls-host .pro-backend-note')).toBeVisible();
+  await page.locator('#pro-filter-input').fill('cache');
+  expect(await page.locator('#pro-controls-host .pro-search-hidden').count()).toBeGreaterThan(0);
+  await page.selectOption('#view-mode-select', 'guided');
+  await expect(page.locator('#pro-layout')).toBeHidden();
+  await expect(page.locator('#all-settings-group #spawn-rapid-advanced-fields')).toBeAttached();
+});
+
 test('review step exposes structured output and full sampling defaults', async ({ page }) => {
         await page.goto('/');
         await page.waitForLoadState('networkidle');

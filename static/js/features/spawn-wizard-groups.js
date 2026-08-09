@@ -65,7 +65,7 @@ export const CONTROLS = [
   ].map(id => ({ id, loaders: ['llama_cpp'], critical: false, view: 'both' })),
   ...[
     'spawn-port', 'spawn-bind-host', 'spawn-alias', 'spawn-api-key',
-  ].map(id => ({ id, loaders: ['llama_cpp'], critical: false, view: 'both' })),
+  ].map(id => ({ id, loaders: ['llama_cpp', 'rapid_mlx'], critical: false, view: 'both' })),
   { id: 'spawn-extra-args', loaders: ['llama_cpp'], critical: false, view: 'both' },
 
   // ── llama.cpp: Advanced (#spawn-advanced-fields) ──────────────────────

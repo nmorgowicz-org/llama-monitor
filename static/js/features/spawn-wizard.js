@@ -208,6 +208,7 @@ const PRO_RELOCATED_SELECTORS = [
   '#wizard-step-1 > .wizard-main > .sampling-params-section',
 ];
 const PRO_RELOCATED_FIELD_IDS = ['hw-quant-select', 'spawn-kv-unified', 'hw-mtp-depth'];
+const PRO_SHARED_ACCESS_FIELD_IDS = ['spawn-port', 'spawn-bind-host', 'spawn-alias', 'spawn-api-key'];
 const PRO_DECISION_SURFACES = [
   { selector: '#hw-decision-ctx', category: 'Memory & context', controls: ['spawn-context-size'] },
   { selector: '#hw-decision-kv', category: 'Memory & context', controls: ['spawn-cache-type-k', 'spawn-cache-type-v'] },
@@ -218,22 +219,34 @@ const proOriginalPositions = new Map();
 
 function _rememberProPosition(node) {
   if (!node || proOriginalPositions.has(node)) return;
-  proOriginalPositions.set(node, { parent: node.parentElement, next: node.nextSibling });
+  proOriginalPositions.set(node, {
+    parent: node.parentElement,
+    next: node.nextSibling,
+    display: node.style.display,
+  });
 }
 
-function _moveProSurfaces(host) {
-  document.querySelectorAll(PRO_RELOCATED_SELECTORS.join(',')).forEach(node => {
-    _rememberProPosition(node);
-    host.appendChild(node);
-  });
-  PRO_RELOCATED_FIELD_IDS.forEach(id => {
+function _moveProSurfaces(host, loader) {
+  if (loader === 'llama_cpp') {
+    document.querySelectorAll(PRO_RELOCATED_SELECTORS.join(',')).forEach(node => {
+      _rememberProPosition(node);
+      host.appendChild(node);
+      node.style.display = '';
+    });
+  }
+  const fieldIds = loader === 'llama_cpp'
+    ? [...PRO_RELOCATED_FIELD_IDS, ...PRO_SHARED_ACCESS_FIELD_IDS]
+    : PRO_SHARED_ACCESS_FIELD_IDS;
+  fieldIds.forEach(id => {
     const control = document.getElementById(id);
     const field = control?.closest('.hardware-field, .hw-field, .sampling-field, .kv-inline-row, .hardware-row');
     if (field && !host.contains(field)) {
       _rememberProPosition(field);
       host.appendChild(field);
+      field.style.display = '';
     }
   });
+  if (loader !== 'llama_cpp') return;
   PRO_DECISION_SURFACES.forEach(surface => {
     const card = document.querySelector(surface.selector);
     if (!card) return;
@@ -243,11 +256,36 @@ function _moveProSurfaces(host) {
   });
 }
 
+function _renderRapidProNotes(host, loader) {
+  host.querySelectorAll('.pro-backend-note').forEach(note => note.remove());
+  if (loader !== 'rapid_mlx') return;
+  const notes = [
+    {
+      category: 'Model & compatibility',
+      title: 'Rapid-MLX model compatibility',
+      body: 'Rapid-MLX uses the resolved MLX artifact and introspected model profile. llama.cpp quantization and mmproj controls are not applicable here.',
+    },
+  ];
+  notes.forEach(note => {
+    const card = document.createElement('section');
+    card.className = 'pro-backend-note';
+    card.dataset.proCategory = note.category;
+    card.dataset.proSearchText = `${note.category} ${note.title}`;
+    const title = document.createElement('h3');
+    title.textContent = note.title;
+    const body = document.createElement('p');
+    body.textContent = note.body;
+    card.append(title, body);
+    host.prepend(card);
+  });
+}
+
 function _restoreProSurfaces() {
   for (const [node, position] of proOriginalPositions) {
     if (!position.parent) continue;
     if (position.next?.parentNode === position.parent) position.parent.insertBefore(node, position.next);
     else position.parent.appendChild(node);
+    node.style.display = position.display;
   }
 }
 
@@ -293,6 +331,7 @@ function _initProShell() {
       if (target && host) {
         const behavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
         host.scrollTo({ top: Math.max(0, target.offsetTop - 8), behavior });
+        target.scrollIntoView({ block: 'start', behavior });
       }
     });
     if (index === 0) button.classList.add('active');
@@ -342,12 +381,14 @@ function renderProLayout(mode = wizardState.viewMode) {
   if (!layout || !host || !drawerGroup) return;
   _initProShell();
   const isPro = mode === 'pro';
+  const loader = wizardState.engine.selected || 'llama_cpp';
   const guidedSurface = document.querySelector('.hw-guided-old-layout');
   const stickyBar = document.getElementById('hw-sticky-bar');
   // The Pro surface is a view over the same controls, not a section appended
   // below Guided's cards. Move the shell out of the legacy wrapper once and
   // keep the identity strip as the shared context header while Pro is active.
   if (isPro) {
+    _restoreProSurfaces();
     if (guidedSurface?.contains(layout)) {
       (stickyBar || guidedSurface).after(layout);
     }
@@ -365,23 +406,31 @@ function renderProLayout(mode = wizardState.viewMode) {
   PRO_WRAPPER_IDS.forEach(id => {
     const wrapper = document.getElementById(id);
     if (!wrapper) return;
+    const activeWrapper = loader === 'rapid_mlx' ? 'spawn-rapid-advanced-fields' : 'spawn-advanced-fields';
+    const activeDisplay = loader === 'rapid_mlx' ? 'block' : '';
     if (isPro) {
-      wrapper.style.display = '';
-      host.appendChild(wrapper);
+      wrapper.style.display = id === activeWrapper ? activeDisplay : 'none';
+      if (id === activeWrapper) host.appendChild(wrapper);
     } else {
-      wrapper.style.display = '';
-      drawerGroup.appendChild(wrapper);
+      wrapper.style.display = id === activeWrapper ? activeDisplay : 'none';
+      if (id === activeWrapper) drawerGroup.appendChild(wrapper);
     }
   });
 
   if (isPro) {
-    _moveProSurfaces(host);
+    _moveProSurfaces(host, loader);
+    if (loader === 'rapid_mlx') {
+      document.querySelectorAll('#wizard-step-1 > .wizard-main > .sampling-params-section').forEach(section => {
+        _rememberProPosition(section);
+        section.style.display = 'none';
+      });
+    }
+    _renderRapidProNotes(host, loader);
     host.querySelectorAll('.hw-decision-card').forEach(card => { card.style.display = ''; });
     // Pro is the explicit power-user view: every canonical category is
     // expanded so search/scroll-spy has a real target and no setting is
     // hidden behind Guided's profile disclosure state.
     host.querySelectorAll('details').forEach(details => { details.open = true; });
-    const loader = wizardState.engine.selected || 'llama_cpp';
     controlsForView(loader, 'pro').forEach(descriptor => {
       const control = document.getElementById(descriptor.id);
       const field = _proFieldForControl(control);

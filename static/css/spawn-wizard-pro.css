@@ -108,6 +108,27 @@
     display: none !important;
 }
 
+.pro-backend-note {
+    margin: 0 0 14px;
+    padding: 14px;
+    border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+.pro-backend-note h3 {
+    margin: 0 0 6px;
+    color: var(--color-text, #e5e7eb);
+    font-size: 0.86rem;
+}
+
+.pro-backend-note p {
+    margin: 0;
+    color: var(--color-text-muted, #9ca3af);
+    font-size: 0.76rem;
+    line-height: 1.45;
+}
+
 @media (max-width: 820px) {
     .pro-layout {
         flex-direction: column;

@@ -5770,7 +5770,7 @@
    a design choice. Only the llama.cpp-specific wizard-main children are hidden;
    rapid-hardware-panel now lives inside .wizard-main (Phase 0.2 re-parent) so it
    must be excluded from this rule instead of the whole column being hidden. */
-.engine-rapid-mlx #wizard-step-1 > .wizard-main > :not(.rapid-hardware-panel):not(.all-settings-drawer) { display:none; }
+.engine-rapid-mlx #wizard-step-1 > .wizard-main > :not(.rapid-hardware-panel):not(.all-settings-drawer):not(.pro-layout) { display:none; }
 .engine-rapid-mlx .rapid-hardware-panel { width:auto; margin:0; }
 
 [data-theme="light"] .wizard-engine-section { background:linear-gradient(145deg,#f5f8ff,#fff); }

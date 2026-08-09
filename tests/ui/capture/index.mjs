@@ -31,6 +31,7 @@ import scenarioDiscussions from './scenarios/presets/discussions.mjs';
 import scenarioSpawnWizard from './scenarios/wizard-llamacpp/spawn-wizard.mjs';
 import scenarioSpawnWizardProBaseline from './scenarios/wizard-llamacpp/spawn-wizard-pro-baseline.mjs';
 import scenarioSpawnWizardRapidGuidedBaseline from './scenarios/wizard-rapidmlx/spawn-wizard-rapid-guided-baseline.mjs';
+import scenarioSpawnWizardRapidProBaseline from './scenarios/wizard-rapidmlx/spawn-wizard-rapid-pro-baseline.mjs';
 import scenarioSpawnWizardGif from './scenarios/wizard-llamacpp/spawn-wizard-gif.mjs';
 import scenarioSpawnWizardHfDownload from './scenarios/wizard-llamacpp/spawn-wizard-hf-download.mjs';
 import scenarioSpawnWizardTierMatrix from './scenarios/wizard-llamacpp/spawn-wizard-tier-matrix.mjs';
@@ -235,7 +236,7 @@ export const SCENARIOS = {
         ],
         },
     },
-    'spawn-wizard-rapid-guided-baseline': {
+  'spawn-wizard-rapid-guided-baseline': {
         run: scenarioSpawnWizardRapidGuidedBaseline, setup: () => { seedNestedMlxFixture(); }, category: 'wizard-rapidmlx', runtime: 'rapidmlx-local',
         contract: {
             intent: 'Document the current Rapid-MLX wizard baseline in its own Rapid artifact group.',
@@ -248,8 +249,32 @@ export const SCENARIOS = {
                 'rapidmlx-local--spawn-wizard-rapid-mlx-escape-hatch.png', 'rapidmlx-local--spawn-wizard-rapid-mlx-fit.png',
                 'rapidmlx-local--spawn-wizard-rapid-mlx-review.png',
             ],
-        },
     },
+  },
+  'spawn-wizard-rapid-pro-baseline': {
+    run: scenarioSpawnWizardRapidProBaseline,
+    setup: () => { seedNestedMlxFixture(); },
+    category: 'wizard-rapidmlx',
+    runtime: 'rapidmlx-local',
+    contract: {
+      intent: 'Capture Rapid-MLX Pro parity, effective-state, access, filtering, companion-gating, and responsive evidence.',
+      expectedOutputs: [
+        'rapidmlx-local--spawn-wizard-rapid-pro-shell.png',
+        'rapidmlx-local--spawn-wizard-rapid-pro-rail-model.png',
+        'rapidmlx-local--spawn-wizard-rapid-pro-rail-memory.png',
+        'rapidmlx-local--spawn-wizard-rapid-pro-rail-performance.png',
+        'rapidmlx-local--spawn-wizard-rapid-pro-rail-generation.png',
+        'rapidmlx-local--spawn-wizard-rapid-pro-rail-tools.png',
+        'rapidmlx-local--spawn-wizard-rapid-pro-rail-network.png',
+        'rapidmlx-local--spawn-wizard-rapid-pro-rail-advanced.png',
+        'rapidmlx-local--spawn-wizard-rapid-pro-retained-cache-edit.png',
+        'rapidmlx-local--spawn-wizard-rapid-pro-search-cache.png',
+        'rapidmlx-local--spawn-wizard-rapid-pro-modified-only.png',
+        'rapidmlx-local--spawn-wizard-rapid-pro-companion-gated.png',
+        'rapidmlx-local--spawn-wizard-rapid-pro-narrow.png',
+      ],
+    },
+  },
     'spawn-wizard-gif': {
         run: scenarioSpawnWizardGif, category: 'wizard-llamacpp', runtime: 'llamacpp-local',
         contract: { intent: 'Capture the llama.cpp wizard flow as a diagnostic GIF.', expectedOutputs: ['llamacpp-local--spawn-wizard-flow.gif'] },
