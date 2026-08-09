@@ -5,8 +5,8 @@
 | Created | 2026-08-08 |
 | Status | Complete; Phase 13 final validation and Phase 3 active-authority cleanup complete; ready for human acceptance |
 | Scope | Complete the three-step Spawn Wizard for llama.cpp/GGUF and Rapid-MLX with Guided and Pro views, trustworthy capture evidence, introspection-backed recommendations, and documentation closure |
-| Primary design source | [`../archive/rapid-mlx/20260806-spawn_wizard_uiux_redesign.md`](../archive/rapid-mlx/20260806-spawn_wizard_uiux_redesign.md) |
-| Phase-router context | [`20260718-final_rapidmlx_followups_execution.md`](20260718-final_rapidmlx_followups_execution.md), Phase 10 |
+| Primary design source | [`20260806-spawn_wizard_uiux_redesign.md`](20260806-spawn_wizard_uiux_redesign.md) |
+| Phase-router context | [`20260718-final_rapidmlx_followups_execution.md`](../../plans/20260718-final_rapidmlx_followups_execution.md), Phase 10 |
 | Intended executor | Coordinator -> bounded Builder -> fresh Verifier -> focused remediation |
 
 ### Execution progress ledger
@@ -1371,7 +1371,7 @@ Every static-JS phase also runs `rtk npm run validate-js`, `rtk npm run lint`, a
 Use this prompt for the Coordinator, replacing `<N>` with the next open phase:
 
 > Act as Coordinator for Phase `<N>` of
-> `docs/plans/20260808-spawn_wizard_guided_pro_completion.md`. Read the plan's authority,
+> `docs/archive/rapid-mlx/20260808-spawn_wizard_guided_pro_completion.md`. Read the plan's authority,
 > frozen decisions, execution protocol, and exact Phase `<N>` section. Do not trust prior completion
 > claims, stale screenshots, memory, CSS scaffolding, or commit hashes as proof. Inspect the current
 > worktree and preserve unrelated changes. Brief one bounded Builder for only this phase, then a fresh
