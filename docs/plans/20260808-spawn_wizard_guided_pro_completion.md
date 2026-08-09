@@ -1418,4 +1418,4 @@ Phase 11 accessibility hardening is complete for the current wizard surfaces. Ad
 
 ### Phase 12 documentation milestone (2026-08-09)
 
-Updated the primary Spawn Wizard and Setup Wizard references plus the README launch-wizard summary to describe the current three-step Guided/Pro flow, backend-native Rapid-MLX/llama.cpp controls, shared canonical state, and Full config requested/effective labeling. Remaining Phase 12 work is the broader screenshot-reference and historical-status audit across the listed reference documents.
+Updated the primary Spawn Wizard and Setup Wizard references, inference-tuning disclosure, and the README launch-wizard summary to describe the current three-step Guided/Pro flow, backend-native Rapid-MLX/llama.cpp controls, shared canonical state, and Full config requested/effective labeling. Remaining Phase 12 work is the broader screenshot-reference and historical-status audit across the listed reference documents.

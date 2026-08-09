@@ -488,7 +488,11 @@ collapse that dominates agentic use.
 
 ---
 
-## Wizard tier disclosure (Quick / Balanced / Advanced)
+## Wizard control disclosure (Guided and Pro)
+
+The wizard now presents Guided recommendations and a searchable Pro view over one canonical
+state registry. Tier metadata controls Guided disclosure and default resolution; it never
+removes a control, and Pro modified-only/reset actions operate on the same state.
 
 Every hardware-step control in the Spawn Wizard is declared once, per loader, in
 `static/js/features/spawn-wizard-groups.js` as a `{ id, tier, quickValue? }` row. The tier
