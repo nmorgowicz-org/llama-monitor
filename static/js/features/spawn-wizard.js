@@ -34,7 +34,7 @@ import { openCardPanel, _closeCardPanel } from './spawn-wizard-model-card.js';
 export { openCardPanel };
 import { configureMlxWizardIA, applyMlxTierVisibility } from './spawn-wizard-mlx-ia.js';
 import { configureLlamaWizardIA, applyLlamaTierVisibility } from './spawn-wizard-llama-ia.js';
-import { controlsForLoader, applyEffectiveLocks } from './spawn-wizard-groups.js';
+import { controlsForLoader, controlsForView, applyEffectiveLocks } from './spawn-wizard-groups.js';
 import { initGuidedCards } from './spawn-wizard-guided.js';
 import {
   _platformInfo,
@@ -121,8 +121,6 @@ export { buildSpawnPayload, launchPortForPayload, supportsTunePanelForPayload } 
 // Wraps decision-critical controls in always-open cards; everything else
 // goes into a collapsible "All settings" drawer.
 
-const ALL_SETTINGS_COUNT = 23; // Total non-card controls (approx)
-
 function _renderAllSettingsDrawer() {
   const drawer = document.getElementById('all-settings-drawer');
   const btn = document.getElementById('all-settings-btn');
@@ -130,7 +128,9 @@ function _renderAllSettingsDrawer() {
   const body = document.getElementById('all-settings-body');
   if (!drawer || !btn || !countEl) return;
 
-  countEl.textContent = ALL_SETTINGS_COUNT;
+  const loader = wizardState.engine.selected || 'llama_cpp';
+  const settings = controlsForView(loader, 'guided').filter(control => control.view !== 'card');
+  countEl.textContent = String(settings.length);
 
   // Toggle
   btn.addEventListener('click', () => {
