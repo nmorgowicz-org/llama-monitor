@@ -84,6 +84,7 @@ export default async function(ctx) {
     await sleep(250);
     snapshot = await inspectDrawer('llama_cpp');
     if (!snapshot.bodyOpen || snapshot.count < 1) throw new Error(`Llama drawer did not open: ${JSON.stringify(snapshot)}`);
+    await page.evaluate(() => document.getElementById('all-settings-group')?.scrollIntoView({ behavior: 'instant', block: 'start' }));
     // INTENT: Llama Guided drawer is open after a canonical edit and exposes the changed count.
     await captureShot(page, 'spawn-wizard-guided-drawer-llama-open.png', { fullPage: true, runtimeTag: 'llamacpp-local', expandSelector: '.wizard-body' });
 

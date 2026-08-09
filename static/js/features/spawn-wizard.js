@@ -152,12 +152,17 @@ function _renderAllSettingsDrawer() {
     const changed = settings.reduce((n, control) => {
       const field = document.getElementById(control.id);
       if (!field) return n;
-      if (field.type === 'checkbox') return n + (field.checked !== field.defaultChecked ? 1 : 0);
-      if (field.tagName === 'SELECT') {
-        const baseline = field.dataset.wizDefault ?? Array.from(field.options).find(option => option.defaultSelected)?.value ?? field.options[0]?.value ?? '';
-        return n + (field.value !== baseline ? 1 : 0);
+      const baseline = field.dataset.wizDefault ?? field.dataset.allSettingsDefault;
+      if (field.type === 'checkbox') {
+        const resolvedDefault = baseline ?? (field.dataset.allSettingsDefault = field.checked ? '1' : '0');
+        return n + ((field.checked ? '1' : '0') !== resolvedDefault ? 1 : 0);
       }
-      return n + (field.value !== field.defaultValue ? 1 : 0);
+      if (field.tagName === 'SELECT') {
+        const resolvedDefault = baseline ?? (field.dataset.allSettingsDefault = field.value);
+        return n + (field.value !== resolvedDefault ? 1 : 0);
+      }
+      const resolvedDefault = baseline ?? (field.dataset.allSettingsDefault = field.value);
+      return n + (field.value !== resolvedDefault ? 1 : 0);
     }, 0);
     changedEl.textContent = `${changed} changed`;
     changedEl.dataset.count = String(changed);
