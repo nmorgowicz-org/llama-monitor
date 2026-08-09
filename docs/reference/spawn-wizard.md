@@ -8,7 +8,7 @@
 
 The Spawn Wizard is the guided flow for creating a model server. It provides:
 
-- Profile selection (Quick / Balanced / Advanced) and use-case selection (agentic / general / roleplay)
+- Guided disclosure with five workload intents (agentic / tool-research / general / roleplay / deterministic batch-eval)
 - Engine selection between llama.cpp and Rapid-MLX
 - Model source input (local GGUF, Hugging Face, or import)
 - Architecture-aware VRAM breakdown and context fit modes
@@ -144,14 +144,11 @@ Each new step folds in the old steps it absorbed:
 Opens with a profile + use-case selection screen (wizard-step-0), then engine selection and
 model source input on the same step:
 
-- **Profile cards**: Quick, Balanced, Advanced — influence the default hardware policy and,
-  as of the control-tier registry (see below), which hardware-step groups start expanded.
-- **Use-case cards**: agentic, general, roleplay — maps to a `workload_scenario` string sent to the backend VRAM estimator (see below).
+- **Guided setup**: the legacy Quick/Balanced/Advanced profile selector is retired. Guided keeps safe defaults visible and exposes every applicable setting through the canonical All settings drawer; the Pro selector is visibly unavailable until its implementation phase.
+Guided disclosure keeps safe defaults visible; every applicable control is reachable in the canonical All settings drawer.
+- **Workload cards** map to typed `workload_scenario` values sent to the backend VRAM estimator.
 
-The use-case selection drives the backend's memory policy:
-- `agentic` → `interactive_coding_agent` (coding agent workload, 80% priority)
-- `general` → `general_chat` (standard chat, moderate context)
-- `roleplay` → `roleplay_storytelling` (long-context narrative)
+The workload mapping is: `agentic` → `interactive_coding_agent`, `tool_research` → `tool_research_agent`, `general` → `general_chat`, `roleplay` → `roleplay_storytelling`, and `batch_eval` → `deterministic_batch_eval`.
 
 Engine selection, model source input, and model-specific options also live on this step. See
 [Engine selection](#engine-selection) below.
@@ -175,16 +172,15 @@ For Rapid-MLX: a dedicated `rapid-hardware-panel` is shown with:
 - **Reasoning mode**: Toggle ON for reasoning models (pins KV to int8).
 - **Web UI availability**: Auto, On, Off.
 
-### Control-tier registry (Quick/Balanced/Advanced disclosure)
+### Presentation descriptors and setting state registry
 
 Both engines' Hardware-step controls are declared once, in `static/js/features/spawn-wizard-groups.js`,
 as a flat table of `{ id, loader, tier, quickValue }` rows keyed by DOM control id. This
 registry — not the DOM's own layout — is the source of truth for two independent behaviors:
 
-- **`applyProfileVisibility()`** (`spawn-wizard.js`) drives a Quick-tier disable loop: on the
-  Quick profile, every `tier: 'quick'` control for the active loader is set to its `quickValue`
-  and disabled; on Balanced/Advanced it is re-enabled. `quickValue` is mandatory for every
-  quick-tier control (enforced offline by `scripts/validate-wizard-groups.mjs` — see I2 below).
+The legacy `applyProfileVisibility()` Quick-tier disable loop and profile persistence path are
+retired. Guided keeps applicable controls reachable through the canonical drawer; `profile` remains
+`balanced` only as a backward-compatible payload field and never overwrites explicit edits.
 - **`spawn-wizard-ia.js`**'s `createWizardIA()` factory relocates non-quick controls into
   collapsible, tier-labelled `<details>` groups (grouped under supersections, e.g. "Advanced
   tuning"), open by default at-or-above their own tier and collapsed below it. Each loader gets
