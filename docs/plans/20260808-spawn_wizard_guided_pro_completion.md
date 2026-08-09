@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Created | 2026-08-08 |
-| Status | Phase 11 responsive/accessibility hardening complete; Phase 12 documentation closure remains |
+| Status | Phase 12 documentation/screenshot closure in progress |
 | Scope | Complete the three-step Spawn Wizard for llama.cpp/GGUF and Rapid-MLX with Guided and Pro views, trustworthy capture evidence, introspection-backed recommendations, and documentation closure |
 | Primary design source | [`../archive/rapid-mlx/20260806-spawn_wizard_uiux_redesign.md`](../archive/rapid-mlx/20260806-spawn_wizard_uiux_redesign.md) |
 | Phase-router context | [`20260718-final_rapidmlx_followups_execution.md`](20260718-final_rapidmlx_followups_execution.md), Phase 10 |
@@ -1415,3 +1415,7 @@ The new Full config surface has responsive hardening: state labels stack cleanly
 ### Phase 11 completion update (2026-08-09)
 
 Phase 11 accessibility hardening is complete for the current wizard surfaces. Added the test-only `@axe-core/playwright` gate for Guided, Pro, and Launch states; serious/critical violations are now zero. Fixed the discovered form labeling defects (`hw-ctx-custom`, `hw-vision-select`) and made the scrollable launch preview keyboard-focusable with an accessible region label. The focused gate also verifies keyboard focus and narrow no-clipping behavior against the release build. Phase 12 documentation/screenshot closure remains.
+
+### Phase 12 documentation milestone (2026-08-09)
+
+Updated the primary Spawn Wizard and Setup Wizard references plus the README launch-wizard summary to describe the current three-step Guided/Pro flow, backend-native Rapid-MLX/llama.cpp controls, shared canonical state, and Full config requested/effective labeling. Remaining Phase 12 work is the broader screenshot-reference and historical-status audit across the listed reference documents.
