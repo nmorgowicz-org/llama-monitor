@@ -14,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const root = path.resolve(__dirname, "..");
 const contractPath = path.join(root, "tests", "ui", "core", "fixtures", "spawn-wizard-control-contract.json");
-const fixturePath = path.join(root, 'docs/plans/evidence/spawn-wizard-guided-pro/fixture-freeze.json');
+const fixturePath = path.join(root, 'docs/archive/rapid-mlx/evidence/spawn-wizard-guided-pro/fixture-freeze.json');
 
 const { CONTROLS, PRESENTATION_CONTROLS, assertQuickValueCoverage, validatePresentationDescriptors } = await import(
   path.join(root, "static", "js", "features", "spawn-wizard-groups.js")

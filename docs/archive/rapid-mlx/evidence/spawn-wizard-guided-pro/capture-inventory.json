@@ -2,7 +2,7 @@
   "schema_version": 1,
   "registered": [
     {"scenario":"spawn-wizard","category":"wizard-llamacpp","source":"tests/ui/capture/scenarios/wizard-llamacpp/spawn-wizard.mjs","g0":"broken: successful process omitted later shots"},
-    {"scenario":"spawn-wizard-engines","category":"wizard-llamacpp","source":"tests/ui/capture/scenarios/wizard-llamacpp/spawn-wizard-engines.mjs","g0":{"status":"success","port":17814,"raw_output":"docs/plans/evidence/spawn-wizard-guided-pro/g0-spawn-wizard-engines.raw.log","diagnosis":"mis-grouped Rapid outputs remains unresolved"}},
+    {"scenario":"spawn-wizard-engines","category":"wizard-llamacpp","source":"tests/ui/capture/scenarios/wizard-llamacpp/spawn-wizard-engines.mjs","g0":{"status":"success","port":17814,"raw_output":"docs/archive/rapid-mlx/evidence/spawn-wizard-guided-pro/g0-spawn-wizard-engines.raw.log","diagnosis":"mis-grouped Rapid outputs remains unresolved"}},
     {"scenario":"spawn-wizard-gif","category":"wizard-llamacpp","source":"tests/ui/capture/scenarios/wizard-llamacpp/spawn-wizard-gif.mjs","producer":"captureShot plus ffmpeg GIF"},
     {"scenario":"spawn-wizard-hf-download","category":"wizard-llamacpp","source":"tests/ui/capture/scenarios/wizard-llamacpp/spawn-wizard-hf-download.mjs","producer":"captureShot idle/progress"},
     {"scenario":"spawn-wizard-tier-matrix","category":"wizard-llamacpp","source":"tests/ui/capture/scenarios/wizard-llamacpp/spawn-wizard-tier-matrix.mjs","producer":"captureShot per profile"},
