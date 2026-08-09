@@ -30,8 +30,10 @@ import scenarioCommunitySources from './scenarios/presets/community-sources.mjs'
 import scenarioDiscussions from './scenarios/presets/discussions.mjs';
 import scenarioSpawnWizard from './scenarios/wizard-llamacpp/spawn-wizard.mjs';
 import scenarioSpawnWizardProBaseline from './scenarios/wizard-llamacpp/spawn-wizard-pro-baseline.mjs';
+import scenarioSpawnWizardLaunchFullConfig from './scenarios/wizard-llamacpp/spawn-wizard-launch-full-config.mjs';
 import scenarioSpawnWizardRapidGuidedBaseline from './scenarios/wizard-rapidmlx/spawn-wizard-rapid-guided-baseline.mjs';
 import scenarioSpawnWizardRapidProBaseline from './scenarios/wizard-rapidmlx/spawn-wizard-rapid-pro-baseline.mjs';
+import scenarioSpawnWizardRapidLaunchFullConfig from './scenarios/wizard-rapidmlx/spawn-wizard-launch-full-config.mjs';
 import scenarioSpawnWizardGif from './scenarios/wizard-llamacpp/spawn-wizard-gif.mjs';
 import scenarioSpawnWizardHfDownload from './scenarios/wizard-llamacpp/spawn-wizard-hf-download.mjs';
 import scenarioSpawnWizardTierMatrix from './scenarios/wizard-llamacpp/spawn-wizard-tier-matrix.mjs';
@@ -275,7 +277,31 @@ export const SCENARIOS = {
       ],
     },
   },
-    'spawn-wizard-gif': {
+'spawn-wizard-launch-full-config': {
+  run: scenarioSpawnWizardLaunchFullConfig,
+  category: 'wizard-llamacpp',
+  runtime: 'llamacpp-local',
+  contract: {
+    intent: 'Capture canonical llama.cpp launch Full config with requested and estimator-effective labels.',
+    expectedOutputs: [
+      'llamacpp-local--spawn-wizard-launch-full-config.png',
+      'spawn-wizard-launch-full-config--llamacpp-local--details.png',
+    ],
+  },
+},
+'spawn-wizard-rapid-launch-full-config': {
+  run: scenarioSpawnWizardRapidLaunchFullConfig,
+  category: 'wizard-rapidmlx',
+  runtime: 'rapidmlx-local',
+  contract: {
+    intent: 'Capture canonical Rapid-MLX launch Full config with requested and runtime-effective labels.',
+    expectedOutputs: [
+      'rapidmlx-local--spawn-wizard-launch-full-config.png',
+      'rapidmlx-local--spawn-wizard-launch-full-config-details.png',
+    ],
+  },
+},
+'spawn-wizard-gif': {
         run: scenarioSpawnWizardGif, category: 'wizard-llamacpp', runtime: 'llamacpp-local',
         contract: { intent: 'Capture the llama.cpp wizard flow as a diagnostic GIF.', expectedOutputs: ['llamacpp-local--spawn-wizard-flow.gif'] },
     },

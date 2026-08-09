@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Created | 2026-08-08 |
-| Status | Phase 9 Rapid-MLX Pro parity complete; awaiting human acceptance stop |
+| Status | Phase 10 launch/review convergence complete; awaiting human acceptance stop |
 | Scope | Complete the three-step Spawn Wizard for llama.cpp/GGUF and Rapid-MLX with Guided and Pro views, trustworthy capture evidence, introspection-backed recommendations, and documentation closure |
 | Primary design source | [`../archive/rapid-mlx/20260806-spawn_wizard_uiux_redesign.md`](../archive/rapid-mlx/20260806-spawn_wizard_uiux_redesign.md) |
 | Phase-router context | [`20260718-final_rapidmlx_followups_execution.md`](20260718-final_rapidmlx_followups_execution.md), Phase 10 |
@@ -1403,3 +1403,7 @@ Phase 8 llama.cpp Pro panes are complete. The Pro surface now relocates sampling
 ### Phase 9 milestone update (2026-08-09)
 
 Rapid-MLX Pro parity is complete in the current tree. The seven-category Pro surface now exposes backend-native Model, Memory & context, Performance, Generation & reasoning, Tools & conversation formatting, Network & observability, and Advanced panes; shared access controls remain available to both loaders, while compatibility copy explicitly identifies MLX-native artifacts and avoids llama.cpp-only quant/mmproj claims. Effective-state and effective-KV evidence, retained-cache editing, parser/profile evidence, companion trust/unavailable gating, cache search, modified-only filtering, and narrow layout are covered by the fresh receipt `docs/screenshots/artifacts/wizard-rapidmlx/spawn-wizard-rapid-pro-baseline--receipt.json` and its 13 original-resolution captures. Focused release-built Rapid-MLX Pro Playwright verification passes; JS validation/lint and diff checks pass. This phase is ready for the human acceptance stop.
+
+### Phase 10 milestone update (2026-08-09)
+
+Launch/review convergence is complete for the current wizard surfaces. Step 3 now has one canonical, expandable Full config review shared by both engines, with explicit requested, estimator-effective, and runtime-effective labeling; llama.cpp points to the VRAM estimator while Rapid-MLX points to the backend command preview. The existing canonical payload/protected-credential tests cover save and launch projections, including fields moved through Guided and Pro panes. Fresh release-built G10 launch receipts are recorded at `docs/screenshots/artifacts/wizard-llamacpp/spawn-wizard-launch-full-config--receipt.json` and `docs/screenshots/artifacts/wizard-rapidmlx/spawn-wizard-rapid-launch-full-config--receipt.json`. Focused Full config Playwright verification, JS validation/lint, release build, and screenshot captures pass.

@@ -949,6 +949,13 @@ export function _renderPresetParamsStep() {
     sections.push({ label: 'Extra', rows: [{ label: 'Extra command-line arguments', value: h.extraArgs }] });
   }
 
+  const stateLegend = document.getElementById('spawn-full-config-state');
+  if (stateLegend) {
+    stateLegend.textContent = rapid
+      ? 'Requested · runtime-effective in command preview'
+      : 'Requested · estimator-effective in VRAM budget';
+  }
+
   container.innerHTML = '';
 
   for (const section of sections) {
@@ -959,7 +966,16 @@ export function _renderPresetParamsStep() {
 
     const hdr = document.createElement('div');
     hdr.className = 'summary-list-header';
-    hdr.textContent = section.label;
+    const sectionLabel = document.createElement('span');
+    sectionLabel.textContent = section.label;
+    const sectionState = document.createElement('span');
+    sectionState.className = 'summary-state';
+    sectionState.textContent = rapid && section.label === 'Rapid-MLX advanced'
+      ? 'requested / runtime-effective'
+      : section.label === 'Hardware' && !rapid
+        ? 'requested / estimator-effective'
+        : 'requested';
+    hdr.append(sectionLabel, sectionState);
     block.appendChild(hdr);
 
     for (const r of section.rows) {

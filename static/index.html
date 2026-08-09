@@ -5110,8 +5110,15 @@
                             Review the settings that will be saved with this preset. Save it so you can reuse it later, then click Start server.
                         </div>
                     </div>
-                    <!-- Populated by _renderPresetParamsStep() -->
-                    <div id="preset-params-table"></div>
+<details class="spawn-full-config-drawer" id="spawn-full-config-drawer" open>
+ <summary class="spawn-full-config-summary">
+  <span>Full config</span>
+  <span class="spawn-config-state-legend" id="spawn-full-config-state">Requested · estimator-effective where available</span>
+ </summary>
+ <div class="spawn-full-config-help">Canonical launch review. Requested values come from this wizard; estimator-effective values come from the VRAM estimator; runtime-effective values are shown only when the backend reports them.</div>
+ <!-- Populated by _renderPresetParamsStep() -->
+ <div id="preset-params-table"></div>
+</details>
                     <div class="spawn-save-preset-row" id="spawn-save-preset-row" style="margin-top:14px;">
                         <input type="text" id="spawn-preset-name-input" class="spawn-preset-name-input" placeholder="Preset name…" maxlength="80">
                         <button type="button" class="btn-wizard-secondary" id="spawn-save-preset-btn">Save as Preset</button>

@@ -1013,6 +1013,35 @@ test('Rapid-MLX Pro keeps backend-native controls and shared access settings', a
   await expect(page.locator('#all-settings-group #spawn-rapid-advanced-fields')).toBeAttached();
 });
 
+test('Launch Full config review labels requested and effective state', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForLoadState('networkidle');
+  await page.evaluate(async () => {
+    const { openSpawnWizard, wizardState, selectWizardEngine, showStep } = await import('/js/features/spawn-wizard.js');
+    openSpawnWizard();
+    wizardState.model.source = 'local';
+    wizardState.model.path = '/tmp/full-config-model.gguf';
+    wizardState.model.paramB = 8;
+    wizardState.model.modelBytes = 4 * 1024 * 1024 * 1024;
+    selectWizardEngine('llama_cpp', true);
+    showStep(2);
+  });
+  await expect(page.locator('#wizard-step-2')).toHaveClass(/active/);
+  await expect(page.locator('#spawn-full-config-drawer')).toBeVisible();
+  await expect(page.locator('#spawn-full-config-state')).toContainText('estimator-effective');
+  await expect(page.locator('#preset-params-table .summary-state').first()).toContainText('requested');
+
+  await page.evaluate(async () => {
+    const { wizardState, selectWizardEngine, showStep } = await import('/js/features/spawn-wizard.js');
+    wizardState.model.source = 'local';
+    wizardState.model.path = '/tmp/full-config-rapid';
+    selectWizardEngine('rapid_mlx', true);
+    showStep(2);
+  });
+  await expect(page.locator('#spawn-full-config-state')).toContainText('runtime-effective');
+  await expect(page.locator('#preset-params-table .summary-state').last()).toContainText('requested');
+});
+
 test('review step exposes structured output and full sampling defaults', async ({ page }) => {
         await page.goto('/');
         await page.waitForLoadState('networkidle');
