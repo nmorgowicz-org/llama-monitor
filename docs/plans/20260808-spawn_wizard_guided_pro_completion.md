@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Created | 2026-08-08 |
-| Status | Phase 12 documentation/screenshot closure in progress |
+| Status | Phase 12 documentation/screenshot closure complete; awaiting human acceptance stop |
 | Scope | Complete the three-step Spawn Wizard for llama.cpp/GGUF and Rapid-MLX with Guided and Pro views, trustworthy capture evidence, introspection-backed recommendations, and documentation closure |
 | Primary design source | [`../archive/rapid-mlx/20260806-spawn_wizard_uiux_redesign.md`](../archive/rapid-mlx/20260806-spawn_wizard_uiux_redesign.md) |
 | Phase-router context | [`20260718-final_rapidmlx_followups_execution.md`](20260718-final_rapidmlx_followups_execution.md), Phase 10 |
@@ -1418,4 +1418,4 @@ Phase 11 accessibility hardening is complete for the current wizard surfaces. Ad
 
 ### Phase 12 documentation milestone (2026-08-09)
 
-Updated the primary Spawn Wizard and Setup Wizard references (including corrected current step headings), inference-tuning and Rapid-MLX runtime disclosure, and the README launch-wizard summary to describe the current three-step Guided/Pro flow, backend-native Rapid-MLX/llama.cpp controls, shared canonical state, and Full config requested/effective labeling. Remaining Phase 12 work is the broader screenshot-reference and historical-status audit across the listed reference documents.
+Updated the primary Spawn Wizard and Setup Wizard references (including corrected current step headings), inference-tuning and Rapid-MLX runtime disclosure, and the README launch-wizard summary to describe the current three-step Guided/Pro flow, backend-native Rapid-MLX/llama.cpp controls, shared canonical state, and Full config requested/effective labeling. Audited wizard screenshot references with `scripts/check-unused-screenshots.sh`; all promoted screenshots are referenced and no stale Pro-unavailable claim remains in the primary wizard docs.
