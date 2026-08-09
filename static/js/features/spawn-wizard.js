@@ -2628,16 +2628,6 @@ export async function introspectHfFileMetadata(repoId, fname, sizeBytes) {
   }
 }
 
-export function inferParamBFromName(name) {
-  // Match patterns like "27B", "7b", "70B", "235b", "3.5b", "122B"
-  // Prefer the first large number (total params) not the "active" suffix
-  const matches = [...name.matchAll(/(\d+(?:\.\d+)?)\s*[Bb]/gi)];
-  if (!matches.length) return 0;
-  // If there's a pattern like "35B-A3B" or "122B-A10B", take the larger (total) param count
-  const values = matches.map(m => parseFloat(m[1]));
-  return Math.max(...values);
-}
-
 // ── Introspection ─────────────────────────────────────────────────────────────
 
 let introspectDebounce = null;
