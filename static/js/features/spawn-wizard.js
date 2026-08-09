@@ -2504,6 +2504,14 @@ function updateSelectedModelArchLabel() {
         (layerStr ? layerStr + perLayerStr + ' — set --gpu-layers (-ngl) between 0 and ' + nLayers + ' to offload layers to the GPU.' : '');
   }
   container.appendChild(note);
+
+  if (wizardState.arch.metadataStatus !== 'unknown') {
+    const evidence = document.createElement('div');
+    evidence.className = 'selected-model-arch-hint';
+    const status = wizardState.arch.metadataStatus === 'resolved' ? 'Model-native' : 'Unknown / degraded';
+    evidence.textContent = `Evidence: ${status} · ${wizardState.arch.metadataReason || 'safe defaults retained'}`;
+    container.appendChild(evidence);
+  }
 }
 
 // ── Model path changed ────────────────────────────────────────────────────────
