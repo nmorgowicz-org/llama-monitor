@@ -83,8 +83,8 @@ only for models the user thinks of as "reasoning models" — `reasoning_mode` se
 policy, it does not mean "show thinking."
 
 Because of this, `#spawn-kv-cache-dtype` in the wizard and preset editor is a read-only
-"Effective: int8 (reasoning profile)" readout on Quick/Balanced. On Advanced it remains
-selectable, but any selection is immediately annotated with the requested→effective
+"Effective: int8 (reasoning profile)" readout in Guided. In Pro it remains selectable
+as a requested value, but any selection is immediately annotated with the requested→effective
 diff already computed by `build_requested_vs_effective()`
 (`src/web/api/rapid_mlx_runtime.rs:758`) — it must never look like a live knob when the
 runtime is going to override it. The VRAM estimator models this correctly
