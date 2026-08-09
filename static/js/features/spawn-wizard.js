@@ -134,7 +134,7 @@ function _renderAllSettingsDrawer() {
   const loader = wizardState.engine.selected || 'llama_cpp';
   const settings = controlsForView(loader, 'guided').filter(control => control.view !== 'card');
   countEl.textContent = String(settings.length);
-  settingStateRegistry.mount(group, settings);
+  settingStateRegistry.mount(dom.overlay || document, controlsForLoader(loader));
 
   // The IA engines own the canonical rows; the shared drawer only relocates
   // their wrapper, never clones individual inputs or creates proxy controls.
@@ -166,14 +166,22 @@ function _renderAllSettingsDrawer() {
       body.style.display = isOpen ? 'none' : 'block';
       btn.setAttribute('aria-expanded', String(!isOpen));
     });
-    group.addEventListener('input', event => {
-      settingStateRegistry.syncControl(event.target);
+  }
+
+  const overlay = dom.overlay || document;
+  if (!overlay.dataset?.settingStateBound) {
+    if (overlay.dataset) overlay.dataset.settingStateBound = '1';
+    const sync = event => {
+      const control = event.target?.closest?.('select, input, textarea') || event.target;
+      const entry = settingStateRegistry.syncControl(control);
+      if (!entry) return;
+      updateVramDisplay();
+      renderContextChipRow();
+      refreshStepGuardrails();
       group._refreshAllSettingsChanged?.();
-    });
-    group.addEventListener('change', event => {
-      settingStateRegistry.syncControl(event.target);
-      group._refreshAllSettingsChanged?.();
-    });
+    };
+    overlay.addEventListener('input', sync);
+    overlay.addEventListener('change', sync);
   }
 
   // Initially hide
