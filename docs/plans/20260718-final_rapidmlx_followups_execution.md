@@ -8,7 +8,7 @@
 | Intended reader | A context-free Coordinator agent |
 | Execution model | Coordinator → Builder → fresh Verifier → focused remediation |
 | Maximum phase context | 200k; stop and checkpoint before compaction |
-| Product implementation status | In progress — Phases 0–10 reconciled; Phases 11–14.5 remain open |
+| Product implementation status | Local implementation complete through Phase 14; Phase 14.5 is verified with the Qwen3.6 vision gate retained pending upstream Rapid-MLX support |
 
 > **Coordinator reconciliation (2026-08-09):** The ledger below was stale after the Spawn Wizard Guided/Pro work landed. Phases 6, 8B3, 9d–9f, and 10a–10e are now recorded against current-source behavior, release-built validation, and the archived completion/evidence packet. This does not close the independent Rapid-MLX roadmap work in Phases 11–14.5.
 
@@ -1111,8 +1111,9 @@ Known call sites requiring remediation (audit for more before closing this packe
 
 ### Phase 11 — Diagnostics, metrics, and storage
 
-- **State:** In progress — remote-agent idle-gating packet implemented (2026-08-09); Phase 11 metrics/Doctor packet implemented (2026-08-10), storage and export packets remain.
+- **State:** Verified complete (2026-08-10) — remote-agent idle gating, metrics/Doctor, bounded storage visibility, and export/privacy review are complete.
 - **Milestone (2026-08-09):** The Windows-installed remote agent now keeps GPU and system metric workers idle until an authenticated master request is received. Authenticated requests refresh a shared activity timestamp; the gate expires after 180 seconds without activity, with a bounded five-second idle check. Unauthenticated `/health` remains available and does not wake polling. This preserves remote reachability while avoiding unnecessary system polling and thread work when no master is connected. Unit coverage verifies inactive, active-through-timeout, expiry, and clock-skew-safe behavior.
+- **Milestone (2026-08-10, storage closure):** Database query results are bounded to 1,000 rows and 1 MiB serialized data; backup metadata listing is capped at 256 entries and reports truncation explicitly. Existing stats, integrity, maintenance, backup, restore, repair, and deletion routes remain authenticated at their required token level and operate only within the owned backup root. Added regression coverage and documented the privacy/storage contract. No raw cache export/import path was added.
 - **Budget:** 170k
 - **Depends on:** Phases 3 and 5–7
 - **Read:** cache telemetry Sections 6.1/6.2/6.5; A9/A12/A23–A24/A31/A37/A41/A48; Phase 11; diagnostics/security/client matrices.

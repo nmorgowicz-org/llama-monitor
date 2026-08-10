@@ -2,6 +2,17 @@
 
 Llama Monitor's monitoring surface is split between a live top-nav cockpit, the Server tab, and host telemetry cards that light up when the app can read local hardware or reach a remote agent.
 
+## Diagnostics, Doctor, and storage
+
+The Server dashboard's Doctor findings are cross-backend and evidence-based. Each finding has a condition, explanation, concrete remediation, and a short reason why it happens. Missing or stale runtime fields remain explicitly unavailable; they are never rendered as zeroes. The same detection result supplies novice and power-user wording.
+
+Database observability is local and authenticated:
+
+- `/api/db/stats`, `/api/db/integrity`, `/api/db/indexes`, and `/api/db/backups` require the regular `api-token`.
+- Maintenance and manual backup creation are bounded operations; manual backups retain the seven newest files.
+- Restore, repair, and backup deletion require the elevated `db-admin-token` and use owned backup paths only.
+- Backup listings expose metadata only and are capped at 256 entries. Database query results are capped at 1,000 rows and 1 MiB; no raw prompt/response telemetry is exported by the monitoring metrics surface.
+
 ## SPA Navigation
 
 Top-level views (Dashboard, Chat, Logs, Server, Spawn) are now SPA routes:

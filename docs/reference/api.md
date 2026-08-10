@@ -1775,7 +1775,7 @@ Creates a manual backup in `~/.config/llama-monitor/backups/chat_<timestamp>.db`
 ```json
 {
   "status": "backup_created",
-  "path": "/Users/nick/.config/llama-monitor/backups/chat_1746000000000.db",
+  "name": "manual/chat_1746000000000.db",
   "size_bytes": 40960
 }
 ```
@@ -1814,7 +1814,8 @@ Lists both manual backups (`chat_*.db`) and automatic hourly backups (`chat_auto
       "modified": 1746000000000
     }
   ],
-  "total_size": 40960
+  "total_size": 40960,
+  "truncated": false
 }
 ```
 
@@ -1880,11 +1881,14 @@ Requires `api-token`.
 ]
 ```
 
+The metadata response is bounded to 256 backup entries. `truncated: true` means additional owned files were not included; it never exposes backup contents or filesystem paths.
+
 ### `POST /api/db/query`
 Requires `api-token` or `db-admin-token` (dual-token).
 
 Safeguards:
 - Max body size: 256 KB; max SQL length: 16 KB; execution timeout: 10 seconds.
+- Query results are capped at 1,000 rows and 1 MiB of serialized row data; add a `LIMIT` clause or narrow selected columns when a query exceeds either bound.
 - Single-statement only: a semicolon anywhere in the SQL is rejected via a simple substring
   scan (`;` present → "Multi-statement queries are not allowed"). This is a lightweight and
   fragile guard, not full parsing.
