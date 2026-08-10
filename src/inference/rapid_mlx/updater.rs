@@ -396,9 +396,12 @@ impl RapidMlxRuntimeManager {
         &self,
         release: ManagedReleaseSelection,
     ) -> Result<RuntimeMutationResult> {
-        self.ensure_platform()?;
+        self.ensure_platform()
+            .context("Managed Rapid-MLX platform check failed")?;
         let _permit = self.try_mutation_permit()?;
-        self.stage_and_activate_locked(release).await
+        self.stage_and_activate_locked(release)
+            .await
+            .context("Managed Rapid-MLX stage-and-activate failed")
     }
 
     async fn stage_and_activate_locked(
@@ -407,43 +410,86 @@ impl RapidMlxRuntimeManager {
     ) -> Result<RuntimeMutationResult> {
         let parsed_release = validate_release_selection(&release)?;
         let exact_version = release.version.as_str();
-        let environment_id = unique_environment_id(exact_version, &self.root)?;
+        let environment_id = unique_environment_id(exact_version, &self.root)
+            .context("Could not allocate managed Rapid-MLX environment ID")?;
         let environment = create_checked_child(
             &self.root,
             &Path::new(ENVIRONMENTS_DIR).join(&environment_id),
-        )?;
+        )
+        .with_context(|| format!("Could not create managed environment {environment_id}"))?;
         let result = async {
             let environment_relative = relative_to_root(&self.root, &environment)?;
-            let tool_dir = create_checked_child(&self.root, &environment_relative.join("tool"))?;
-            let bin_dir = create_checked_child(&self.root, &environment_relative.join("bin"))?;
-            let cache_dir = checked_existing_child(&self.root, Path::new("uv-cache"), true)?;
-            let python_dir = checked_existing_child(&self.root, Path::new("uv-python"), true)?;
+            let tool_dir = create_checked_child(&self.root, &environment_relative.join("tool"))
+                .with_context(|| format!("Could not create tool directory for {environment_id}"))?;
+            let bin_dir = create_checked_child(&self.root, &environment_relative.join("bin"))
+                .with_context(|| format!("Could not create bin directory for {environment_id}"))?;
+            // These app-owned directories are created lazily on first install.
+            // `uv-python` is absent on older managed-runtime roots, and treating
+            // it as already-existing made every upgrade fail with ENOENT.
+            let cache_dir = create_checked_child(&self.root, Path::new("uv-cache"))
+                .context("Could not create managed Rapid-MLX uv cache directory")?;
+            let python_dir = create_checked_child(&self.root, Path::new("uv-python"))
+                .context("Could not create managed Rapid-MLX uv Python directory")?;
 
             self.run_uv_install(exact_version, &tool_dir, &bin_dir, &cache_dir, &python_dir)
-                .await?;
+                .await
+                .with_context(|| format!("uv install failed for {}", environment.display()))?;
             let binary_relative = managed_tool_binary_relative();
-            let binary = checked_existing_child(&tool_dir, &binary_relative, false)?;
+            let binary =
+                checked_existing_child(&tool_dir, &binary_relative, false).with_context(|| {
+                    format!(
+                        "Staged Rapid-MLX executable was not found at {}",
+                        tool_dir.join(&binary_relative).display()
+                    )
+                })?;
             if !binary.is_file() {
                 bail!("The staged Rapid-MLX runtime did not provide its expected executable");
             }
-            let binary_relative = relative_to_root(&environment, &binary)?;
-            let binary_sha256 = sha256_file(&binary)?;
+            let binary_relative = relative_to_root(&environment, &binary)
+                .context("Staged Rapid-MLX executable escaped its managed environment")?;
+            let binary_sha256 = sha256_file(&binary).with_context(|| {
+                format!("Cannot hash staged Rapid-MLX binary {}", binary.display())
+            })?;
 
             let profile = self
                 .runtime_probe
                 .probe(&binary, parsed_release.prerelease)
                 .await
-                .map_err(|_| {
-                    anyhow!("The staged Rapid-MLX runtime failed compatibility validation")
+                .with_context(|| {
+                    format!(
+                        "The staged Rapid-MLX runtime failed compatibility validation for {}",
+                        binary.display()
+                    )
                 })?;
-            require_verified_profile(exact_version, &profile)?;
+            require_verified_profile(exact_version, &profile).context(
+                "The staged Rapid-MLX runtime did not satisfy its compatibility profile",
+            )?;
 
             // Capture resolved dependency receipt from the installed environment.
-            let resolved_receipt = capture_resolved_receipt(&binary, exact_version)?;
+            let resolved_receipt = match capture_resolved_receipt(&binary, exact_version) {
+                Ok(receipt) => receipt,
+                Err(error) => {
+                    // A dependency receipt is diagnostic metadata, not a reason to
+                    // reject an otherwise healthy runtime. uv environments may
+                    // expose a Python interpreter without every optional helper.
+                    eprintln!(
+                        "[rapid-mlx] dependency receipt unavailable for {}: {error:#}",
+                        binary.display()
+                    );
+                    None
+                }
+            };
 
             // Run the on-device update-validation probe.
             // User-driven (triggered by install/upgrade), bounded (30s total, 8s per sub-check).
-            let probe_result = run_update_validation_probe(&binary, exact_version).await?;
+            let probe_result = run_update_validation_probe(&binary, exact_version)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Rapid-MLX post-install validation probe failed for {}",
+                        binary.display()
+                    )
+                })?;
 
             let manifest = EnvironmentManifest {
                 schema_version: MANIFEST_SCHEMA_VERSION,
@@ -462,30 +508,68 @@ impl RapidMlxRuntimeManager {
                 &Path::new(ENVIRONMENTS_DIR).join(&environment_id),
                 true,
             )?;
-            atomic_json_write(&environment.join(MANIFEST_FILE), &manifest, true)?;
+            atomic_json_write(&environment.join(MANIFEST_FILE), &manifest, true)
+                .context("Could not write staged Rapid-MLX manifest")?;
             let completion_path = environment.join(COMPLETION_FILE);
             let completion = fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .open(&completion_path)
                 .context("Cannot create managed runtime completion marker")?;
-            completion.sync_all()?;
+            completion
+                .sync_all()
+                .context("Could not sync managed Rapid-MLX completion marker")?;
 
-            self.validate_environment(&environment_id)?;
-            let old = self.load_pointer()?;
+            self.validate_environment(&environment_id)
+                .with_context(|| {
+                    format!("Staged Rapid-MLX environment validation failed: {environment_id}")
+                })?;
+            let old = self
+                .load_pointer()
+                .context("Could not read current managed Rapid-MLX pointer")?;
+            // A previous interrupted cleanup or an older updater can leave
+            // current.json pointing at an environment that no longer exists.
+            // Keep the install recoverable: retain the first valid pointer
+            // candidate (active, then prior rollback candidate) and log any
+            // discarded candidate for diagnosis.
+            let previous_environment_id = old.as_ref().and_then(|pointer| {
+                [
+                    Some(pointer.active_environment_id.as_str()),
+                    pointer.previous_environment_id.as_deref(),
+                ]
+                .into_iter()
+                .flatten()
+                .find_map(|candidate| {
+                    if candidate == environment_id {
+                        return None;
+                    }
+                    match self.validate_environment(candidate) {
+                        Ok(_) => Some(candidate.to_owned()),
+                        Err(error) => {
+                            eprintln!(
+                                "[rapid-mlx] ignoring invalid previous environment {candidate}: {error:#}"
+                            );
+                            None
+                        }
+                    }
+                })
+            });
             let pointer = ActivePointer {
                 schema_version: MANIFEST_SCHEMA_VERSION,
                 active_environment_id: environment_id.clone(),
-                previous_environment_id: old.map(|item| item.active_environment_id),
+                previous_environment_id,
             };
             // Build the response before activation so no later failure can cause
             // cleanup to remove the newly active environment.
-            let active = self.entry_for(&environment_id, true, false)?;
+            let active = self
+                .entry_for(&environment_id, true, false)
+                .context("Could not build active managed Rapid-MLX runtime entry")?;
             let response = RuntimeMutationResult {
                 active,
                 previous_environment_id: pointer.previous_environment_id.clone(),
             };
-            self.write_pointer(&pointer)?;
+            self.write_pointer(&pointer)
+                .context("Could not activate managed Rapid-MLX runtime pointer")?;
             Ok(response)
         }
         .await;
@@ -558,19 +642,29 @@ impl RapidMlxRuntimeManager {
     fn validate_environment(&self, id: &str) -> Result<(EnvironmentManifest, PathBuf)> {
         validate_environment_id(id)?;
         let relative = Path::new(ENVIRONMENTS_DIR).join(id);
-        let environment = checked_existing_child(&self.root, &relative, true)?;
-        let complete = checked_existing_child(&self.root, &relative.join(COMPLETION_FILE), false)?;
-        let completion_metadata = fs::metadata(&complete)?;
+        let environment = checked_existing_child(&self.root, &relative, true)
+            .with_context(|| format!("Managed runtime environment is missing: {id}"))?;
+        let complete =
+            checked_existing_child(&self.root, &relative.join(COMPLETION_FILE), false)
+                .with_context(|| format!("Managed runtime completion marker is missing: {id}"))?;
+        let completion_metadata = fs::metadata(&complete)
+            .with_context(|| format!("Could not inspect completion marker for {id}"))?;
         if !completion_metadata.is_file() || completion_metadata.len() != 0 {
             bail!("Managed runtime completion marker is invalid");
         }
         let manifest_path =
-            checked_existing_child(&self.root, &relative.join(MANIFEST_FILE), false)?;
-        let metadata = fs::metadata(&manifest_path)?;
+            checked_existing_child(&self.root, &relative.join(MANIFEST_FILE), false)
+                .with_context(|| format!("Managed runtime manifest is missing: {id}"))?;
+        let metadata = fs::metadata(&manifest_path)
+            .with_context(|| format!("Could not inspect managed runtime manifest for {id}"))?;
         if !metadata.is_file() || metadata.len() > MAX_MANIFEST_BYTES {
             bail!("Managed runtime manifest is invalid");
         }
-        let manifest: EnvironmentManifest = serde_json::from_slice(&fs::read(&manifest_path)?)?;
+        let manifest: EnvironmentManifest = serde_json::from_slice(
+            &fs::read(&manifest_path)
+                .with_context(|| format!("Could not read managed runtime manifest for {id}"))?,
+        )
+        .with_context(|| format!("Managed runtime manifest is invalid JSON: {id}"))?;
         if manifest.schema_version != MANIFEST_SCHEMA_VERSION
             || manifest.environment_id != id
             || manifest.runtime_source != RuntimeSource::Managed
@@ -584,7 +678,13 @@ impl RapidMlxRuntimeManager {
         }
         let binary_relative = PathBuf::from(&manifest.binary_relative_path);
         validate_relative_path(&binary_relative)?;
-        let binary = checked_existing_child(&environment, &binary_relative, false)?;
+        let binary =
+            checked_existing_child(&environment, &binary_relative, false).with_context(|| {
+                format!(
+                    "Managed runtime executable is missing for {id}: {}",
+                    environment.join(&binary_relative).display()
+                )
+            })?;
         if !binary.is_file() {
             bail!("Managed runtime executable is not a regular file");
         }
@@ -1193,14 +1293,28 @@ fn find_python_in_env(binary: &Path) -> Result<PathBuf> {
     )
 }
 
+const METADATA_SCRIPT: &str = r#"
+import importlib.metadata
+for distribution in sorted(importlib.metadata.distributions(), key=lambda item: (item.metadata.get("Name") or "").lower()):
+    name = distribution.metadata.get("Name")
+    version = distribution.version
+    if name and version:
+        print(f"{name}=={version}")
+"#;
+
 fn run_pip_freeze(python: &Path) -> Result<String> {
     let output = std::process::Command::new(python)
-        .args(["-m", "pip", "freeze"])
+        // uv-managed tool environments intentionally do not include pip. Read
+        // installed distribution metadata through Python's stdlib instead.
+        .args(["-c", METADATA_SCRIPT])
         .output()
-        .context("Failed to run pip freeze in managed environment")?;
+        .context("Failed to inspect managed environment package metadata")?;
 
     if !output.status.success() {
-        return Err(anyhow!("pip freeze failed with status {}", output.status));
+        return Err(anyhow!(
+            "Package metadata inspection failed with status {}",
+            output.status
+        ));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
@@ -1377,13 +1491,41 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn stale_active_pointer_does_not_block_install_or_discard_rollback() {
+        let (_temp, manager, _probe) = fixture_manager();
+        let first = manager.install("0.10.9").await.unwrap();
+        let pointer_path = manager.root.join(POINTER_FILE);
+        let mut pointer: ActivePointer =
+            serde_json::from_slice(&fs::read(&pointer_path).unwrap()).unwrap();
+        let valid_previous = pointer.active_environment_id.clone();
+        pointer.active_environment_id = "0.10.12-stale".to_string();
+        pointer.previous_environment_id = Some(valid_previous.clone());
+        fs::write(&pointer_path, serde_json::to_vec(&pointer).unwrap()).unwrap();
+
+        let result = manager.install("0.10.10").await.unwrap();
+        assert_eq!(
+            result.previous_environment_id.as_deref(),
+            Some(valid_previous.as_str())
+        );
+        let current: ActivePointer =
+            serde_json::from_slice(&fs::read(&pointer_path).unwrap()).unwrap();
+        assert_eq!(current.active_environment_id, result.active.environment_id);
+        assert_eq!(
+            current.previous_environment_id.as_deref(),
+            Some(valid_previous.as_str())
+        );
+        assert_eq!(first.active.version, "0.10.9");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn pointer_write_failure_is_precommit_and_cleans_stage() {
         let (_temp, manager, _probe) = fixture_manager();
         manager.install("0.10.9").await.unwrap();
         let pointer_before = fs::read(manager.root.join(POINTER_FILE)).unwrap();
         fs::write(manager.root.join(".current.json.tmp"), b"occupied").unwrap();
         let error = manager.upgrade("0.10.10").await.unwrap_err();
-        assert!(error.to_string().contains("temporary file"));
+        assert!(format!("{error:#}").contains("temporary file"), "{error:#}");
         assert_eq!(
             fs::read(manager.root.join(POINTER_FILE)).unwrap(),
             pointer_before
@@ -1577,7 +1719,7 @@ mod tests {
             manager.rollback().await.unwrap_err(),
         ] {
             assert!(
-                error.to_string().contains("require macOS on Apple Silicon"),
+                format!("{error:#}").contains("require macOS on Apple Silicon"),
                 "{error:#}"
             );
         }

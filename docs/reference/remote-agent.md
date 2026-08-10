@@ -160,6 +160,17 @@ Endpoints:
 - **GET /metrics**
   - Combined endpoint returning both system and GPU metrics in a single payload.
 
+### Idle polling behavior
+
+The installed agent keeps its GPU and system metric workers idle until an
+authenticated master request is received. Authenticated `/info`, `/agent/info`,
+and `/metrics*` requests refresh the activity lease; `/health` remains available
+for reachability checks but does not wake metric collection. After 180 seconds
+without an authenticated request, workers return to idle and check for activity
+at bounded five-second intervals. This applies consistently on macOS, Linux, and
+Windows; it is especially important for Windows service installs, which may run
+without a connected master monitor.
+
 All authenticated endpoints require:
 - Header: `Authorization: Bearer <token>` where `<token>` is the agent token.
 

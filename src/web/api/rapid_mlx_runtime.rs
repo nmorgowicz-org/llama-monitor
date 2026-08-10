@@ -1496,6 +1496,7 @@ async fn start_job(
         }
     };
     let version = release.as_ref().map(|item| item.version().to_string());
+    let version_for_log = version.clone();
     if !try_insert_job(
         state,
         RuntimeJobSnapshot {
@@ -1537,13 +1538,20 @@ async fn start_job(
                 "Runtime validated and activated",
                 Some(result),
             ),
-            Err(error) => update_job(
-                &job_state,
-                &job_id,
-                RuntimeJobState::Failed,
-                public_runtime_error(&error),
-                None,
-            ),
+            Err(error) => {
+                eprintln!(
+                    "[rapid-mlx] managed runtime {:?} {} failed during validation: {error:#}",
+                    operation,
+                    version_for_log.as_deref().unwrap_or("unknown version"),
+                );
+                update_job(
+                    &job_state,
+                    &job_id,
+                    RuntimeJobState::Failed,
+                    public_runtime_error(&error),
+                    None,
+                );
+            }
         }
     });
 

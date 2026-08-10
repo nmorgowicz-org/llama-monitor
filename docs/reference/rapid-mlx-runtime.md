@@ -316,6 +316,12 @@ Error handling:
   - Installer process tree is killed and reaped.
   - Staging environment is removed.
   - `current.json` is left unchanged.
+- Server logs retain operation/version and stage-specific diagnostics (staging,
+  uv installation, executable lookup, compatibility probe, manifest/completion,
+  and activation-pointer validation). Public job responses remain redacted.
+- If an older `current.json` references a removed environment, activation logs
+  the invalid candidate, skips it, and preserves the first valid rollback
+  candidate instead of blocking an otherwise safe install.
 
 ## Upgrade flow
 
