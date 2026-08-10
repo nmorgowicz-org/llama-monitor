@@ -1136,12 +1136,13 @@ Known call sites requiring remediation (audit for more before closing this packe
 
 ### Phase 13 — Convergence and documentation
 
-- **State:** Not started
+- **State:** In progress (2026-08-10) — documentation convergence audit begun after Phase 12 security closure.
 - **Budget:** 130k
 - **Depends on:** Phases 5–12
 - **Read:** all resolved decisions; Phase 13; completion ledger; surface/client matrices; reference-doc requirements.
 - **Primary output:** one vocabulary across all surfaces; completed preset migrations against the D32 version/migration contract (not ad-hoc per-field defaults); complete user/reference/client/cache/troubleshooting documentation.
 - **Completion proof:** no evidence grade is hidden; docs match code; all preset-shape migrations reference the single D32 contract and round-trip; OpenCode/Hermes/OpenClaw/SillyTavern setup is explicit; promoted screenshots are referenced.
+- **Milestone (2026-08-10):** Corrected stale MTP documentation in `docs/reference/vram-estimator.md` and `docs/reference/setup-wizard.md`: confirmed primary-model metadata remains authoritative, while flexible filename/repository hints are retained as explicitly inferred draft/head candidate discovery when those files expose little introspectable metadata. Hints never claim a confirmed MTP depth. `scripts/check-unused-screenshots.sh` reports no unreferenced promoted screenshots.
 
 ### Phase 14 — Full release validation
 

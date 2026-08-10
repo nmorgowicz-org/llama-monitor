@@ -598,7 +598,7 @@ When the download starts, the model card displays an indeterminate progress bar 
 ### MTP and IQ Quant Detection
 
 The model browser and library recognize and label:
-- MTP (Multi-Token Prediction) / draft models: detected via filename patterns including `-mtp.gguf` (Unsloth convention). These models are shown with an MTP badge (indigo pill) in the model cards.
+- MTP (Multi-Token Prediction) / draft models: model cards may show a provisional `-mtp.gguf` or repository hint (Unsloth convention). Separate draft/head files frequently expose little introspectable metadata, so these hints remain useful for candidate discovery but are labeled inferred and never treated as confirmed MTP depth. Confirmed GGUF/HF metadata wins for primary-model controls and launch policy.
 - IQ quantizations: filenames with `-IQ` or `_IQ` (e.g., `IQ2_XXS`, `IQ3_M`, `IQ4_XL`) are correctly parsed, including the full `IQ` prefix in the quant label.
 
 ### Model Card

@@ -580,7 +580,7 @@ Zero-guard: returns 0 when:
 
 Primary: GGUF fields (`nextn_predict_layers`, `next_n_token_count`, `num_nextn_predict_layers`, `multi_token_prediction_depth`). When present, these set `mtp_depth` directly via introspection.
 
-Fallback: When any heuristic path (Qwen3.6, Qwen3.5, Gemma 3/4, or generic) encounters `"mtp"` or `"multi-token"` in the filename, it sets `mtp_depth = 1` via `from_name_and_params()`. This value is then used by `full_estimate` (for MTP overhead in the breakdown) and `max_context` (for budgeting fixed costs). EXAONE 4.5 unconditionally uses MTP (all sizes).
+The filename keyword branch in `from_name_and_params()` is a legacy pre-download VRAM-estimator fallback (degraded/best-effort). Confirmed primary-model metadata remains authoritative for Spawn Wizard recommendations and launch state. Separate draft-model/MTP-head files often have no introspectable head metadata, so filename/repository hints remain a flexible provisional discovery fallback; they must be labeled inferred and must not claim a confirmed MTP depth. The resulting estimate includes MTP overhead in its breakdown and fixed-cost context budget. EXAONE 4.5 unconditionally uses MTP (all sizes).
 
 ### `find_min_cpu_moe_to_fit_weights`
 
