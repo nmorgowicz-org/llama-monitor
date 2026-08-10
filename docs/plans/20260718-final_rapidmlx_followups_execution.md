@@ -1122,6 +1122,7 @@ Known call sites requiring remediation (audit for more before closing this packe
 ### Phase 12 — Security, dependencies, and watchlist
 
 - **State:** In progress — initial authenticated-route audit passed (39 `auth_routing` tests, 2026-08-10); dependency, probe, path, and remote-code review remains.
+- **Milestone (2026-08-10):** Authenticated route coverage passed (`cargo test --test auth_routing`: 39 tests) and path-focused library coverage passed (47 tests). `cargo tree -d` was reviewed; duplicate versions are transitive dependency families (Warp/Rustls/HF-Xet/crypto), not an unreviewed direct dependency addition. No dependency upgrade or security exception was introduced in this packet.
 - **Budget:** 120k
 - **Depends on:** Phases 3 and 8–11
 - **Read:** gaps 3.10/3.11; D12/D13/D17/D21/D26; A11–A14/A18/A24/A27/A34/A44; Phase 12; security matrix/evidence.
