@@ -1112,7 +1112,8 @@ Known call sites requiring remediation (audit for more before closing this packe
 
 ### Phase 11 — Diagnostics, metrics, and storage
 
-- **State:** Not started
+- **State:** In progress — remote-agent idle-gating packet implemented (2026-08-09); diagnostics, metrics dictionary, Doctor, and storage packets remain.
+- **Milestone (2026-08-09):** The Windows-installed remote agent now keeps GPU and system metric workers idle until an authenticated master request is received. Authenticated requests refresh a shared activity timestamp; the gate expires after 180 seconds without activity, with a bounded five-second idle check. Unauthenticated `/health` remains available and does not wake polling. This preserves remote reachability while avoiding unnecessary system polling and thread work when no master is connected. Unit coverage verifies inactive, active-through-timeout, expiry, and clock-skew-safe behavior.
 - **Budget:** 170k
 - **Depends on:** Phases 3 and 5–7
 - **Read:** cache telemetry Sections 6.1/6.2/6.5; A9/A12/A23–A24/A31/A37/A41/A48; Phase 11; diagnostics/security/client matrices.

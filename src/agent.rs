@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, HashSet};
 use std::net::SocketAddr;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{
+    Arc, LazyLock, Mutex,
+    atomic::{AtomicU64, Ordering},
+};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -197,10 +200,30 @@ static REMOTE_AGENT_AUTOSTART_SUPPRESS_UNTIL: LazyLock<Mutex<Option<Instant>>> =
 
 const REMOTE_AGENT_DEFAULT_PORT: u16 = 7779;
 const REMOTE_AGENT_POLL_INTERVAL: Duration = Duration::from_secs(2);
+/// The installed agent stays quiet until an authenticated master request arrives.
+/// After this idle window, the metric workers stop reading GPU/system state again.
+const AGENT_MASTER_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
+const AGENT_IDLE_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 const REMOTE_AGENT_AUTOSTART_TIMEOUT: Duration = Duration::from_secs(15);
 const REMOTE_AGENT_AUTOSTART_SUPPRESS_DURATION: Duration = Duration::from_secs(120);
 const GITHUB_LATEST_RELEASE_URL: &str =
     "https://api.github.com/repos/nmorgowicz-org/llama-monitor/releases/latest";
+
+fn unix_timestamp_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn master_request_is_recent(last_request: &AtomicU64, now: u64) -> bool {
+    let last = last_request.load(Ordering::Relaxed);
+    last != 0 && now.saturating_sub(last) <= AGENT_MASTER_IDLE_TIMEOUT.as_secs()
+}
+
+fn mark_master_request(last_request: &AtomicU64) {
+    last_request.store(unix_timestamp_seconds(), Ordering::Relaxed);
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentMetrics {
@@ -418,14 +441,20 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
     let _ = ensure_token_in_file(&agent_config_dir, &token);
 
     let backend = gpu::detect_backend(&app_config.gpu_backend);
+    let last_master_request = Arc::new(AtomicU64::new(0));
     let gpu_metrics: Arc<Mutex<BTreeMap<String, GpuMetrics>>> =
         Arc::new(Mutex::new(BTreeMap::new()));
 
     {
         let gpu_metrics = Arc::clone(&gpu_metrics);
         let backend = Arc::clone(&backend);
+        let last_master_request = Arc::clone(&last_master_request);
         std::thread::spawn(move || {
             loop {
+                if !master_request_is_recent(&last_master_request, unix_timestamp_seconds()) {
+                    std::thread::sleep(AGENT_IDLE_CHECK_INTERVAL);
+                    continue;
+                }
                 match backend.read_metrics() {
                     Ok(metrics) => {
                         if let Ok(mut lock) = gpu_metrics.lock() {
@@ -445,8 +474,13 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
 
     {
         let system_metrics = Arc::clone(&system_metrics);
+        let last_master_request = Arc::clone(&last_master_request);
         std::thread::spawn(move || {
             loop {
+                if !master_request_is_recent(&last_master_request, unix_timestamp_seconds()) {
+                    std::thread::sleep(AGENT_IDLE_CHECK_INTERVAL);
+                    continue;
+                }
                 *system_metrics.lock().unwrap() = system::get_system_metrics();
                 std::thread::sleep(Duration::from_secs(5));
             }
@@ -471,10 +505,12 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
 
     let auth = {
         let allowed = allowed_tokens.clone();
+        let last_master_request = Arc::clone(&last_master_request);
         warp::any()
             .and(warp::header::headers_cloned())
             .and_then(move |headers: HeaderMap| {
                 let allowed = allowed.clone();
+                let last_master_request = last_master_request.clone();
                 async move {
                     let bearer = headers
                         .get("authorization")
@@ -484,6 +520,7 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
                     if let Some(tok) = bearer
                         && allowed.iter().any(|t| t == tok)
                     {
+                        mark_master_request(&last_master_request);
                         return Ok::<(), warp::Rejection>(());
                     }
                     Err(warp::reject::custom(AgentAuthError))
@@ -4376,5 +4413,36 @@ mod tests {
                 "http://192.168.2.16:7779".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn master_request_activity_is_inactive_without_request() {
+        let last_request = AtomicU64::new(0);
+        assert!(!master_request_is_recent(&last_request, 1_000));
+    }
+
+    #[test]
+    fn master_request_activity_is_active_at_and_before_timeout() {
+        let last_request = AtomicU64::new(1_000);
+        let timeout = AGENT_MASTER_IDLE_TIMEOUT.as_secs();
+        assert!(master_request_is_recent(&last_request, 1_000));
+        assert!(master_request_is_recent(&last_request, 1_000 + timeout));
+        assert!(!master_request_is_recent(&last_request, 1_001 + timeout));
+    }
+
+    #[test]
+    fn marking_master_request_activates_polling() {
+        let last_request = AtomicU64::new(0);
+        mark_master_request(&last_request);
+        assert!(master_request_is_recent(
+            &last_request,
+            unix_timestamp_seconds()
+        ));
+    }
+
+    #[test]
+    fn master_request_activity_handles_clock_skew_safely() {
+        let last_request = AtomicU64::new(2_000);
+        assert!(master_request_is_recent(&last_request, 1_000));
     }
 }
