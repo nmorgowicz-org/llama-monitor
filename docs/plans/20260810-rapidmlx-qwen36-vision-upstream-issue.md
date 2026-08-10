@@ -212,3 +212,18 @@ this exact config-dir path successfully using the serialized hybrid lane;
 `GET /v1/models` reported `modality: image` and capabilities `text`,
 `vision`, and `tools`. The temporary validation server was stopped after the
 health check. The original HF snapshot remains intact.
+
+## VLM prefill qualification (2026-08-10)
+
+The existing text-only `512` recommendation should not be applied blindly to
+image requests. With the Nightmedia 35B model and a representative captured UI
+image (1,283 prompt tokens), `--prefill-step-size 1024` correctly rejected the
+request because the image prompt exceeded the per-batch cap. The same request
+completed HTTP 200 at `--prefill-step-size 1536` (16 generated tokens in 3.28 s).
+
+This supports a VLM-specific recommendation of `1536` as the initial tier,
+with `2048` as the next escalation for larger screenshots/prompts. `512`
+remains the text-only default. The estimator, Spawn Wizard, and Preset Editor
+should use the model's verified multimodal capability when selecting this
+default; that policy change is not applied yet pending the cross-surface
+implementation pass.
