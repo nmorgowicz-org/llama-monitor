@@ -41,6 +41,8 @@ pub struct RuntimeInventoryEntry {
     pub environment_id: String,
     pub version: String,
     pub release_channel: ManagedReleaseChannel,
+    #[serde(default)]
+    pub extras: Vec<ManagedRuntimeExtra>,
     pub executable_path: PathBuf,
     pub active: bool,
     pub rollback_candidate: bool,
@@ -57,6 +59,7 @@ impl Default for RuntimeInventoryEntry {
             environment_id: String::new(),
             version: String::new(),
             release_channel: ManagedReleaseChannel::Stable,
+            extras: Vec::new(),
             executable_path: PathBuf::new(),
             active: false,
             rollback_candidate: false,
@@ -127,10 +130,47 @@ pub enum ManagedReleaseChannel {
     Prerelease,
 }
 
+/// Optional Rapid-MLX capability bundles installed alongside the core runtime.
+/// `core` is implicit and therefore is not represented in this list.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum ManagedRuntimeExtra {
+    Guided,
+    Vision,
+    Embeddings,
+    Audio,
+}
+
+impl ManagedRuntimeExtra {
+    fn package_name(self) -> &'static str {
+        match self {
+            Self::Guided => "guided",
+            Self::Vision => "vision",
+            Self::Embeddings => "embeddings",
+            Self::Audio => "audio",
+        }
+    }
+}
+
+pub fn default_runtime_extras() -> Vec<ManagedRuntimeExtra> {
+    vec![ManagedRuntimeExtra::Guided, ManagedRuntimeExtra::Vision]
+}
+
+fn normalize_runtime_extras(
+    mut extras: Vec<ManagedRuntimeExtra>,
+) -> Result<Vec<ManagedRuntimeExtra>> {
+    extras.sort_unstable();
+    if extras.windows(2).any(|pair| pair[0] == pair[1]) {
+        bail!("Rapid-MLX runtime extras must not contain duplicates");
+    }
+    Ok(extras)
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ManagedReleaseSelection {
     version: String,
     channel: ManagedReleaseChannel,
+    extras: Vec<ManagedRuntimeExtra>,
     provenance: PublishedReleaseProvenance,
 }
 
@@ -144,9 +184,18 @@ impl ManagedReleaseSelection {
         version: impl Into<String>,
         channel: ManagedReleaseChannel,
     ) -> Result<Self> {
+        Self::from_published_release_with_extras(version, channel, default_runtime_extras())
+    }
+
+    pub(crate) fn from_published_release_with_extras(
+        version: impl Into<String>,
+        channel: ManagedReleaseChannel,
+        extras: Vec<ManagedRuntimeExtra>,
+    ) -> Result<Self> {
         let selection = Self {
             version: version.into(),
             channel,
+            extras: normalize_runtime_extras(extras)?,
             provenance: PublishedReleaseProvenance,
         };
         validate_release_selection(&selection)?;
@@ -159,6 +208,10 @@ impl ManagedReleaseSelection {
 
     pub fn channel(&self) -> ManagedReleaseChannel {
         self.channel
+    }
+
+    pub fn extras(&self) -> &[ManagedRuntimeExtra] {
+        &self.extras
     }
 }
 
@@ -181,6 +234,8 @@ struct EnvironmentManifest {
     runtime_source: RuntimeSource,
     compatibility_state: String,
     release_channel: ManagedReleaseChannel,
+    #[serde(default)]
+    extras: Vec<ManagedRuntimeExtra>,
     /// Resolved dependency receipt: exact packages installed with this environment.
     /// Preserved for rollback; never hand-curated. Derived from upstream contract.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -301,6 +356,7 @@ impl RapidMlxRuntimeManager {
                     environment_id: id,
                     version: manifest.version,
                     release_channel: manifest.release_channel,
+                    extras: manifest.extras,
                     executable_path: binary,
                     active: false,
                     rollback_candidate: false,
@@ -431,7 +487,7 @@ impl RapidMlxRuntimeManager {
             let python_dir = create_checked_child(&self.root, Path::new("uv-python"))
                 .context("Could not create managed Rapid-MLX uv Python directory")?;
 
-            self.run_uv_install(exact_version, &tool_dir, &bin_dir, &cache_dir, &python_dir)
+            self.run_uv_install(&release, &tool_dir, &bin_dir, &cache_dir, &python_dir)
                 .await
                 .with_context(|| format!("uv install failed for {}", environment.display()))?;
             let binary_relative = managed_tool_binary_relative();
@@ -500,6 +556,7 @@ impl RapidMlxRuntimeManager {
                 runtime_source: RuntimeSource::Managed,
                 compatibility_state: CompatibilityState::Verified.label().to_string(),
                 release_channel: release.channel,
+                extras: release.extras.clone(),
                 resolved_receipt,
                 last_probe_result: Some(probe_result),
             };
@@ -590,13 +647,23 @@ impl RapidMlxRuntimeManager {
 
     async fn run_uv_install(
         &self,
-        exact_version: &str,
+        release: &ManagedReleaseSelection,
         tool_dir: &Path,
         bin_dir: &Path,
         cache_dir: &Path,
         python_dir: &Path,
     ) -> Result<()> {
-        let requirement = format!("rapid-mlx=={exact_version}");
+        let extras = release
+            .extras
+            .iter()
+            .map(|extra| extra.package_name())
+            .collect::<Vec<_>>()
+            .join(",");
+        let requirement = if extras.is_empty() {
+            format!("rapid-mlx=={}", release.version)
+        } else {
+            format!("rapid-mlx[{extras}]=={}", release.version)
+        };
         let mut command = Command::new(&self.uv_program);
         command
             .args([
@@ -676,6 +743,9 @@ impl RapidMlxRuntimeManager {
         if parsed.prerelease != (manifest.release_channel == ManagedReleaseChannel::Prerelease) {
             bail!("Managed runtime manifest release channel is invalid");
         }
+        if normalize_runtime_extras(manifest.extras.clone())? != manifest.extras {
+            bail!("Managed runtime manifest extras are not canonical");
+        }
         let binary_relative = PathBuf::from(&manifest.binary_relative_path);
         validate_relative_path(&binary_relative)?;
         let binary =
@@ -711,6 +781,7 @@ impl RapidMlxRuntimeManager {
             environment_id: id.to_string(),
             version: manifest.version,
             release_channel: manifest.release_channel,
+            extras: manifest.extras,
             executable_path: binary,
             active,
             rollback_candidate,

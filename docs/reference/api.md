@@ -2192,7 +2192,10 @@ Fields:
 - `rollback_available`: true if a previous known-good environment is retained.
 - `active`: current managed runtime or null.
 - `inventory`: retained environments (up to internal limit), each with active/rollback
-  candidate flags.
+  candidate flags and immutable `extras` profile.
+- `extras`: optional capability bundles (`guided`, `vision`, `embeddings`, `audio`);
+  core is implicit. Omit on install/upgrade requests to use the recommended
+  `guided` + `vision` profile.
 - `jobs`: up to 16 most recent runtime operations.
 
 If the manager cannot initialize, the endpoint returns 500 with:
@@ -2328,6 +2331,7 @@ Request:
 {
   "version": "0.10.10",
   "channel": "stable",
+  "extras": ["guided", "vision"],
   "confirm": "INSTALL_RAPID_MLX_RUNTIME"
 }
 ```
@@ -2373,6 +2377,7 @@ Request uses the same shape as install, but with its own confirmation token:
 {
   "version": "0.10.11",
   "channel": "stable",
+  "extras": ["guided", "vision"],
   "confirm": "UPGRADE_RAPID_MLX_RUNTIME"
 }
 ```

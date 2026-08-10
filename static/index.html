@@ -7340,8 +7340,16 @@
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
-        <div class="rapid-mlx-modal-status" id="rapid-mlx-status-text">Checking runtime…</div>
-        <div class="rapid-mlx-modal-actions">
+    <div class="rapid-mlx-modal-status" id="rapid-mlx-status-text">Checking runtime…</div>
+    <fieldset class="rapid-mlx-profile" id="rapid-mlx-profile">
+      <legend>Optional capabilities</legend>
+      <label><input type="checkbox" id="rapid-mlx-extra-guided" value="guided" checked> Guided generation</label>
+      <label><input type="checkbox" id="rapid-mlx-extra-vision" value="vision" checked> Vision</label>
+      <label><input type="checkbox" id="rapid-mlx-extra-embeddings" value="embeddings"> Embeddings</label>
+      <label><input type="checkbox" id="rapid-mlx-extra-audio" value="audio"> Audio / TTS</label>
+      <small>Core is always installed. Guided and Vision are recommended for new installations; other bundles are opt-in.</small>
+    </fieldset>
+    <div class="rapid-mlx-modal-actions">
             <button id="rapid-mlx-upgrade-btn" class="rapid-mlx-action-btn" type="button" style="display:none;">Upgrade</button>
             <button id="rapid-mlx-repair-btn" class="rapid-mlx-action-btn" type="button" style="display:none;">Repair</button>
             <button id="rapid-mlx-rollback-btn" class="rapid-mlx-action-btn rapid-mlx-action-btn-soft" type="button" style="display:none;">Rollback</button>

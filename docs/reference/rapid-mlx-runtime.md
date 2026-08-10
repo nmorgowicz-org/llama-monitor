@@ -262,8 +262,8 @@ Install is a single bounded transaction. From `updater.rs`:
    - Ensure `uv-cache/` and `uv-python/` exist and are app-owned.
 
 4. uv install:
-   - Runs:
-     - `uv tool install rapid-mlx==<version>`
+- Runs (recommended default):
+  - `uv tool install 'rapid-mlx[guided,vision]==<version>'`
    - Environment:
      - `env_clear()` then restore only:
        - `PATH`
@@ -275,8 +275,19 @@ Install is a single bounded transaction. From `updater.rs`:
        - `UV_CACHE_DIR` → `uv-cache`
        - `UV_PYTHON_INSTALL_DIR` → `uv-python`
        - `UV_NO_CONFIG=1`, `UV_NO_PROGRESS=1`, `NO_COLOR=1`
-   - Flags:
-     - `--no-config --link-mode copy --no-progress --no-color`
+- Flags:
+  - `--no-config --link-mode copy --no-progress --no-color`
+
+### Runtime capability profiles
+
+The core package is always installed. New installs default to the `guided` and
+`vision` extras (`rapid-mlx[guided,vision]`); users can deselect them or opt into
+`embeddings` and `audio`. The `all` bundle is never selected implicitly.
+
+Each extras selection is recorded in the immutable environment manifest and is
+preserved across upgrades and rollback. Existing core-only manifests remain
+valid and are not silently expanded. Capability probing reports requested,
+installed, effective, unavailable, and broken optional features separately.
 
 5. Binary resolution and integrity:
    - On Unix:

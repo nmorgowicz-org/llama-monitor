@@ -23,8 +23,8 @@ use crate::inference::rapid_mlx::model_resolver::{
     AuthoritativeSafetensorsSource, RapidMlxModelSource,
 };
 use crate::inference::rapid_mlx::updater::{
-    ManagedReleaseChannel, ManagedReleaseSelection, ManagedRuntimeStatus, RapidMlxRuntimeManager,
-    RuntimeInventoryEntry, RuntimeMutationResult,
+    ManagedReleaseChannel, ManagedReleaseSelection, ManagedRuntimeExtra, ManagedRuntimeStatus,
+    RapidMlxRuntimeManager, RuntimeInventoryEntry, RuntimeMutationResult, default_runtime_extras,
 };
 use crate::inference::rapid_mlx::{RapidMlxConfig, check_mutual_exclusions};
 use crate::state::{DoctorFinding, DoctorFindingType, DoctorSeverity, FixAction};
@@ -99,6 +99,7 @@ struct PublicRuntimeInventoryEntry {
     environment_id: String,
     version: String,
     release_channel: ManagedReleaseChannel,
+    extras: Vec<ManagedRuntimeExtra>,
     active: bool,
     rollback_candidate: bool,
     complete: bool,
@@ -110,6 +111,7 @@ impl From<RuntimeInventoryEntry> for PublicRuntimeInventoryEntry {
             environment_id: entry.environment_id,
             version: entry.version,
             release_channel: entry.release_channel,
+            extras: entry.extras,
             active: entry.active,
             rollback_candidate: entry.rollback_candidate,
             complete: entry.complete,
@@ -180,6 +182,8 @@ impl Default for PublishedRelease {
 struct RuntimeMutationRequest {
     version: String,
     channel: ManagedReleaseChannel,
+    #[serde(default = "default_runtime_extras")]
+    extras: Vec<ManagedRuntimeExtra>,
     confirm: String,
 }
 
@@ -188,6 +192,7 @@ impl Default for RuntimeMutationRequest {
         Self {
             version: String::new(),
             channel: ManagedReleaseChannel::Stable,
+            extras: default_runtime_extras(),
             confirm: String::new(),
         }
     }
@@ -1345,11 +1350,12 @@ fn mutation_route(ctx: ApiCtx, state: RuntimeApiState, operation: RuntimeOperati
                             "Managed Rapid-MLX runtime changes require Apple Silicon macOS",
                         ));
                     }
-                    let release = match select_published_release(
-                        &state,
-                        &request.version,
-                        request.channel,
-                    )
+            let release = match select_published_release(
+                &state,
+                &request.version,
+                request.channel,
+                request.extras,
+            )
                     .await
                     {
                         Ok(release) => release,
@@ -1435,7 +1441,13 @@ async fn published_selection_for_active_runtime(
     let active = status
         .active
         .ok_or_else(|| anyhow::anyhow!("No active managed runtime"))?;
-    select_published_release(state, &active.version, active.release_channel).await
+    select_published_release(
+        state,
+        &active.version,
+        active.release_channel,
+        active.extras,
+    )
+    .await
 }
 
 fn job_route(ctx: ApiCtx, state: RuntimeApiState) -> ApiRoute {
@@ -1635,30 +1647,44 @@ async fn select_published_release(
     state: &RuntimeApiState,
     version: &str,
     channel: ManagedReleaseChannel,
+    extras: Vec<ManagedRuntimeExtra>,
 ) -> anyhow::Result<ManagedReleaseSelection> {
     RapidMlxRuntimeManager::validate_published_version(version, channel)?;
-    if let Ok(selection) =
-        select_release_from_metadata(published_releases(state).await?, version, channel)
-    {
+    if let Ok(selection) = select_release_from_metadata(
+        published_releases(state).await?,
+        version,
+        channel,
+        extras.clone(),
+    ) {
         return Ok(selection);
     }
 
     let url = format!("{RELEASE_BY_TAG_URL}/v{version}");
     let body = fetch_bounded_release_body(&state.client, &url).await?;
     let release: GithubRelease = serde_json::from_slice(&body)?;
-    select_release_from_metadata(decode_github_releases(vec![release]), version, channel)
+    select_release_from_metadata(
+        decode_github_releases(vec![release]),
+        version,
+        channel,
+        extras,
+    )
 }
 
 fn select_release_from_metadata(
     releases: Vec<PublishedRelease>,
     version: &str,
     channel: ManagedReleaseChannel,
+    extras: Vec<ManagedRuntimeExtra>,
 ) -> anyhow::Result<ManagedReleaseSelection> {
     let release = releases
         .into_iter()
         .find(|release| release.version == version && release.channel == channel)
         .ok_or_else(|| anyhow::anyhow!("Release was not found"))?;
-    ManagedReleaseSelection::from_published_release(release.version, release.channel)
+    ManagedReleaseSelection::from_published_release_with_extras(
+        release.version,
+        release.channel,
+        extras,
+    )
 }
 
 fn random_job_id() -> anyhow::Result<String> {
@@ -2460,6 +2486,30 @@ mod tests {
     }
 
     #[test]
+    fn release_request_defaults_to_guided_and_vision_profile() {
+        let request: RuntimeMutationRequest =
+            serde_json::from_str(r#"{"version":"0.10.10","channel":"stable","confirm":"x"}"#)
+                .unwrap();
+        assert_eq!(request.extras, default_runtime_extras());
+    }
+
+    #[test]
+    fn release_request_rejects_duplicate_extras() {
+        let request: RuntimeMutationRequest = serde_json::from_str(
+            r#"{"version":"0.10.10","channel":"stable","extras":["vision","vision"],"confirm":"x"}"#,
+        )
+        .unwrap();
+        assert!(
+            ManagedReleaseSelection::from_published_release_with_extras(
+                request.version,
+                request.channel,
+                request.extras,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn release_selection_requires_exact_published_version_and_channel() {
         let releases = vec![PublishedRelease {
             version: "0.10.10".into(),
@@ -2472,6 +2522,7 @@ mod tests {
                 releases.clone(),
                 "0.10.10",
                 ManagedReleaseChannel::Stable,
+                Vec::new(),
             )
             .is_ok()
         );
@@ -2480,12 +2531,18 @@ mod tests {
                 releases.clone(),
                 "0.10.11",
                 ManagedReleaseChannel::Stable,
+                Vec::new(),
             )
             .is_err()
         );
         assert!(
-            select_release_from_metadata(releases, "0.10.10", ManagedReleaseChannel::Prerelease,)
-                .is_err()
+            select_release_from_metadata(
+                releases,
+                "0.10.10",
+                ManagedReleaseChannel::Prerelease,
+                Vec::new(),
+            )
+            .is_err()
         );
     }
 
@@ -2520,6 +2577,7 @@ mod tests {
             environment_id: "rapid-mlx-0.10.10-test".into(),
             version: "0.10.10".into(),
             release_channel: ManagedReleaseChannel::Stable,
+            extras: Vec::new(),
             executable_path: "/Users/person/.config/llama-monitor/private/rapid-mlx".into(),
             active: true,
             rollback_candidate: false,

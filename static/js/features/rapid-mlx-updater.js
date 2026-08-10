@@ -52,7 +52,11 @@ export function initRapidMlxUpdater() {
         const resp = await fetch('/api/rapid-mlx/runtime/upgrade', {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ version: latest.version, confirm: 'UPGRADE_RAPID_MLX_RUNTIME' }),
+        body: JSON.stringify({
+          version: latest.version,
+          extras: selectedRuntimeExtras(),
+          confirm: 'UPGRADE_RAPID_MLX_RUNTIME',
+        }),
         });
         if (!resp.ok) {
           const body = await resp.json().catch(() => ({}));
@@ -299,6 +303,11 @@ async function openRapidMlxModal() {
   const active = _runtimeStatus?.active ?? null;
   const mutating = _runtimeStatus?.mutation_in_progress ?? false;
   const rollbackAvail = _runtimeStatus?.rollback_available ?? false;
+  const profileEl = document.getElementById('rapid-mlx-profile');
+  if (profileEl) {
+    profileEl.style.display = (supported && !mutating) ? '' : 'none';
+    syncRuntimeProfile(active);
+  }
 
   // Header: version info
   const statusEl = document.getElementById('rapid-mlx-status-text');
@@ -366,6 +375,27 @@ function resetChangelogSection() {
 function selectReleaseRow(row) {
   document.querySelectorAll('.rapid-mlx-release-row--selected').forEach(el => el.classList.remove('rapid-mlx-release-row--selected'));
   row.classList.add('rapid-mlx-release-row--selected');
+}
+
+function selectedRuntimeExtras() {
+  const inputs = ['guided', 'vision', 'embeddings', 'audio'].map(extra => document.getElementById(`rapid-mlx-extra-${extra}`));
+  if (!inputs.some(Boolean)) {
+    return Array.isArray(_runtimeStatus?.active?.extras)
+      ? _runtimeStatus.active.extras
+      : ['guided', 'vision'];
+  }
+  return ['guided', 'vision', 'embeddings', 'audio'].filter(extra => {
+    const input = document.getElementById(`rapid-mlx-extra-${extra}`);
+    return input?.checked === true;
+  });
+}
+
+function syncRuntimeProfile(active) {
+  const defaults = active ? (Array.isArray(active.extras) ? active.extras : []) : ['guided', 'vision'];
+  ['guided', 'vision', 'embeddings', 'audio'].forEach(extra => {
+    const input = document.getElementById(`rapid-mlx-extra-${extra}`);
+    if (input) input.checked = defaults.includes(extra);
+  });
 }
 
 function buildReleaseRow(release, isCurrent, isLatest) {
@@ -449,9 +479,7 @@ async function installVersion(btn, release) {
     return;
   }
 
-  const actionName = release.version
-    ? ('upgrade' in _runtimeStatus?.active ? 'upgrade' : 'install')
-    : 'install';
+  const actionName = _runtimeStatus?.active ? 'upgrade' : 'install';
 
   try {
     const resp = await fetch(
@@ -465,6 +493,7 @@ async function installVersion(btn, release) {
         body: JSON.stringify({
           version: release.version,
           channel: release.channel || 'stable',
+          extras: selectedRuntimeExtras(),
           confirm: `${actionName.toUpperCase()}_RAPID_MLX_RUNTIME`,
         }),
       }

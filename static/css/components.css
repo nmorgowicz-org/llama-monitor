@@ -4378,6 +4378,38 @@ button:disabled {
   font-size: 11px;
   color: var(--color-fg-soft);
 }
+.rapid-mlx-profile {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 12px;
+  margin: 8px 14px 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-fg-subtle) 20%, transparent);
+  border-radius: 8px;
+  color: var(--color-fg-soft);
+  font-size: 10px;
+}
+.rapid-mlx-profile legend {
+  padding: 0 4px;
+  color: var(--color-text-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.rapid-mlx-profile label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.rapid-mlx-profile input {
+  accent-color: var(--color-primary);
+}
+.rapid-mlx-profile small {
+  grid-column: 1 / -1;
+  color: var(--color-text-muted);
+  line-height: 1.35;
+}
 
 .rapid-mlx-modal-actions {
   display: flex;

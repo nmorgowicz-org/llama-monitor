@@ -25,6 +25,7 @@ export default async function(ctx, options) {
                         active: {
                             version: '0.10.10',
                             source: 'managed',
+                            extras: ['guided', 'vision'],
                             path: '~/.config/llama-monitor/runtimes/rapid-mlx/0.10.10/venv/bin/rapid-mlx',
                         },
                         last_known_good: { version: '0.10.9' },
