@@ -745,10 +745,7 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 
 ### Phase 9 — Formatting, endpoints, and revision-pinned template substitution
 
-- **State:** 9a, 9-RapidMLX, 9b, 9c, 9d, 9e verified complete (2026-08-03). 9f (client-protocol qualification, lowest urgency) not started.
-  refinements in progress (modal theme, pre-populated editor, inline discussion viewer, upstream
-  template loading, chat-template row redesign, Rapid-MLX preset editor wiring). Only 9f
-  (client-protocol qualification, lowest urgency) remains not started.
+- **State:** 9a, 9-RapidMLX, 9b, 9c, 9d, 9e, and 9f verified complete (9f client-protocol qualification verified 2026-08-07). Remaining items are documentation/refinement notes only; no Phase 9 implementation packet is outstanding. The detailed 9f section below is authoritative: llama.cpp structured Chat, raw Text, and OpenAI legacy Text were live round-tripped with the qualified template and tool-call fixture; Rapid-MLX structured chat/tool behavior was covered by existing smoke tests, with raw-text behavior documented as shared OpenAI-compatibility inference.
   The execution companion was updated to reflect work already done but not recorded: 9a's revision
   pinning, retained history, and rollback shipped in spawn_wizard.rs without a ledger row. Phase
   9 is now split into ordered parts for context management: Part A (lifecycle core), Part R
@@ -1124,7 +1121,7 @@ Known call sites requiring remediation (audit for more before closing this packe
 
 ### Phase 12 — Security, dependencies, and watchlist
 
-- **State:** Not started
+- **State:** In progress — initial authenticated-route audit passed (39 `auth_routing` tests, 2026-08-10); dependency, probe, path, and remote-code review remains.
 - **Budget:** 120k
 - **Depends on:** Phases 3 and 8–11
 - **Read:** gaps 3.10/3.11; D12/D13/D17/D21/D26; A11–A14/A18/A24/A27/A34/A44; Phase 12; security matrix/evidence.
