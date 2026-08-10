@@ -79,9 +79,9 @@ export function renderMmprojSection() {
   if (!row) return;
 
   // mmproj is a llama.cpp/GGUF concept — Rapid-MLX vision uses its own MLX-VLM
-  // component set (currently unqualified for release, see vision detection work),
-  // not a companion projector file. Showing this control under Rapid-MLX would
-  // offer a knob that does nothing for that backend.
+  // component set and keeps the vision tower inside the native model. Showing
+  // this companion-projector control under Rapid-MLX would offer a knob that
+  // does nothing for that backend.
   if (wizardState.engine.selected === 'rapid_mlx') {
     row.style.display = 'none';
     return;

@@ -14,6 +14,10 @@
 // shared wizard shell and delegates to this module at its Rapid-MLX call sites.
 
 import { wizardState, dom } from './spawn-wizard.js';
+import {
+    rapidMlxPrefillStepSizeDefault,
+    rapidMlxProfileHasVision,
+} from './rapid-mlx-prefill.js';
 
 /*
  * Mirrors the two Rapid-MLX mutual-exclusion rules that involve the Phase 7 throughput
@@ -430,10 +434,16 @@ export function applyRapidMlxDefaults() {
     if (dom.turboquantModeSelect) dom.turboquantModeSelect.value = 'none';
   }
   // Default workloadScenario to Interactive Coding Agent if not set
-  if (!h.workloadScenario) {
-    h.workloadScenario = 'interactive_coding_agent';
-  }
-  applyReasoningModeLock();
+    if (!h.workloadScenario) {
+        h.workloadScenario = 'interactive_coding_agent';
+    }
+    if (!h.prefillStepSizeUserSet) {
+        h.prefillStepSize = rapidMlxPrefillStepSizeDefault(wizardState.model.rapidMlxProfile);
+        if (dom.prefillStepSizeSelect) {
+            dom.prefillStepSizeSelect.value = String(h.prefillStepSize);
+        }
+    }
+    applyReasoningModeLock();
   window.scheduleVramUpdate?.();
 }
 
@@ -477,7 +487,10 @@ export function bindRapidMlxAdvancedControls() {
   bindSel(dom.toolCallParserSelect, 'toolCallParser');
   bindSel(dom.reasoningParserSelect, 'reasoningParser');
   bindSel(dom.hybridModeSelect, 'hybridMode');
-  bindSel(dom.prefillStepSizeSelect, 'prefillStepSize');
+    bindSel(dom.prefillStepSizeSelect, 'prefillStepSize');
+    dom.prefillStepSizeSelect?.addEventListener('change', () => {
+        wizardState.hardware.prefillStepSizeUserSet = true;
+    });
   bindSel(dom.speculativeSourceSelect, 'speculativeSource');
   bindSel(dom.speculativeTokensSelect, 'speculativeTokens');
 
@@ -624,7 +637,7 @@ function _renderRapidMlxProfileHints() {
   hintsEl.style.display = '';
   hintsEl.innerHTML = '';
 
-  const hasVision = profile.extras && (profile.extras.vision || profile.extras.has_vision_tower);
+    const hasVision = rapidMlxProfileHasVision(profile);
   const hasEmbeddings = profile.extras && profile.extras.embeddings;
   if (profile.reasoning_parser && wizardState.hardware.rapidReasoningMode == null) {
     wizardState.hardware.rapidReasoningMode = 'on';
@@ -694,7 +707,14 @@ function _renderRapidMlxProfileHints() {
     // Auto leaves Rapid's model-specific MLLM detection in control. The user
     // can only force the safe text lane here; force-on needs model evidence.
     if (hasVision) {
-    const configRow = document.createElement('div');
+        if (!wizardState.hardware.prefillStepSizeUserSet) {
+            wizardState.hardware.prefillStepSize = rapidMlxPrefillStepSizeDefault(profile);
+            if (dom.prefillStepSizeSelect) {
+                dom.prefillStepSizeSelect.value = String(wizardState.hardware.prefillStepSize);
+            }
+            window.scheduleVramUpdate?.();
+        }
+        const configRow = document.createElement('div');
     configRow.className = 'rapid-mlx-config-row';
     const configLabel = document.createElement('span');
     configLabel.className = 'rapid-mlx-config-label';
@@ -845,7 +865,7 @@ export function buildRapidMlxConfig(h, m) {
     auto_tool_choice: !!h.autoToolChoice,
     no_thinking: h.rapidReasoningMode === 'off',
     hybrid_mode: h.hybridMode || 'auto',
-    prefill_step_size: Number(h.prefillStepSize || 512),
+        prefill_step_size: Number(h.prefillStepSize || rapidMlxPrefillStepSizeDefault(m.rapidMlxProfile)),
     ...(escapeHatchFlags.length > 0 && { escape_hatch_flags: escapeHatchFlags }),
     // Phase 7: KV/cache policy (D6 catalog IDs)
     ...(h.kvCacheDtype && h.kvCacheDtype !== 'int4' && { kv_cache_dtype: h.kvCacheDtype }),

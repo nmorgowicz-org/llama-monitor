@@ -92,6 +92,8 @@ pub const FEATURES_PRESET_EDITOR_MLX_JS: &str =
 pub const FEATURES_PRESETS_JS: &str = include_str!("../../static/js/features/presets.js");
 pub const FEATURES_RAPID_MLX_CARDS_JS: &str =
     include_str!("../../static/js/features/rapid-mlx-cards.js");
+pub const FEATURES_RAPID_MLX_PREFILL_JS: &str =
+    include_str!("../../static/js/features/rapid-mlx-prefill.js");
 pub const FEATURES_RAPID_MLX_UPDATER_JS: &str =
     include_str!("../../static/js/features/rapid-mlx-updater.js");
 pub const FEATURES_REMOTE_AGENT_JS: &str = include_str!("../../static/js/features/remote-agent.js");

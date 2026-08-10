@@ -13,6 +13,22 @@ import { test, expect } from '@playwright/test';
 import { dismissAuthShell } from '../helpers.js';
 
 test.describe('Phase 7 preset serialization', () => {
+  test('@in-memory-test Rapid-MLX uses a larger prefill default only for verified vision profiles', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('html.modules-ready');
+    const defaults = await page.evaluate(async () => {
+      const { rapidMlxPrefillStepSizeDefault, rapidMlxProfileHasVision } = await import('/js/features/rapid-mlx-prefill.js');
+      return {
+        text: rapidMlxPrefillStepSizeDefault({ extras: { vision: true } }),
+        vision: rapidMlxPrefillStepSizeDefault({ extras: { has_vision_tower: true } }),
+        confirmed: rapidMlxProfileHasVision({ extras: { has_vision_tower: true } }),
+      };
+    });
+    expect(defaults.text).toBe(512);
+    expect(defaults.vision).toBe(1536);
+    expect(defaults.confirmed).toBe(true);
+  });
+
   test('@in-memory-test canonical estimates keep Rapid prefill separate from llama ubatch', async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');

@@ -711,7 +711,8 @@ export const wizardState = {
     toolCallParser: '',
     reasoningParser: '',
     hybridMode: 'auto',
-    prefillStepSize: 512,
+  prefillStepSize: 512,
+  prefillStepSizeUserSet: false,
     speculativeEnabled: false,
     speculativeSource: 'embedded',
     speculativeModel: '',
@@ -1075,7 +1076,8 @@ function resetWizardState() {
   wizardState.hardware.cacheMode = 'custom';
   wizardState.hardware.prefillBatchSize = '';
   wizardState.hardware.completionBatchSize = '';
-  wizardState.hardware.prefillStepSize = 512;
+    wizardState.hardware.prefillStepSize = 512;
+    wizardState.hardware.prefillStepSizeUserSet = false;
   wizardState.hardware.rapidReasoningMode = 'on';
   wizardState.hardware.speculativeEnabled = false;
   wizardState.hardware.speculativeSource = 'embedded';

@@ -246,7 +246,8 @@ pub struct RapidMlxConfig {
     /// Completion batch size.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completion_batch_size: Option<u64>,
-    /// Prompt chunk processed per prefill step.
+    /// Prompt chunk processed per prefill step. The generic text default is 512;
+    /// the UI raises this to 1536 for a verified native vision model profile.
     #[serde(default = "default_prefill_step_size")]
     pub prefill_step_size: u32,
     // ── Phase 7: reasoning/speculative ─────────────────────────────────

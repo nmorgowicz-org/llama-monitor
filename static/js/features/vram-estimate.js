@@ -6,6 +6,7 @@
 // MemoryBreakdown values for the same model/context/backend.
 
 import { showToast } from './toast.js';
+import { RAPID_MLX_TEXT_PREFILL_STEP_SIZE, RAPID_MLX_VISION_PREFILL_STEP_SIZE } from './rapid-mlx-prefill.js';
 
 let debounce = null;
 let currentRequestId = 0;
@@ -24,7 +25,11 @@ export function rapidEstimatePolicyFromConfig(rapidMlx = {}) {
     // only ever produced null. Scenario is a wizard-side input, derived from the page-1
     // use-case cards; every other surface takes the estimator default.
     retained_cache_mib: rapidMlx.prefix_cache_enabled === false ? 0 : (rapidMlx.retained_cache_mib ?? 8192),
-    prefill_step_size: Number(rapidMlx.prefill_step_size ?? 512),
+        prefill_step_size: Number(rapidMlx.prefill_step_size ?? (
+            rapidMlx.mllm_vision === 'on'
+                ? RAPID_MLX_VISION_PREFILL_STEP_SIZE
+                : RAPID_MLX_TEXT_PREFILL_STEP_SIZE
+        )),
     speculative_config: rapidMlx.speculative_config || null,
   };
 }

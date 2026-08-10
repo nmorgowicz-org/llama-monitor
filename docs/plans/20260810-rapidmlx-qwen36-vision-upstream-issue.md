@@ -225,5 +225,17 @@ This supports a VLM-specific recommendation of `1536` as the initial tier,
 with `2048` as the next escalation for larger screenshots/prompts. `512`
 remains the text-only default. The estimator, Spawn Wizard, and Preset Editor
 should use the model's verified multimodal capability when selecting this
-default; that policy change is not applied yet pending the cross-surface
-implementation pass.
+default; the cross-surface implementation is recorded below.
+
+## Cross-surface default implementation (2026-08-10)
+
+Rapid-MLX now keeps the generic text default at `512` while applying `1536`
+automatically when the live model profile confirms `has_vision_tower`. This
+behavior is shared by the Spawn Wizard, Preset Editor, and VRAM-estimate policy
+builder; an explicit user-selected prefill value is preserved. The stale
+Rapid-MLX mmproj qualification note was removed, and the runtime comparison now
+records PR #1798's serialized hybrid vision lane and the Qwen3.6 live evidence.
+
+The JS module baseline updater now serves an ephemeral static asset server when
+`LLAMA_MONITOR_UI_URL` is not supplied, so baseline refresh no longer requires
+a running llama-monitor instance.

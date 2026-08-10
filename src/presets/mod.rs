@@ -54,7 +54,8 @@ pub fn migrate_preset(preset: &mut ModelPreset) -> bool {
     // migration only bumps the schema marker. That is not the same as behaviorally neutral:
     // the defaults are llama-monitor's, not rapid-mlx's, so a pre-Phase-7 preset picks up
     // `prefill_step_size: 512` where the runtime's own default is 2048. That is the intended
-    // policy (512 measured better for text; vision work raises it deliberately), but it is a
+    // policy (512 measured better for text; verified Rapid-MLX vision profiles use
+    // 1536), but it is a
     // real change to how the preset launches, not a no-op.
     if preset.schema_version.unwrap_or(2) < 3 {
         preset.schema_version = Some(3);

@@ -18,6 +18,7 @@ import {
     getDefaultTemplateForFamily,
 } from './chat-template-registry.js';
 import { buildEstimateBody, rapidEstimatePolicyFromConfig } from './vram-estimate.js';
+import { rapidMlxPrefillStepSizeDefault, rapidMlxProfileHasVision } from './rapid-mlx-prefill.js';
 import { openEstimateEvidenceDrawer } from './evidence-drawer.js';
 import {
     chatTemplateStatusText,
@@ -28,6 +29,7 @@ import {
 
 
 let newPresetSeed = null;
+let _presetRapidMlxPrefillExplicit = false;
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -1258,6 +1260,7 @@ export function openPresetModal(mode, section, seedPreset = null) {
     clearFieldErrors();
     newPresetSeed = mode === 'new' && seedPreset ? structuredClone(seedPreset) : null;
     _presetRapidMlxProfile = null;
+    _presetRapidMlxPrefillExplicit = false;
 
     if (mode === 'edit') {
         const id = document.getElementById('preset-select').value;
@@ -1287,6 +1290,7 @@ export function openPresetModal(mode, section, seedPreset = null) {
         _renderPresetArchInfo(p);
         setVal('modal-alias', p.alias || '');
         // Fetch live Rapid-MLX profile when editing a Rapid-MLX preset
+        _presetRapidMlxPrefillExplicit = p.rapid_mlx?.prefill_step_size != null;
         _schedulePresetRapidMlxProfile();
         numOrEmpty('modal-gpu-layers', p.gpu_layers);
         setChk('modal-no-mmap', p.no_mmap);
@@ -1528,6 +1532,7 @@ export function openPresetModal(mode, section, seedPreset = null) {
         _toggleSpecFields('');
         setStructuredOutputMode('');
         _configureBackendPresetEditor(newPresetSeed);
+        _presetRapidMlxPrefillExplicit = newPresetSeed?.rapid_mlx?.prefill_step_size != null;
     }
 
     const presetModel = document.getElementById('modal-model-path')?.value.trim();
@@ -3151,6 +3156,9 @@ document.getElementById('modal-model-path')?.addEventListener('input', () => {
         document.getElementById(id)?.removeAttribute('max');
     });
     // Fetch live Rapid-MLX profile for this model when backend is rapid_mlx
+    document.getElementById('modal-rapid-prefill-step-size')?.addEventListener('change', () => {
+        _presetRapidMlxPrefillExplicit = true;
+    });
     _schedulePresetRapidMlxProfile();
 });
 
@@ -3172,7 +3180,8 @@ function _schedulePresetRapidMlxProfile() {
         }
         const rapidMlx = preset.rapid_mlx;
         const modelId = rapidMlx?.model_source_view?.canonical_identity
-            || rapidMlx?.model_source_view?.display_name || '';
+            || rapidMlx?.model_source_view?.display_name
+            || presetModelSource(preset) || '';
         if (!modelId || modelId.trim().length < 2) {
             _presetRapidMlxProfile = null;
             _presetUnifiedProfile = null;
@@ -3199,6 +3208,11 @@ function _schedulePresetRapidMlxProfile() {
                 _presetUnifiedProfile = udata || null;
             } else {
                 _presetUnifiedProfile = null;
+            }
+
+            if (rapidMlxProfileHasVision(_presetRapidMlxProfile) && !_presetRapidMlxPrefillExplicit) {
+                setOpt('modal-rapid-prefill-step-size', String(rapidMlxPrefillStepSizeDefault(_presetRapidMlxProfile)));
+                updatePresetVram();
             }
 
             // Apply unified profile recommendations as hints
