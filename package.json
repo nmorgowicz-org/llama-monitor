@@ -6,10 +6,10 @@
     "validate-wizard-groups": "node scripts/validate-wizard-groups.mjs"
   },
   "devDependencies": {
-    "eslint": "10.7.0",
+    "eslint": "10.8.0",
     "eslint-plugin-no-unsanitized": "4.1.5",
-    "globals": "17.7.0",
-    "puppeteer": "25.3.0"
+    "globals": "17.9.0",
+    "puppeteer": "25.4.0"
   },
   "dependencies": {
     "dompurify": "^3.4.13",
