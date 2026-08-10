@@ -167,3 +167,25 @@ RuntimeError: '<model snapshot>' hybrid/linear-attention (ArraysCache), incompat
 - [ ] Link issue #352 and PRs #354, #1178, and #1277.
 - [ ] Ask for a hybrid-aware scheduler with an explicit single-active fallback; do not propose simply deleting the startup guard.
 - [ ] Submit through the required Bug Report workflow/template and wait for maintainer triage.
+## Upstream PR #1798 review (2026-08-10)
+
+Rapid-MLX PR [#1798](https://github.com/raullenchai/Rapid-MLX/pull/1798) is merged (merge commit `b1b1fa7ac36818562780b8fb54b8557c63933225`) with title `fix(mllm): serve hybrid vision models through a serialized lane`. This supersedes the initial audit note that no matching PR was open. Its implementation matches the bounded fix proposed above:
+
+- admits only the concrete `mlx-lm` `ArraysCache` when the compatibility lane is enabled;
+- forces `max_num_seqs`, prefill batch size, and completion batch size to `1` while retaining the waiting-queue admission cap;
+- preserves fail-closed behavior for Mamba, quantized, and unknown cache types;
+- exercises concrete `ArraysCache` merge/filter/extract primitives and claims a real Qwen3.5-9B image request plus queued/cancelled-request checks.
+
+Qualification remains incomplete for this plan: the PR's real-weight run used Qwen3.5-9B, not either pinned Qwen3.6 checkpoint, because the author's 18-GB runner could not safely load the larger model. GitHub's green Apple-Silicon smoke job used Qwen3.5-4B in the text-only `--no-mllm` lane, so it is not an independent vision validation. The PR has no maintainer review; an automated scorecard marked its targeted-test command `exit 2` while still reporting the check as PASS.
+
+Release status: PyPI/latest Rapid-MLX release is `0.12.8` (uploaded before PR #1798 merged), so the fix is not yet available in the managed `0.12.7`/`0.12.8` binaries. Re-test the exact Qwen3.6-27B and Qwen3.6-35B snapshots against a release containing the merge before closing Phase 14.5. Do not submit the original bug report as an unresolved defect unless that release test still fails; retain the report fields as a regression/qualification fallback.
+
+## Local source validation (2026-08-10)
+
+Fetched upstream `main` at `f0d82d97833c15126154f0207594ceb6e7c8b8f5` into the isolated checkout `/private/tmp/rapid-mlx-upstream-review`. With the installed vision stack (`mlx==0.31.2`, `mlx-lm==0.31.3`, `mlx-vlm==0.6.3`) and GPU access:
+
+- `tests/test_mllm_hybrid_probe.py`: **14 passed**;
+- MLLM batch-generator/continuous-batching selection: **82 passed, 3 pre-existing numerical failures** (the same three failures reproduce on the pre-PR base commit);
+- MLLM cancellation/cache/core suites: **54 passed, 6 deselected**.
+
+No Qwen3.6 MLX snapshot is present locally, so an end-to-end Qwen3.6 image request remains the final gate. The isolated source checkout is ready for that run when a pinned MLX snapshot is available; no managed runtime was overwritten.
