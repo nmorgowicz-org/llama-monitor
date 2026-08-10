@@ -300,6 +300,7 @@ Current conservative evidence: Qwen 3.6 35B A3B text receipts fail the source-re
 
 - **State:** Shipped 2026-08-05, reduced scope (see note below)
 - **Milestone (2026-08-10):** Added authenticated `/api/metrics/inference` with a stable privacy-safe metrics dictionary. Each aggregate metric reports `effective` or explicit `unavailable` state, unit, and reason; missing backend telemetry is never zero-filled. WebSocket payloads expose the same dictionary. Cross-backend Doctor now checks llama.cpp tool-enabled KV cache below `q8_0`, disabled/empty Jinja template paths, malformed Rapid-MLX `--tool-call-parser` values, and broken managed optional extras. Unit coverage covers the new state contract and Doctor checks. Remaining Phase 11 work: authenticated bounded exports/backups/network and disk-state visibility/approved cleanup.
+- **Milestone (2026-08-10, audit):** Existing authenticated database surfaces satisfy the storage visibility/approved-cleanup baseline: `/api/db/stats` reports bounded counts and file size, `/api/db/integrity` is read-only, maintenance operations are explicit, backups use SQLite online backup, listing is authenticated, and deletion requires `db-admin-token`. No new raw database export path is needed for this packet.
 - **Budget:** 170k
 - **Depends on:** Phase 5
 - **Read:** comprehensive Section 6 in full; D14/D15/D17–D20; A6–A9/A21/A23/A31–A37/A41; Phase 6; cache/client matrices; cache evidence ledger rows; [`20260726-phase6_rapidmlx_cache_benchmarking.md`](./20260726-phase6_rapidmlx_cache_benchmarking.md).
