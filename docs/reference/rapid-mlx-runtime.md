@@ -289,6 +289,12 @@ preserved across upgrades and rollback. Existing core-only manifests remain
 valid and are not silently expanded. Capability probing reports requested,
 installed, effective, unavailable, and broken optional features separately.
 
+The manifest's `extras` array is the requested install profile, not proof that a
+model can serve every modality. Legacy manifests that predate profile recording
+deserialize as an empty core-only profile and therefore never imply vision
+support; the resolved dependency receipt and capability probe provide the
+installed/effective evidence.
+
 5. Binary resolution and integrity:
    - On Unix:
      - Expected: `tool/rapid-mlx/bin/rapid-mlx`

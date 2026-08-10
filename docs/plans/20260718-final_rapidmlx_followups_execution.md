@@ -1161,7 +1161,7 @@ Known call sites requiring remediation (audit for more before closing this packe
 
 ### Phase 14.5 — Rapid-MLX VLM/vision revisit (2026-08-07)
 
-- **State:** Not started. Explicitly added so this is not lost among the Phase 10-14 backlog.
+- **State:** Verified complete (2026-08-10) with the truthful Rapid-MLX Qwen3.6 vision gate intentionally retained. The managed vision profile and non-hybrid positive control passed; both required Qwen3.6 targets remain blocked by the upstream hybrid `ArraysCache`/MLLM scheduler incompatibility.
 - **Depends on:** Phase 14 (or later, at user's discretion) — a deliberate last-in-list item, not a
   blocker for anything else.
 - **Why this is separate from the vision work already in the plan:** `[[project_rapidmlx_vision_off_the_table]]`
@@ -1190,6 +1190,14 @@ Known call sites requiring remediation (audit for more before closing this packe
   requests with the new profile, plus a known-good VLM positive control. Retain
   full server stderr and the HTTP/error-event outcome, including empty-200
   responses, before changing any Vision UI availability claim.
+
+### Phase 14.5 evidence and upstream review (2026-08-10)
+
+- Managed profile gate passed on release-built llama-monitor: Rapid-MLX `0.12.7`, environment `0.12.7-7b14bfdd7c1f98998c9bdca5`, manifest `extras: ["guided", "vision"]`, resolved `mlx-vlm==0.6.3` (`mlx==0.31.2`, `mlx-lm==0.31.3`).
+- Gemma 4 12B QAT positive control (revision `e70c6b3ba0979b3357dcd2f223ad8bde7787a6b6`) with effective `serve --mllm` returned HTTP 200 and a non-empty image description.
+- Nightmedia Qwen3.6-27B F451/Tess MXFP4 (revision `721c71607072ecc0f0904db862d64ea1d0ac59fb`) and Qwen3.6-35B-A3B Fable Holo 3.1 MXFP4 (revision `16279aa65cee814c6b23e068a71eec7e1617fae0`) both failed before HTTP with the explicit hybrid/linear-attention `ArraysCache` incompatibility for MLLM continuous batching. The separate Qwen3.5-9B hybrid control reproduced the same startup failure. These checkpoints contain vision metadata; this is not a missing-extra result.
+- Upstream review found the relevant fixes are already merged: Rapid-MLX PR #354 closes issue #352 by failing fast and documenting that hybrid `ArraysCache` backbones cannot use `--mllm`; PR #1178 makes default routing fall back to text-only for these models but preserves explicit `--mllm` failure; PR #1277 (merged 2026-07-28 and present in the 0.12.7 era) accepts native `mlx-vlm` KV-cache classes but does not make hybrid `ArraysCache` compatible. No open Rapid-MLX PR matching `ArraysCache`/hybrid MLLM/Qwen3.6 support was found. Current upstream direction is therefore truthful text-only fallback or a future scheduler redesign, not a vision UI re-enable.
+- **Gate decision:** leave Rapid-MLX Qwen3.6 vision unavailable/deferred in UI/docs. Re-open only after upstream supports hybrid MLLM batching or a supported non-hybrid Qwen3.6 VLM is qualified.
 
 ## 6. Decision Gate Router
 
