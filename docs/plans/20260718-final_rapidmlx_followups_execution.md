@@ -299,6 +299,7 @@ Current conservative evidence: Qwen 3.6 35B A3B text receipts fail the source-re
 ### Phase 6 — Cross-backend cache guidance
 
 - **State:** Shipped 2026-08-05, reduced scope (see note below)
+- **Milestone (2026-08-10):** Added authenticated `/api/metrics/inference` with a stable privacy-safe metrics dictionary. Each aggregate metric reports `effective` or explicit `unavailable` state, unit, and reason; missing backend telemetry is never zero-filled. WebSocket payloads expose the same dictionary. Cross-backend Doctor now checks llama.cpp tool-enabled KV cache below `q8_0`, disabled/empty Jinja template paths, malformed Rapid-MLX `--tool-call-parser` values, and broken managed optional extras. Unit coverage covers the new state contract and Doctor checks. Remaining Phase 11 work: authenticated bounded exports/backups/network and disk-state visibility/approved cleanup.
 - **Budget:** 170k
 - **Depends on:** Phase 5
 - **Read:** comprehensive Section 6 in full; D14/D15/D17–D20; A6–A9/A21/A23/A31–A37/A41; Phase 6; cache/client matrices; cache evidence ledger rows; [`20260726-phase6_rapidmlx_cache_benchmarking.md`](./20260726-phase6_rapidmlx_cache_benchmarking.md).
@@ -1112,7 +1113,7 @@ Known call sites requiring remediation (audit for more before closing this packe
 
 ### Phase 11 — Diagnostics, metrics, and storage
 
-- **State:** In progress — remote-agent idle-gating packet implemented (2026-08-09); diagnostics, metrics dictionary, Doctor, and storage packets remain.
+- **State:** In progress — remote-agent idle-gating packet implemented (2026-08-09); Phase 11 metrics/Doctor packet implemented (2026-08-10), storage and export packets remain.
 - **Milestone (2026-08-09):** The Windows-installed remote agent now keeps GPU and system metric workers idle until an authenticated master request is received. Authenticated requests refresh a shared activity timestamp; the gate expires after 180 seconds without activity, with a bounded five-second idle check. Unauthenticated `/health` remains available and does not wake polling. This preserves remote reachability while avoiding unnecessary system polling and thread work when no master is connected. Unit coverage verifies inactive, active-through-timeout, expiry, and clock-skew-safe behavior.
 - **Budget:** 170k
 - **Depends on:** Phases 3 and 5–7

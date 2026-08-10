@@ -6,8 +6,42 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
     gpu_metrics(ctx.clone())
         .or(system_metrics(ctx.clone()))
         .unify()
+        .or(inference_metrics(ctx.clone()))
+        .unify()
         .or(all_metrics(ctx))
         .unify()
+        .boxed()
+}
+
+fn inference_metrics(ctx: ApiCtx) -> ApiRoute {
+    let state = ctx.state;
+    let config = ctx.config;
+    warp::path!("metrics" / "inference")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let state = state.clone();
+            let config = config.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+                record_activity(&state);
+                let snapshot = state.inference_metrics.lock().unwrap().clone();
+                let response = snapshot.as_ref().map(|sample| {
+                    serde_json::json!({
+                        "sampled_at": sample.sampled_at,
+                        "backend": sample.backend,
+                        "health": sample.health,
+                        "ready": sample.ready,
+                        "metrics": sample.metric_dictionary(),
+                    })
+                });
+                Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({ "ok": true, "snapshot": response }),
+                )))
+            }
+        })
         .boxed()
 }
 

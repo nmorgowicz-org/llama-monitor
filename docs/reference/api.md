@@ -315,6 +315,36 @@ Detaches only if the active session is an attach session.
 { "ok": true }
 ```
 
+### `GET /api/metrics/inference`
+Auth: api-token.
+Returns the latest backend-neutral inference sample and a privacy-safe metric
+dictionary. Numeric values are aggregate-only; each dictionary entry includes
+`state` (`effective` or `unavailable`), `unit`, and an explanatory `reason`
+when the selected backend does not expose that metric. Missing telemetry is
+never represented as zero.
+
+```json
+{
+  "ok": true,
+  "snapshot": {
+    "backend": "rapid_mlx",
+    "health": "ok",
+    "metrics": {
+      "generation_tokens_per_second": {
+        "state": "effective",
+        "value": 42.1,
+        "unit": "tokens_per_second"
+      },
+      "ttft": {
+        "state": "unavailable",
+        "unit": "milliseconds",
+        "reason": "backend did not report this metric"
+      }
+    }
+  }
+}
+```
+
 ### `GET /api/capabilities`
 Auth: api-token.
 Returns the current metrics capability state.
