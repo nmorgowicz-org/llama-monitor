@@ -2357,6 +2357,43 @@ struct InstallDiscussionRequest {
     content: String,
 }
 
+/// Template release names become directory components. Keep them a single
+/// simple filename so discussion imports cannot escape the managed release
+/// root through `..`, separators, or platform-specific absolute paths.
+fn is_safe_template_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && !name.contains("..")
+        && !name.starts_with('/')
+        && !name.starts_with('\\')
+        && !name.contains('/')
+        && !name.contains('\\')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+#[cfg(test)]
+mod template_name_security_tests {
+    use super::is_safe_template_name;
+
+    #[test]
+    fn rejects_path_traversal_and_absolute_names() {
+        for name in ["../escape", "nested/name", "\\absolute", "/absolute"] {
+            assert!(
+                !is_safe_template_name(name),
+                "accepted unsafe name {name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_simple_release_names() {
+        assert!(is_safe_template_name("qwen3-froggeric-v1"));
+        assert!(is_safe_template_name("gemma4_official.v2"));
+    }
+}
+
 #[derive(serde::Deserialize, Default)]
 struct DiscussionSource {
     #[serde(default)]
@@ -2842,7 +2879,7 @@ fn api_chat_template_install_discussion(
                 if !check_api_token(&auth, &cfg) {
                     return Ok(unauthorized_api_token());
                 }
-                if req.name.is_empty() || req.content.is_empty() {
+                if !is_safe_template_name(&req.name) || req.content.is_empty() {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({ "ok": false, "error": "name and content are required" })),
                     ));
