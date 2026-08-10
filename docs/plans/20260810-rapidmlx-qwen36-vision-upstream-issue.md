@@ -195,3 +195,20 @@ The locally cached `~/.config/llama-monitor/models/mlx/native/nightmedia-27b-mxf
 - two concurrent image requests both HTTP 200, completing sequentially (about 9.8 s and 17.9 s, total about 18.0 s), demonstrating the singleton lane queues the second request.
 
 The exact 35B Nightmedia MLX snapshot should receive the same live check when selected; no managed runtime was overwritten.
+
+## Config-dir materialization and validation (2026-08-10)
+
+The preferred Nightmedia 35B snapshot was copied (not removed from the HF
+cache) into the llama-monitor model tree as a self-contained model:
+
+```text
+/Users/nick/.config/llama-monitor/models/mlx/native/nightmedia-35b-mxfp4-mlx
+```
+
+The copy dereferenced the Hugging Face snapshot's blob symlinks. It is 18 GB,
+contains four safetensors shards plus the tokenizer/config/processor files,
+and has no symlinks. Upstream Rapid-MLX `main` with the `vision` extra loaded
+this exact config-dir path successfully using the serialized hybrid lane;
+`GET /v1/models` reported `modality: image` and capabilities `text`,
+`vision`, and `tools`. The temporary validation server was stopped after the
+health check. The original HF snapshot remains intact.
