@@ -2051,6 +2051,26 @@ impl Drop for CleanupDir {
 mod tests {
     use super::*;
 
+    static WORKER_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn test_python_path() -> PathBuf {
+        if let Some(path) = std::env::var_os("PYTHON") {
+            let path = PathBuf::from(path);
+            if path.is_file() {
+                return path;
+            }
+        }
+        if let Some(path_var) = std::env::var_os("PATH") {
+            for directory in std::env::split_paths(&path_var) {
+                let candidate = directory.join("python3");
+                if candidate.is_file() {
+                    return candidate;
+                }
+            }
+        }
+        panic!("python3 interpreter not found on PATH; set PYTHON for recovery tests");
+    }
+
     fn write_valid_cache_manifest(cache: &Path, expected_key: &str) {
         let manifest = RecoveryManifest {
             schema_version: 1,
@@ -2228,7 +2248,9 @@ mod tests {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[tokio::test]
     async fn active_worker_cancellation_stops_child_and_writes_sentinel() {
+        let _guard = WORKER_TEST_LOCK.lock().unwrap();
         let temp = tempfile::tempdir().unwrap();
+        let python = test_python_path();
         let worker = temp.path().join("worker.py");
         let request = temp.path().join("request.json");
         let cancel_path = temp.path().join("cancel");
@@ -2241,15 +2263,9 @@ mod tests {
             trigger.store(true, Ordering::Release);
         });
         let started = std::time::Instant::now();
-        let error = run_worker(
-            Path::new("/usr/bin/python3"),
-            &worker,
-            &request,
-            &cancel_path,
-            cancelled,
-        )
-        .await
-        .expect_err("active worker must be cancelled");
+        let error = run_worker(&python, &worker, &request, &cancel_path, cancelled)
+            .await
+            .expect_err("active worker must be cancelled");
         trigger_task.await.unwrap();
         assert!(error.to_string().contains("cancelled"));
         assert!(cancel_path.is_file());
@@ -2292,7 +2308,9 @@ mod tests {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[tokio::test]
     async fn worker_output_overflow_is_bounded_without_pipe_deadlock() {
+        let _guard = WORKER_TEST_LOCK.lock().unwrap();
         let temp = tempfile::tempdir().unwrap();
+        let python = test_python_path();
         let worker = temp.path().join("worker.py");
         let request = temp.path().join("request.json");
         let cancel_path = temp.path().join("cancel");
@@ -2300,7 +2318,7 @@ mod tests {
         fs::write(&request, b"{}").unwrap();
         let started = std::time::Instant::now();
         let error = run_worker(
-            Path::new("/usr/bin/python3"),
+            &python,
             &worker,
             &request,
             &cancel_path,
@@ -2315,7 +2333,9 @@ mod tests {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[tokio::test]
     async fn cancellation_kills_term_ignoring_descendant_after_leader_exits() {
+        let _guard = WORKER_TEST_LOCK.lock().unwrap();
         let temp = tempfile::tempdir().unwrap();
+        let python = test_python_path();
         let worker = temp.path().join("worker.py");
         let request = temp.path().join("request.json");
         let cancel_path = temp.path().join("cancel");
@@ -2337,15 +2357,9 @@ mod tests {
             }
             trigger.store(true, Ordering::Release);
         });
-        let error = run_worker(
-            Path::new("/usr/bin/python3"),
-            &worker,
-            &request,
-            &cancel_path,
-            cancelled,
-        )
-        .await
-        .expect_err("cancellation must stop the process group");
+        let error = run_worker(&python, &worker, &request, &cancel_path, cancelled)
+            .await
+            .expect_err("cancellation must stop the process group");
         trigger_task.await.unwrap();
         assert!(error.to_string().contains("cancelled"));
         let pid: u32 = fs::read_to_string(pid_path).unwrap().parse().unwrap();
@@ -2361,7 +2375,9 @@ mod tests {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[tokio::test]
     async fn nominal_exit_closes_pipe_holding_descendant_group() {
+        let _guard = WORKER_TEST_LOCK.lock().unwrap();
         let temp = tempfile::tempdir().unwrap();
+        let python = test_python_path();
         let worker = temp.path().join("worker.py");
         let request = temp.path().join("request.json");
         let cancel_path = temp.path().join("cancel");
@@ -2373,7 +2389,7 @@ mod tests {
         fs::write(&request, b"{}").unwrap();
         let started = std::time::Instant::now();
         run_worker(
-            Path::new("/usr/bin/python3"),
+            &python,
             &worker,
             &request,
             &cancel_path,
