@@ -1,5 +1,7 @@
 # Setup Wizard Reference
 
+For external-client setup and endpoint ownership, see [External client profiles](external-clients.md).
+
 > **Same wizard, two docs, different audiences.** "Setup Wizard" and "Spawn Wizard" are two
 > names for one feature. This doc is the **user-facing walkthrough**: what each step looks
 > like, what the controls do, and the underlying HF/VRAM/chat-template API reference. For
