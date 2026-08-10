@@ -1137,6 +1137,7 @@ Known call sites requiring remediation (audit for more before closing this packe
 ### Phase 13 — Convergence and documentation
 
 - **State:** In progress (2026-08-10) — documentation convergence audit begun after Phase 12 security closure.
+- **Milestone (2026-08-10, external-client profiles):** Added `docs/reference/external-clients.md` covering authenticated OpenCode, Hermes, OpenClaw, and SillyTavern setup, streaming/tool ownership, raw-vs-structured completion modes, requested/effective diagnostics, template rollback, and provisional MTP-head evidence. Linked it from the API reference; screenshot usage remains clean.
 - **Budget:** 130k
 - **Depends on:** Phases 5–12
 - **Read:** all resolved decisions; Phase 13; completion ledger; surface/client matrices; reference-doc requirements.

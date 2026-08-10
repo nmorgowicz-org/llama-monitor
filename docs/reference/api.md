@@ -2648,6 +2648,9 @@ All require `api-token`.
 
 ### Chat Templates
 
+External client setup profiles for OpenCode, Hermes, OpenClaw, and SillyTavern
+are documented in [External client profiles](external-clients.md).
+
 All require `api-token`.
 
 - `POST /api/chat-template/fetch` — fetch a chat template URL and return its content.
