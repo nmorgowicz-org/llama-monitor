@@ -7,6 +7,7 @@ import { sleep } from '../../harness/paths.mjs';
 import { captureCloseUp, captureShot, cleanupScreenshotTabs } from '../../harness/shot.mjs';
 
 export default async function(ctx, options) {
+    await gotoApp(ctx.page, ctx.baseUrl);
     const source = await connectSource(ctx.page, options);
     try {
         await runChat(ctx, options);
@@ -17,7 +18,6 @@ export default async function(ctx, options) {
 
 async function runChat(ctx, options) {
     const { page, baseUrl } = ctx;
-    await gotoApp(page, baseUrl);
 
     await switchTab(page, 'chat');
     await sleep(500);

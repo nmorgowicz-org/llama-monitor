@@ -101,3 +101,11 @@ Both local paths are *faster and more deterministic* than a contended remote att
 Implemented the source-selection seam in `tests/ui/capture/harness/source.mjs` and migrated the proof scenarios `chat`, `dashboard`, and `smoke`. Remote attach remains the only implemented strategy and the default; `--source`, `CAPTURE_SOURCE`, scenario defaults, and force precedence are now represented in the contract. The source handle exposes `kind` and `teardown()` so later local strategies can own process/preset cleanup without changing scenario code.
 
 Validation: release build passed; source-contract/argument parsing checks passed; smoke capture passed with `--no-attach`; JS validation and lint passed. A remote dashboard capture was attempted but the configured remote endpoint did not complete the existing 45-second `/api/attach` handshake, so the live remote receipts remain pending an available runtime. Local llama.cpp and local MLX strategies remain Phase 2/3 work.
+
+### Remote attach timeout update (2026-08-09)
+
+The default `/api/attach` wait is now 120 seconds, with `CAPTURE_ATTACH_TIMEOUT_MS` available for slower or faster environments. The earlier 45-second reference describes the pre-update capture attempt. Timeout cleanup removes the response listener before rejecting, preventing stale handlers during retries.
+
+### Phase 1 remote proof closure (2026-08-09)
+
+The attach ordering defect was fixed: migrated scenarios now navigate to the app before invoking `connectSource()`, matching the original attach contract. This supersedes the earlier pending-capture note. Fresh release-built captures passed sequentially for `dashboard`, `chat`, and `smoke` using `--source remote` with the configured endpoint. The Phase 1 remote strategy gate is closed; local llama.cpp and local MLX strategies remain Phase 2/3 work.

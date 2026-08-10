@@ -5,12 +5,7 @@ import { gotoApp, waitForMonitor } from '../../harness/browser.mjs';
 import { sleep } from '../../harness/paths.mjs';
 
 export default async function({ page, baseUrl }, options) {
-    const source = options.noAttach ? null : await connectSource(page, options);
-    try {
-        await runSmoke({ page, baseUrl }, options);
-    } finally {
-        await source?.teardown();
-    }
+    await runSmoke({ page, baseUrl }, options);
 }
 
 async function runSmoke({ page, baseUrl }, options) {
@@ -41,6 +36,7 @@ async function runSmoke({ page, baseUrl }, options) {
     });
 
     await gotoApp(page, baseUrl);
+    const source = options.noAttach ? null : await connectSource(page, options);
 
     if (options.noAttach) {
         // attachToServer normally triggers the setup->monitor view
@@ -74,6 +70,7 @@ async function runSmoke({ page, baseUrl }, options) {
     }
 
     console.log('[SMOKE] PASS: no critical console errors on startup.');
+    await source?.teardown();
 }
 
 // ── Setup wizard ────────────────────────────────────────────────────────────────

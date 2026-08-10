@@ -1,7 +1,7 @@
 // Remote-attach helpers (connect capture browser to an already-running llama-monitor).
 // Extracted from tests/ui/capture.mjs (Phase A1).
 import { gotoApp, launchBrowser, waitForMonitor } from './browser.mjs';
-import { CAPTURE_FORM_AUTH, DEFAULT_VIEWPORT, REMOTE_SERVER, sleep } from './paths.mjs';
+import { CAPTURE_ATTACH_TIMEOUT_MS, CAPTURE_FORM_AUTH, DEFAULT_VIEWPORT, REMOTE_SERVER, sleep } from './paths.mjs';
 import { cleanupServer, spawnLlamaMonitor } from './server.mjs';
 import { captureShot } from './shot.mjs';
 
@@ -11,8 +11,9 @@ export async function attachToServer(page, remoteServer = REMOTE_SERVER) {
     // Set up listener for /api/attach response.
     const attachPromise = new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
-            reject(new Error('Attach API request timed out (no /api/attach response within 45s)'));
-        }, 45000);
+            page.off('response', handler);
+            reject(new Error(`Attach API request timed out (no /api/attach response within ${Math.ceil(CAPTURE_ATTACH_TIMEOUT_MS / 1000)}s)`));
+        }, CAPTURE_ATTACH_TIMEOUT_MS);
         const handler = async (response) => {
             if (!response.url().includes('/api/attach')) return;
             clearTimeout(timeout);

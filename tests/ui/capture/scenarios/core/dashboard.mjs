@@ -6,6 +6,7 @@ import { sleep } from '../../harness/paths.mjs';
 import { captureElementScreenshot, captureShot } from '../../harness/shot.mjs';
 
 export default async function(ctx, options) {
+    await gotoApp(ctx.page, ctx.baseUrl);
     const source = await connectSource(ctx.page, options);
     try {
         await runDashboard(ctx, options);
@@ -16,7 +17,6 @@ export default async function(ctx, options) {
 
 async function runDashboard(ctx, options) {
     const { page, baseUrl } = ctx;
-    await gotoApp(page, baseUrl);
 
     await switchTab(page, 'server');
     // Wait for agent first poll (2s interval) + some render time.

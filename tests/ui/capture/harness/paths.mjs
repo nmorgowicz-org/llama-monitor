@@ -24,6 +24,10 @@ export const DEFAULT_PORT = parseInt(process.env.SCREENSHOT_PORT || '8892', 10);
 // Example: RUNNING_PORT=8080 node tests/ui/capture.mjs --scenario dashboard
 export const RUNNING_PORT = process.env.RUNNING_PORT ? parseInt(process.env.RUNNING_PORT, 10) : null;
 export const REMOTE_SERVER = process.env.REMOTE_SERVER || 'http://192.168.2.16:8001';
+const configuredAttachTimeout = Number.parseInt(process.env.CAPTURE_ATTACH_TIMEOUT_MS || '120000', 10);
+export const CAPTURE_ATTACH_TIMEOUT_MS = Number.isFinite(configuredAttachTimeout) && configuredAttachTimeout > 0
+    ? configuredAttachTimeout
+    : 120000;
 export const BINARY_PATH = join(ROOT_DIR, 'target/release/llama-monitor');
 export const CAPTURE_FORM_AUTH = process.env.SCREENSHOT_FORM_AUTH || 'admin:secret123';
 export const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
