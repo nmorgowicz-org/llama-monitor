@@ -188,4 +188,10 @@ Fetched upstream `main` at `f0d82d97833c15126154f0207594ceb6e7c8b8f5` into the i
 - MLLM batch-generator/continuous-batching selection: **82 passed, 3 pre-existing numerical failures** (the same three failures reproduce on the pre-PR base commit);
 - MLLM cancellation/cache/core suites: **54 passed, 6 deselected**.
 
-No Qwen3.6 MLX snapshot is present locally, so an end-to-end Qwen3.6 image request remains the final gate. The isolated source checkout is ready for that run when a pinned MLX snapshot is available; no managed runtime was overwritten.
+The locally cached `~/.config/llama-monitor/models/mlx/native/nightmedia-27b-mxfp8-mlx` snapshot is Qwen3.6-27B (`model_type=qwen3_5`, `Qwen3_5ForConditionalGeneration`, vision tower present; 27 GB). Running upstream `main` against this real snapshot with `--mllm --prefill-step-size 2048 --max-num-seqs 1 --prefill-batch-size 1 --completion-batch-size 1 --disable-prefix-cache --pflash off --cache-memory-mb 4096 --gpu-memory-utilization 0.75` produced:
+
+- startup success with the expected `ArraysCache` serialized-lane warning and effective `max_num_seqs=1`, `prefill_batch=1`, `completion_batch=1`;
+- grounded image request HTTP 200 with a visual description;
+- two concurrent image requests both HTTP 200, completing sequentially (about 9.8 s and 17.9 s, total about 18.0 s), demonstrating the singleton lane queues the second request.
+
+The exact 35B Nightmedia MLX snapshot should receive the same live check when selected; no managed runtime was overwritten.
