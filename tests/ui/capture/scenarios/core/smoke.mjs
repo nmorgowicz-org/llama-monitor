@@ -1,10 +1,19 @@
 // Scenario: smoke
 // Extracted from tests/ui/capture.mjs (Phase A3).
-import { attachToServer } from '../../harness/attach.mjs';
+import { connectSource } from '../../harness/source.mjs';
 import { gotoApp, waitForMonitor } from '../../harness/browser.mjs';
 import { sleep } from '../../harness/paths.mjs';
 
 export default async function({ page, baseUrl }, options) {
+    const source = options.noAttach ? null : await connectSource(page, options);
+    try {
+        await runSmoke({ page, baseUrl }, options);
+    } finally {
+        await source?.teardown();
+    }
+}
+
+async function runSmoke({ page, baseUrl }, options) {
     const criticalPatterns = [
         'import',
         'Cannot set properties of (null|undefined)',
@@ -33,9 +42,7 @@ export default async function({ page, baseUrl }, options) {
 
     await gotoApp(page, baseUrl);
 
-    if (!options.noAttach) {
-        await attachToServer(page);
-    } else {
+    if (options.noAttach) {
         // attachToServer normally triggers the setup->monitor view
         // transition; force it directly since we're skipping attach.
         await page.evaluate(async () => {

@@ -96,3 +96,8 @@ Both local paths are *faster and more deterministic* than a contended remote att
 - `tests/ui/capture/index.mjs`
 - `tests/ui/capture/scenarios/wizard-rapidmlx/rapid-mlx-live.mjs`
 - `tests/ui/capture/harness/shot.mjs`
+## Phase 1 progress (2026-08-09)
+
+Implemented the source-selection seam in `tests/ui/capture/harness/source.mjs` and migrated the proof scenarios `chat`, `dashboard`, and `smoke`. Remote attach remains the only implemented strategy and the default; `--source`, `CAPTURE_SOURCE`, scenario defaults, and force precedence are now represented in the contract. The source handle exposes `kind` and `teardown()` so later local strategies can own process/preset cleanup without changing scenario code.
+
+Validation: release build passed; source-contract/argument parsing checks passed; smoke capture passed with `--no-attach`; JS validation and lint passed. A remote dashboard capture was attempted but the configured remote endpoint did not complete the existing 45-second `/api/attach` handshake, so the live remote receipts remain pending an available runtime. Local llama.cpp and local MLX strategies remain Phase 2/3 work.

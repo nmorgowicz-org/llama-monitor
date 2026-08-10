@@ -53,7 +53,7 @@ import scenarioChatHistoryQA from './scenarios/features/chat-history-qa.mjs';
 import scenarioSparkline from './scenarios/validation/sparkline.mjs';
 import scenarioGifs from './scenarios/validation/gifs.mjs';
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
     const options = {
         scenario: null,
         gpuOnly: false,
@@ -61,6 +61,7 @@ function parseArgs(argv) {
         listScenarios: false,
         noAttach: false,
         closeUp: false,
+        source: null,
         viewport: { ...DEFAULT_VIEWPORT },
     };
 
@@ -79,6 +80,9 @@ function parseArgs(argv) {
             options.listScenarios = true;
         } else if (arg === '--no-attach') {
             options.noAttach = true;
+        } else if (arg === '--source' && argv[i + 1]) {
+            options.source = argv[i + 1];
+            i += 1;
         } else if (arg === '--close-up') {
             options.closeUp = true;
         } else if (arg === '--help' || arg === '-h') {
@@ -153,6 +157,7 @@ Scenarios:
     navbar           Nav bar close-ups: idle-dark, low-power active, idle-light (requires --close-up)
 
 Options:
+  --source <name> Select capture source (Phase 1 implements: remote)
   --gpu-only         For gifs scenario, capture only GPU/system animation
   --inference-only   For gifs scenario, capture only inference animation
   --no-attach        Skip remote attach for scenarios that do not require it
@@ -193,7 +198,7 @@ export const SCENARIOS = {
     'rapid-preset': { run: scenarioRapidPreset, setup: () => { seedRapidMlxCapturePreset(); }, category: 'presets', runtime: 'rapidmlx-local' },
     'evidence-drawer': { run: scenarioEvidenceDrawer, category: 'presets', runtime: 'neutral' },
     'community-sources': { run: scenarioCommunitySources, category: 'presets', runtime: 'neutral' },
-    'chat': { run: scenarioChat, category: 'core', runtime: 'neutral' },
+    'chat': { run: scenarioChat, source: 'remote', category: 'core', runtime: 'neutral' },
     'guided-gen': { run: scenarioGuidedGen, category: 'core', runtime: 'neutral' },
     'sidebar': { run: scenarioSidebar, category: 'core', runtime: 'neutral' },
     'models-v2': { run: scenarioModelsV2, setup: () => ({ extraArgs: seedModelsDirFixture() }), category: 'models', runtime: 'neutral' },
@@ -205,7 +210,7 @@ export const SCENARIOS = {
     'filebrowser': { run: scenarioFilebrowser, category: 'models', runtime: 'neutral' },
     'panels': { run: scenarioPanels, setup: () => ({ extraArgs: seedModelsDirFixture() }), category: 'core', runtime: 'neutral' },
     'models': { run: scenarioModels, setup: () => ({ extraArgs: seedModelsDirFixture() }), category: 'models', runtime: 'neutral' },
-    'dashboard': { run: scenarioDashboard, category: 'core', runtime: 'neutral' },
+    'dashboard': { run: scenarioDashboard, source: 'remote', category: 'core', runtime: 'neutral' },
     'dashboard-rapid-mlx': { run: scenarioDashboardRapidMlx, category: 'features', runtime: 'rapidmlx-local' },
     'spawn-wizard': {
         run: scenarioSpawnWizard, category: 'wizard-llamacpp', runtime: 'llamacpp-local',
@@ -348,7 +353,7 @@ export const SCENARIOS = {
     'rapid-mlx-live': { run: scenarioRapidMlxLive, category: 'validation', runtime: 'rapidmlx-local' },
     'sparkline': { run: scenarioSparkline, category: 'validation', runtime: 'neutral' },
     'gifs': { run: scenarioGifs, category: 'validation', runtime: 'neutral' },
-    'smoke': { run: scenarioSmoke, category: 'core', runtime: 'neutral' },
+    'smoke': { run: scenarioSmoke, source: 'remote', category: 'core', runtime: 'neutral' },
     'navbar': { run: scenarioNavbar, category: 'core', runtime: 'neutral' },
 };
 
@@ -405,7 +410,7 @@ export async function runCli({ scenario: forcedScenario = null, argv = process.a
             const launched = await launchBrowser(options.viewport);
             browser = launched.browser;
             const page = launched.page;
-            await scenario.run({ page, baseUrl, browser }, options);
+            await scenario.run({ page, baseUrl, browser }, { ...options, scenarioSource: scenario.source });
             if (scenario.contract) finishCaptureReceipt();
             console.log(`[CAPTURE] Scenario "${scenarioName}" complete.`);
             lastErr = null;

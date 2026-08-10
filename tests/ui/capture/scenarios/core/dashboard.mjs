@@ -1,14 +1,22 @@
 // Scenario: dashboard
 // Extracted from tests/ui/capture.mjs (Phase A3).
-import { attachToServer } from '../../harness/attach.mjs';
+import { connectSource } from '../../harness/source.mjs';
 import { gotoApp, switchTab } from '../../harness/browser.mjs';
 import { sleep } from '../../harness/paths.mjs';
 import { captureElementScreenshot, captureShot } from '../../harness/shot.mjs';
 
 export default async function(ctx, options) {
+    const source = await connectSource(ctx.page, options);
+    try {
+        await runDashboard(ctx, options);
+    } finally {
+        await source.teardown();
+    }
+}
+
+async function runDashboard(ctx, options) {
     const { page, baseUrl } = ctx;
     await gotoApp(page, baseUrl);
-    await attachToServer(page);
 
     await switchTab(page, 'server');
     // Wait for agent first poll (2s interval) + some render time.

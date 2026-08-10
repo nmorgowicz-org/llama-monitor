@@ -1,15 +1,23 @@
 // Scenario: chat
 // Extracted from tests/ui/capture.mjs (Phase A3).
-import { attachToServer } from '../../harness/attach.mjs';
+import { connectSource } from '../../harness/source.mjs';
 import { gotoApp, switchTab } from '../../harness/browser.mjs';
 import { sendChatPrompt, waitForChatComplete } from '../../harness/chat.mjs';
 import { sleep } from '../../harness/paths.mjs';
 import { captureCloseUp, captureShot, cleanupScreenshotTabs } from '../../harness/shot.mjs';
 
 export default async function(ctx, options) {
+    const source = await connectSource(ctx.page, options);
+    try {
+        await runChat(ctx, options);
+    } finally {
+        await source.teardown();
+    }
+}
+
+async function runChat(ctx, options) {
     const { page, baseUrl } = ctx;
     await gotoApp(page, baseUrl);
-    await attachToServer(page);
 
     await switchTab(page, 'chat');
     await sleep(500);
