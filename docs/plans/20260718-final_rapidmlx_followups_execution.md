@@ -1381,7 +1381,7 @@ Phase 9 was reconciled 2026-08-03 by audit of `spawn_wizard.rs` and is now split
 | 10e | Verified complete (2026-08-09) | Coordinator; metadata provenance cleanup and final validation | PASS — active wizard recommendations use introspection/effective metadata with truthful unavailable/degraded states; filename-derived MTP advisor fallback removed | `bde808b`, `879af46`, `62be7de` evidence archive | Legacy `src/llama/model_defaults.rs` compatibility path remains isolated/documented; do not treat it as active wizard inference |
 | 11 | Not started | — | — | — | Phases 3, 5–7 |
 | 12 | Verified complete (2026-08-10) | Coordinator | PASS — authenticated route/dependency/path/remote-code/probe/updater audit; explicit managed-template read allowlist and discussion-name validation | `b504b8f`, `6be7491`, `ce0892c`, `eaa1f51`; 2,292 Rust tests, 39 auth-routing, compatibility/updater/path tests, clippy, release build, JS validation/lint | Phase 14 final release gate |
-| 13 | Not started | — | — | — | Phases 5–12 |
+| 13 | In progress (2026-08-10) | Coordinator | Docs/client convergence underway: MTP evidence vocabulary and template smoke-test/rollback distinction reconciled | `3373132`, `ab61b17`, `44f4739`; unused-screenshot check clean | Complete reference/client/migration audit before Phase 14 |
 | 14 | Not started | — | — | — | Phases 1–13 |
 
 ### 8.1 Finding F-DEADCODE-RAPID — unwired Rapid-MLX capability surface (historical finding; reconciled 2026-08-09)
