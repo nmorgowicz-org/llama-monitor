@@ -1149,8 +1149,10 @@ Known call sites requiring remediation (audit for more before closing this packe
 
 ### Phase 14 — Full release validation
 
-- **State:** In progress (2026-08-10) — mandatory repository checks and isolated Playwright suite completed; final screenshots/security/platform traceability remain.
+- **State:** Verified complete (2026-08-10) — mandatory checks, isolated Playwright, fresh screenshots, auth/security, and platform-impact review passed. Phase 14.5 remains explicitly last.
 - **Milestone (2026-08-10):** Mandatory checks passed in order: clippy, 2,294 Rust tests (26 ignored), JavaScript validation, lint, diff check, release build, formatter, and clean status. Isolated release-built Playwright suite completed its 273-test matrix on port 17778; capture-manifest and unused-screenshot checks are clean.
+- **Milestone (2026-08-10, fresh screenshots):** Sequential release-built `wizard-llamacpp` and `wizard-rapidmlx` capture groups completed on port 17779 using the installed Playwright Chromium executable. Guided/Pro/Launch, narrow, light/dark, HF, and GIF artifacts were regenerated; visual inspection of the affected Guided drawer and Rapid-MLX Guided baseline found no layout or state regression. The initial capture attempt without an executable was a harness environment miss, then rerun successfully with the existing Chromium cache.
+- **Completion (2026-08-10):** Final security/platform recheck passed (`cargo test --test auth_routing`: 39). Changed Rust files are platform-neutral API/advisor code; no tray, Cargo platform configuration, or `#[cfg]` surface changed, so the Windows-target gate is not applicable. Phase 14 is complete; Phase 14.5 remains the explicitly last, user-directed Rapid-MLX VLM/vision revisit.
 - **Budget:** 120k
 - **Depends on:** Phases 1–13
 - **Read:** Phase 14; all validation matrices; revalidation and completion ledgers; repository mandatory checks.
@@ -1384,7 +1386,7 @@ Phase 9 was reconciled 2026-08-03 by audit of `spawn_wizard.rs` and is now split
 | 11 | Not started | — | — | — | Phases 3, 5–7 |
 | 12 | Verified complete (2026-08-10) | Coordinator | PASS — authenticated route/dependency/path/remote-code/probe/updater audit; explicit managed-template read allowlist and discussion-name validation | `b504b8f`, `6be7491`, `ce0892c`, `eaa1f51`; 2,292 Rust tests, 39 auth-routing, compatibility/updater/path tests, clippy, release build, JS validation/lint | Phase 14 final release gate |
 | 13 | Verified complete (2026-08-10) | Coordinator | PASS — reference/client vocabulary, external-client profiles, MTP evidence semantics, template smoke-test/rollback distinction, and preset migrations reconciled | `3373132`, `ab61b17`, `44f4739`, `5ea4d9b`, `426a26b`; 62 preset tests, unused-screenshot check clean | Phase 14 final release gate |
-| 14 | In progress (2026-08-10) | Coordinator | Mandatory repository checks and isolated release-built Playwright matrix pass; final screenshot/security/platform gates remain | 2,294 Rust tests, 273 Playwright tests, release build, JS validation/lint, diff check, capture-manifest/unused-screenshot checks | Final security/platform review and sequential screenshots |
+| 14 | Verified complete (2026-08-10) | Coordinator | PASS — mandatory checks, isolated release-built Playwright matrix, fresh wizard captures, auth/security, and platform-impact review | 2,294 Rust tests, 39 auth-routing, 273 Playwright tests, release build, JS validation/lint, capture receipts, unused-screenshot check | Phase 14.5 explicitly last |
 
 ### 8.1 Finding F-DEADCODE-RAPID — unwired Rapid-MLX capability surface (historical finding; reconciled 2026-08-09)
 
