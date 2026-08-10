@@ -2668,7 +2668,7 @@ All require `api-token`.
 - `GET /api/chat-template/discussion-content` — fetch a discussion thread's raw content.
 - `POST /api/chat-template/install-discussion` — install a chat template found in an HF discussion thread.
 
-These endpoints back the chat-template lifecycle modal (install, activate, update-check, smoke-test, and Discussion-sourced templates), which auto-routes to Discussions based on template family and degrades gracefully for loose/untracked templates.
+These endpoints back the chat-template lifecycle modal (install, activate, update-check, smoke-test, and Discussion-sourced templates), which auto-routes to Discussions based on template family and degrades gracefully for loose/untracked templates. Discussion create-fix candidates are activated only after the bounded two-fixture tool-call smoke test passes; Version History activation is an explicit rollback of an already-installed release.
 
 ### Sleep Mode
 
