@@ -1377,7 +1377,7 @@ Phase 9 was reconciled 2026-08-03 by audit of `spawn_wizard.rs` and is now split
 | 10d | Verified complete (2026-08-09) | Coordinator; current Spawn Wizard completion packet | PASS — llama.cpp/Rapid-MLX Guided and Pro parity audited; backend-only differences are explicitly labeled and unsupported controls remain unavailable | `a1d3c93`, `bde808b`, archived Guided/Pro evidence and launch receipts | None for the Spawn Wizard parity slice |
 | 10e | Verified complete (2026-08-09) | Coordinator; metadata provenance cleanup and final validation | PASS — active wizard recommendations use introspection/effective metadata with truthful unavailable/degraded states; filename-derived MTP advisor fallback removed | `bde808b`, `879af46`, `62be7de` evidence archive | Legacy `src/llama/model_defaults.rs` compatibility path remains isolated/documented; do not treat it as active wizard inference |
 | 11 | Not started | — | — | — | Phases 3, 5–7 |
-| 12 | Not started | — | — | — | Phases 3, 8–11 |
+| 12 | Verified complete (2026-08-10) | Coordinator | PASS — authenticated route/dependency/path/remote-code/probe/updater audit; explicit managed-template read allowlist and discussion-name validation | `b504b8f`, `6be7491`, `ce0892c`, `eaa1f51`; 2,292 Rust tests, 39 auth-routing, compatibility/updater/path tests, clippy, release build, JS validation/lint | Phase 14 final release gate |
 | 13 | Not started | — | — | — | Phases 5–12 |
 | 14 | Not started | — | — | — | Phases 1–13 |
 
