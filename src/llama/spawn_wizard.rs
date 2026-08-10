@@ -243,6 +243,32 @@ pub fn predict_perf_hints(
     spec_type: Option<&str>,
     has_mtp_model: bool,
 ) -> Vec<BenchmarkSuggestion> {
+    predict_perf_hints_with_mtp_evidence(
+        arch,
+        context_size,
+        ctk,
+        ctv,
+        is_unified_memory,
+        spec_type,
+        has_mtp_model,
+        false,
+    )
+}
+
+/// Advisory hints can use a draft/head filename or repository hint when
+/// introspection cannot expose MTP metadata. Keep that evidence explicitly
+/// provisional so it never masquerades as a confirmed MTP depth.
+#[allow(clippy::too_many_arguments)]
+pub fn predict_perf_hints_with_mtp_evidence(
+    arch: &vram_estimator::ModelArch,
+    context_size: u64,
+    ctk: &str,
+    ctv: &str,
+    is_unified_memory: bool,
+    spec_type: Option<&str>,
+    has_mtp_model: bool,
+    mtp_inferred: bool,
+) -> Vec<BenchmarkSuggestion> {
     let mut out: Vec<BenchmarkSuggestion> = Vec::new();
 
     // 1. Dense + large + unified memory → bandwidth ceiling; MoE is the real fix.
@@ -333,10 +359,15 @@ pub fn predict_perf_hints(
     if has_mtp_model && !mtp_already_enabled {
         out.push(BenchmarkSuggestion {
             label: "Enable MTP speculative decoding".to_string(),
-            description:
+            description: if mtp_inferred {
+                "A draft/MTP candidate was inferred from an artifact hint; verify compatibility before enabling. Multi-Token Prediction may give ~1.4–2× faster \
+generation with no change in output quality."
+                    .to_string()
+            } else {
                 "An MTP draft model is available. Multi-Token Prediction gives ~1.4–2× faster \
-                  generation with no change in output quality."
-                    .to_string(),
+generation with no change in output quality."
+                    .to_string()
+            },
             param: "spec_type".to_string(),
             value: serde_json::json!("draft-mtp,ngram-mod"),
             patch: Some(
@@ -1453,5 +1484,17 @@ mod tests {
             crate::llama::vram_estimator::ModelArch::from_name_and_params("Qwen3.6-27B", 27.0);
         let hints = predict_perf_hints(&arch, 16_384, "q8_0", "q8_0", true, None, false);
         assert!(hints.iter().any(|h| h.param == "ctk"));
+    }
+
+    #[test]
+    fn perf_hints_label_inferred_mtp_as_provisional() {
+        let arch =
+            crate::llama::vram_estimator::ModelArch::from_name_and_params("Qwen3.6-27B", 27.0);
+        let hints = predict_perf_hints_with_mtp_evidence(
+            &arch, 16_384, "q8_0", "q8_0", true, None, true, true,
+        );
+        let mtp = hints.iter().find(|hint| hint.param == "spec_type").unwrap();
+        assert!(mtp.description.contains("inferred"));
+        assert!(mtp.description.contains("verify compatibility"));
     }
 }

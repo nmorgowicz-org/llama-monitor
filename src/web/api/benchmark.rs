@@ -716,18 +716,33 @@ fn api_advise(
                 let is_unified = body["is_unified"].as_bool().unwrap_or(false);
                 let spec_type = body["spec_type"].as_str();
                 let has_mtp = body["has_mtp"].as_bool().unwrap_or(false);
+                let mtp_inferred = body["mtp_inferred"].as_bool().unwrap_or(false);
+                let mtp_candidate = has_mtp || mtp_inferred;
 
                 let arch =
                     crate::llama::vram_estimator::ModelArch::from_name_and_params("", param_b);
-                let suggestions = crate::llama::spawn_wizard::predict_perf_hints(
-                    &arch,
-                    context_size,
-                    ctk,
-                    ctv,
-                    is_unified,
-                    spec_type,
-                    has_mtp,
-                );
+                let suggestions = if mtp_inferred {
+                    crate::llama::spawn_wizard::predict_perf_hints_with_mtp_evidence(
+                        &arch,
+                        context_size,
+                        ctk,
+                        ctv,
+                        is_unified,
+                        spec_type,
+                        mtp_candidate,
+                        true,
+                    )
+                } else {
+                    crate::llama::spawn_wizard::predict_perf_hints(
+                        &arch,
+                        context_size,
+                        ctk,
+                        ctv,
+                        is_unified,
+                        spec_type,
+                        has_mtp,
+                    )
+                };
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({ "suggestions": suggestions }),

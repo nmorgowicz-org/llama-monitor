@@ -731,7 +731,10 @@ export function updatePresetAdvisor() {
             ctk, ctv,
             is_unified: isUnified,
             spec_type: specType || null,
-            has_mtp: /mtp/i.test(name),
+  // Draft/head artifacts often lack introspectable MTP metadata. Keep the
+  // filename signal as a provisional hint, never as confirmed model state.
+  has_mtp: false,
+  mtp_inferred: /(?:mtp|draft(?:[-_]model)?)/i.test(name),
         };
         const seq = ++_presetAdvisorSeq;
         try {

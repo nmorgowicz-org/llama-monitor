@@ -3718,10 +3718,11 @@ export function updateAdvisor() {
     const paramB = arch.paramB || m.paramB || 0;
     if (!name && !paramB) { box.style.display = 'none'; return; }
 
-    // MTP capability is authoritative only from introspected architecture/profile
-    // metadata. Artifact names (including finetunes/distillations) are never a
-    // model-property fallback.
-    const hasMtp = (baseArch.mtpDepth || 0) > 0;
+// MTP depth is authoritative only from introspected architecture/profile
+// metadata. A model-browser draft/head classification can still provide a
+// provisional candidate hint when that separate artifact exposes no head data.
+const hasMtp = (baseArch.mtpDepth || 0) > 0;
+const mtpInferred = !hasMtp && Boolean(m.isDraftModel || m.is_draft_assistant);
     const body = {
       name,
       param_b: paramB,
@@ -3731,6 +3732,7 @@ export function updateAdvisor() {
       is_unified: isUnifiedMemory(),
       spec_type: hw.mtpEnabled ? 'draft-mtp' : null,
       has_mtp: hasMtp,
+      mtp_inferred: mtpInferred,
     };
 
     const seq = ++_advisorSeq;
