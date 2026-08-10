@@ -2642,6 +2642,56 @@ fn resolve_template_source_repo(template_name: &str) -> Result<Option<String>, S
     Ok(source_repo)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PathValidationError {
+    Invalid,
+    OutsideManagedRoot,
+    NotFound,
+}
+
+/// Resolve a template path without allowing reads outside the managed cache.
+/// Canonicalization is required so symlinks cannot escape the allowlisted root.
+fn resolve_managed_chat_template_path(
+    path: &std::path::Path,
+    root: &std::path::Path,
+) -> Result<std::path::PathBuf, PathValidationError> {
+    if !path.is_absolute()
+        || path.components().any(|c| matches!(c, Component::ParentDir))
+        || path.extension().and_then(|e| e.to_str()) != Some("jinja")
+    {
+        return Err(PathValidationError::Invalid);
+    }
+
+    let canonical_root = std::fs::canonicalize(root).map_err(|_| PathValidationError::NotFound)?;
+    let canonical_path = std::fs::canonicalize(path).map_err(|_| PathValidationError::NotFound)?;
+    if !canonical_path.starts_with(&canonical_root) {
+        return Err(PathValidationError::OutsideManagedRoot);
+    }
+    if !canonical_path.is_file() {
+        return Err(PathValidationError::NotFound);
+    }
+    Ok(canonical_path)
+}
+
+#[cfg(test)]
+mod chat_template_path_security_tests {
+    use super::{PathValidationError, resolve_managed_chat_template_path};
+    use std::path::Path;
+
+    #[test]
+    fn rejects_relative_parent_and_non_template_paths() {
+        let root = Path::new("/tmp/llama-monitor-chat-templates");
+        assert_eq!(
+            resolve_managed_chat_template_path(Path::new("../secret.jinja"), root),
+            Err(PathValidationError::Invalid)
+        );
+        assert_eq!(
+            resolve_managed_chat_template_path(Path::new("/etc/hosts"), root),
+            Err(PathValidationError::Invalid)
+        );
+    }
+}
+
 fn api_chat_template_read(
     _state: AppState,
     app_config: Arc<AppConfig>,
@@ -2665,7 +2715,17 @@ fn api_chat_template_read(
                         ),
                     ));
                 }
-                let p = PathBuf::from(&path);
+                    let Some(template_root) = chat_template_dir_path() else {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "error": "managed template directory unavailable"
+                                })),
+                                warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                            ),
+                        ));
+                    };
+                    let p = PathBuf::from(&path);
                 if !p.is_absolute() || p.components().any(|c| matches!(c, Component::ParentDir)) {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::with_status(
@@ -2674,7 +2734,40 @@ fn api_chat_template_read(
                         ),
                     ));
                 }
-                match std::fs::read_to_string(&p) {
+                    let resolved = match resolve_managed_chat_template_path(&p, &template_root) {
+                        Ok(path) => path,
+                        Err(PathValidationError::OutsideManagedRoot) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({
+                                        "error": "template path must be inside the managed template directory"
+                                    })),
+                                    warp::http::StatusCode::FORBIDDEN,
+                                ),
+                            ));
+                        }
+                        Err(PathValidationError::Invalid) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({
+                                        "error": "absolute .jinja path required, no .."
+                                    })),
+                                    warp::http::StatusCode::BAD_REQUEST,
+                                ),
+                            ));
+                        }
+                        Err(PathValidationError::NotFound) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({
+                                        "error": "template file not found"
+                                    })),
+                                    warp::http::StatusCode::NOT_FOUND,
+                                ),
+                            ));
+                        }
+                    };
+                    match std::fs::read_to_string(&resolved) {
                     Ok(text) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::with_header(warp::reply::with_status(text, warp::http::StatusCode::OK), "Content-Type", "text/plain; charset=utf-8"),
                     )),
