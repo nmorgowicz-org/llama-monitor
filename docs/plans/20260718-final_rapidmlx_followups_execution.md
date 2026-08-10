@@ -1168,6 +1168,16 @@ Known call sites requiring remediation (audit for more before closing this packe
   actual MLX-VLM components"), and update `[[project_rapidmlx_vision_off_the_table]]` and any other
   memory/docs that currently say vision is off the table. If still broken, record the current
   failure mode with fresh evidence and leave the gate in place.
+- **Dependency/profile gate:** run the matrix only after confirming the managed
+  runtime manifest records the requested `guided` + `vision` extras. Capture
+  the exact Rapid-MLX version, `mlx-vlm` version, model/revision, and effective
+  MLLM arguments. A missing extra must be reported separately from a hybrid
+  `ArraysCache`/scheduler failure; do not treat either result as general model
+  capability evidence.
+- **Required matrix:** repeat the prior Qwen3.6-27B and Qwen3.6-35B-A3B image
+  requests with the new profile, plus a known-good VLM positive control. Retain
+  full server stderr and the HTTP/error-event outcome, including empty-200
+  responses, before changing any Vision UI availability claim.
 
 ## 6. Decision Gate Router
 
