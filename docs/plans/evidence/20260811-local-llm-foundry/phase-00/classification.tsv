@@ -1291,86 +1291,86 @@ docs/plans/20260810-rapidmlx-qwen36-vision-upstream-issue.md	202	llama-monitor	p
 docs/plans/20260810-rapidmlx-qwen36-vision-upstream-issue.md	205	llama-monitor	public-brand	rewrite-current-documentation	14	/Users/nick/.config/llama-monitor/models/mlx/native/nightmedia-35b-mxfp4-mlx
 docs/plans/20260810-rapidmlx-qwen36-vision-upstream-issue.md	240	llama_monitor	public-brand	rewrite-current-documentation	14	`LLAMA_MONITOR_UI_URL` is not supplied, so baseline refresh no longer requires
 docs/plans/20260810-rapidmlx-qwen36-vision-upstream-issue.md	241	llama-monitor	public-brand	rewrite-current-documentation	14	a running llama-monitor instance.
-docs/plans/20260811-local_llm_foundry-rebrand.md	39	llama monitor	public-brand	rewrite-current-documentation	14	This plan coordinates the complete public rebrand from Llama Monitor /
-docs/plans/20260811-local_llm_foundry-rebrand.md	40	llama-monitor	public-brand	rewrite-current-documentation	14	`llama-monitor` to **Local LLM Foundry**. It covers product identity, visual
-docs/plans/20260811-local_llm_foundry-rebrand.md	85	llama_monitor	compatibility-identifier	accept-through-2.x	2,3,8	| Rust library crate | Keep `llama_monitor` as an explicit internal compatibility target in 2.0 |
-docs/plans/20260811-local_llm_foundry-rebrand.md	133	llama monitor	public-brand	rewrite-current-documentation	14	- An exact case-insensitive scan for `Llama Monitor`, `llama-monitor`, or
-docs/plans/20260811-local_llm_foundry-rebrand.md	133	llama-monitor	public-brand	rewrite-current-documentation	14	- An exact case-insensitive scan for `Llama Monitor`, `llama-monitor`, or
-docs/plans/20260811-local_llm_foundry-rebrand.md	134	llama_monitor	public-brand	rewrite-current-documentation	14	`llama_monitor` currently reaches roughly 281 files across source, static
-docs/plans/20260811-local_llm_foundry-rebrand.md	136	llama-monitor	public-brand	rewrite-current-documentation	14	- `Cargo.toml:2` names the package `llama-monitor`.
-docs/plans/20260811-local_llm_foundry-rebrand.md	150	llama-monitor	public-brand	rewrite-current-documentation	14	`llama-monitor-encryption-key`, accepts
-docs/plans/20260811-local_llm_foundry-rebrand.md	151	llama_monitor	public-brand	rewrite-current-documentation	14	`LLAMA_MONITOR_ENCRYPTION_KEY`, and stores `encryption-key` under the
-docs/plans/20260811-local_llm_foundry-rebrand.md	158	llama_monitor	public-brand	rewrite-current-documentation	14	`llama_monitor_session`.
-docs/plans/20260811-local_llm_foundry-rebrand.md	162	llama-monitor	public-brand	rewrite-current-documentation	14	`llama-monitor[.exe]`.
-docs/plans/20260811-local_llm_foundry-rebrand.md	254	llama monitor	compatibility-identifier	accept-through-2.x	2,3,8	| Product | Llama Monitor | Local LLM Foundry | Old name appears only in migration/deprecation/history |
-docs/plans/20260811-local_llm_foundry-rebrand.md	255	llama monitor	public-brand	rewrite-current-documentation	14	| Short UI name | Llama Monitor / monitor | Foundry | Preserve technical “monitor” verbs where natural |
-docs/plans/20260811-local_llm_foundry-rebrand.md	256	llama-monitor	compatibility-identifier	accept-through-2.x	2,3,8	| Slug | `llama-monitor` | `local-llm-foundry` | Accept old aliases through 2.x |
-docs/plans/20260811-local_llm_foundry-rebrand.md	257	llama-monitor	compatibility-identifier	accept-through-2.x	2,3,8	| Binary | `llama-monitor[.exe]` | `local-llm-foundry[.exe]` | Ship a thin legacy launcher/alias with one warning |
-docs/plans/20260811-local_llm_foundry-rebrand.md	258	llama-monitor	public-brand	rewrite-current-documentation	14	| Cargo package | `llama-monitor` | `local-llm-foundry` | No dual package; lockfile updates atomically |
-docs/plans/20260811-local_llm_foundry-rebrand.md	259	llama_monitor	public-brand	rewrite-current-documentation	14	| Rust crate | `llama_monitor` | Explicitly keep `llama_monitor` in 2.0 | Internal namespace is not public product branding |
-docs/plans/20260811-local_llm_foundry-rebrand.md	259	llama_monitor	public-brand	rewrite-current-documentation	14	| Rust crate | `llama_monitor` | Explicitly keep `llama_monitor` in 2.0 | Internal namespace is not public product branding |
-docs/plans/20260811-local_llm_foundry-rebrand.md	261	llama-monitor	public-brand	rewrite-current-documentation	14	| Repository | `nmorgowicz-org/llama-monitor` | recommended `nmorgowicz-org/local-llm-foundry` | Rely on GitHub redirect but update every canonical URL |
-docs/plans/20260811-local_llm_foundry-rebrand.md	262	llama-monitor	compatibility-identifier	accept-through-2.x	2,3,8	| Unix/macOS root | `~/.config/llama-monitor` | `~/.config/local-llm-foundry` | Legacy-root mode and explicit migration through 2.x |
-docs/plans/20260811-local_llm_foundry-rebrand.md	263	llama-monitor	compatibility-identifier	accept-through-2.x	2,3,8	| Windows root | `%APPDATA%\\llama-monitor` plus older `%USERPROFILE%\\.config\\llama-monitor` | `%APPDATA%\\local-llm-foundry` | Detect both legacy roots; never merge silently |
-docs/plans/20260811-local_llm_foundry-rebrand.md	263	llama-monitor	compatibility-identifier	accept-through-2.x	2,3,8	| Windows root | `%APPDATA%\\llama-monitor` plus older `%USERPROFILE%\\.config\\llama-monitor` | `%APPDATA%\\local-llm-foundry` | Detect both legacy roots; never merge silently |
-docs/plans/20260811-local_llm_foundry-rebrand.md	264	llama_monitor	compatibility-identifier	accept-through-2.x	2,3,8	| Environment prefix | `LLAMA_MONITOR_*` plus standalone legacy variables | `LOCAL_LLM_FOUNDRY_*` | New wins; unequal dual values fail with an actionable error |
-docs/plans/20260811-local_llm_foundry-rebrand.md	265	llama_monitor	compatibility-identifier	accept-through-2.x	2,3,8	| Encryption env | `LLAMA_MONITOR_ENCRYPTION_KEY` | `LOCAL_LLM_FOUNDRY_ENCRYPTION_KEY` | Accept both; keep legacy HKDF info string or explicitly re-encrypt |
-docs/plans/20260811-local_llm_foundry-rebrand.md	266	llama_monitor	compatibility-identifier	accept-through-2.x	2,3,8	| Form cookie | `llama_monitor_session` | `local_llm_foundry_session` | Accept both; login sets new; logout clears both |
-docs/plans/20260811-local_llm_foundry-rebrand.md	273	llama-monitor	public-brand	rewrite-current-documentation	14	| Release assets | `llama-monitor-<platform>` | `local-llm-foundry-<platform>` | 2.0 bridge publishes both names with identical checksummed payloads |
-docs/plans/20260811-local_llm_foundry-rebrand.md	998	llama_monitor	public-brand	rewrite-current-documentation	14	`[lib] name = "llama_monitor"`, and document why the internal crate remains
-docs/plans/20260811-local_llm_foundry-rebrand.md	1002	llama-monitor	compatibility-identifier	accept-through-2.x	2,3,8	- [ ] The legacy `llama-monitor` entrypoint emits one actionable deprecation
-docs/plans/20260811-local_llm_foundry-rebrand.md	1004	llama_monitor	public-brand	rewrite-current-documentation	14	- [ ] Keep Rust/test imports on `llama_monitor`; do not rename backend
-docs/plans/20260811-local_llm_foundry-rebrand.md	1078	llama-monitor	public-brand	rewrite-current-documentation	14	- [ ] Centralize and document existing `llama-monitor-*` and
-docs/plans/20260811-local_llm_foundry-rebrand.md	1079	llama_monitor	compatibility-identifier	accept-through-2.x	2,3,8	`llama_monitor_*` browser keys as frozen 2.x compatibility identifiers.
-docs/plans/20260811-local_llm_foundry-rebrand.md	1172	llama-monitor	public-brand	rewrite-current-documentation	14	- [ ] Preserve old CA/key identity; do not rename `llama-monitor CA` merely
-docs/plans/20260811-local_llm_foundry-rebrand.md	1302	llama-monitor	public-brand	rewrite-current-documentation	14	- [ ] Retain `arc-llama-monitor`/`arc-llama-monitor-fast` runner labels until
-docs/plans/20260811-local_llm_foundry-rebrand.md	1302	llama-monitor	public-brand	rewrite-current-documentation	14	- [ ] Retain `arc-llama-monitor`/`arc-llama-monitor-fast` runner labels until
-docs/plans/20260811-local_llm_foundry-rebrand.md	1312	llama-monitor	compatibility-identifier	accept-through-2.x	2,3,8	- the equivalent four `llama-monitor-*` aliases. These are four target builds
-docs/plans/20260811-local_llm_foundry-rebrand.md	1319	llama-monitor	public-brand	rewrite-current-documentation	14	`llama-monitor.exe`, `sensor_bridge.exe`, and
-docs/plans/20260811-local_llm_foundry-rebrand.md	1446	llama_monitor	public-brand	rewrite-current-documentation	14	`CI=1 LLAMA_MONITOR_USE_RELEASE=1 LLAMA_MONITOR_TEST_PORT=17778 rtk npm test`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1446	llama_monitor	public-brand	rewrite-current-documentation	14	`CI=1 LLAMA_MONITOR_USE_RELEASE=1 LLAMA_MONITOR_TEST_PORT=17778 rtk npm test`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1688	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-preferences`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1689	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-last-endpoint`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1690	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-last-session`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1691	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-previous-position`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1692	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-group-by-family`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1693	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-preset-sort`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1694	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-chat-font`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1695	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-enter-to-send`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1696	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-chat-telemetry-pinned`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1697	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-chat-style`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1698	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-models-prefs`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1699	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-chat-focus-mode`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1700	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-notifications`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1701	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-gpu-viz`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1702	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-system-viz`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1703	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-date-format`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1704	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-log-font-size`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1705	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-log-tail-enabled`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1706	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-log-tail-lines`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1707	llama_monitor	public-brand	rewrite-current-documentation	14	- `llama_monitor_sidebar_width`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1708	llama_monitor	public-brand	rewrite-current-documentation	14	- `llama_monitor_sidebar_expanded`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1709	llama_monitor	public-brand	rewrite-current-documentation	14	- `llama_monitor_context_notes_intro_hidden`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1713	llama_monitor	public-brand	rewrite-current-documentation	14	`appNavWidth`. Treat `llama_monitor_settings` as a likely stale test
-docs/plans/20260811-local_llm_foundry-rebrand.md	1756	llama-monitor	public-brand	rewrite-current-documentation	14	- HKDF info `llama-monitor-encryption-key`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1758	llama-monitor	public-brand	rewrite-current-documentation	14	- `.llama-monitor-provenance.json`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1759	llama-monitor	public-brand	rewrite-current-documentation	14	- `.llama-monitor-source.json`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1760	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-conversion.json`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1771	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-linux-x86_64`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1772	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-linux-aarch64`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1773	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-windows-x86_64.zip`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1774	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-macos-aarch64.tar.gz`
-docs/plans/20260811-local_llm_foundry-rebrand.md	1779	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-agent`
-docs/plans/20260811-local_llm_foundry-rebrand.md	2016	llama_monitor	public-brand	rewrite-current-documentation	14	- [ ] Internal `llama_monitor` crate and technology namespaces are documented.
+docs/plans/20260811-local_llm_foundry-rebrand.md	40	llama monitor	public-brand	rewrite-current-documentation	14	This plan coordinates the complete public rebrand from Llama Monitor /
+docs/plans/20260811-local_llm_foundry-rebrand.md	41	llama-monitor	public-brand	rewrite-current-documentation	14	`llama-monitor` to **Local LLM Foundry**. It covers product identity, visual
+docs/plans/20260811-local_llm_foundry-rebrand.md	86	llama_monitor	compatibility-identifier	accept-through-2.x	2,3,8	| Rust library crate | Keep `llama_monitor` as an explicit internal compatibility target in 2.0 |
+docs/plans/20260811-local_llm_foundry-rebrand.md	134	llama monitor	public-brand	rewrite-current-documentation	14	- An exact case-insensitive scan for `Llama Monitor`, `llama-monitor`, or
+docs/plans/20260811-local_llm_foundry-rebrand.md	134	llama-monitor	public-brand	rewrite-current-documentation	14	- An exact case-insensitive scan for `Llama Monitor`, `llama-monitor`, or
+docs/plans/20260811-local_llm_foundry-rebrand.md	135	llama_monitor	public-brand	rewrite-current-documentation	14	`llama_monitor` currently reaches roughly 281 files across source, static
+docs/plans/20260811-local_llm_foundry-rebrand.md	137	llama-monitor	public-brand	rewrite-current-documentation	14	- `Cargo.toml:2` names the package `llama-monitor`.
+docs/plans/20260811-local_llm_foundry-rebrand.md	151	llama-monitor	public-brand	rewrite-current-documentation	14	`llama-monitor-encryption-key`, accepts
+docs/plans/20260811-local_llm_foundry-rebrand.md	152	llama_monitor	public-brand	rewrite-current-documentation	14	`LLAMA_MONITOR_ENCRYPTION_KEY`, and stores `encryption-key` under the
+docs/plans/20260811-local_llm_foundry-rebrand.md	159	llama_monitor	public-brand	rewrite-current-documentation	14	`llama_monitor_session`.
+docs/plans/20260811-local_llm_foundry-rebrand.md	163	llama-monitor	public-brand	rewrite-current-documentation	14	`llama-monitor[.exe]`.
+docs/plans/20260811-local_llm_foundry-rebrand.md	255	llama monitor	compatibility-identifier	accept-through-2.x	2,3,8	| Product | Llama Monitor | Local LLM Foundry | Old name appears only in migration/deprecation/history |
+docs/plans/20260811-local_llm_foundry-rebrand.md	256	llama monitor	public-brand	rewrite-current-documentation	14	| Short UI name | Llama Monitor / monitor | Foundry | Preserve technical “monitor” verbs where natural |
+docs/plans/20260811-local_llm_foundry-rebrand.md	257	llama-monitor	compatibility-identifier	accept-through-2.x	2,3,8	| Slug | `llama-monitor` | `local-llm-foundry` | Accept old aliases through 2.x |
+docs/plans/20260811-local_llm_foundry-rebrand.md	258	llama-monitor	compatibility-identifier	accept-through-2.x	2,3,8	| Binary | `llama-monitor[.exe]` | `local-llm-foundry[.exe]` | Ship a thin legacy launcher/alias with one warning |
+docs/plans/20260811-local_llm_foundry-rebrand.md	259	llama-monitor	public-brand	rewrite-current-documentation	14	| Cargo package | `llama-monitor` | `local-llm-foundry` | No dual package; lockfile updates atomically |
+docs/plans/20260811-local_llm_foundry-rebrand.md	260	llama_monitor	public-brand	rewrite-current-documentation	14	| Rust crate | `llama_monitor` | Explicitly keep `llama_monitor` in 2.0 | Internal namespace is not public product branding |
+docs/plans/20260811-local_llm_foundry-rebrand.md	260	llama_monitor	public-brand	rewrite-current-documentation	14	| Rust crate | `llama_monitor` | Explicitly keep `llama_monitor` in 2.0 | Internal namespace is not public product branding |
+docs/plans/20260811-local_llm_foundry-rebrand.md	262	llama-monitor	public-brand	rewrite-current-documentation	14	| Repository | `nmorgowicz-org/llama-monitor` | recommended `nmorgowicz-org/local-llm-foundry` | Rely on GitHub redirect but update every canonical URL |
+docs/plans/20260811-local_llm_foundry-rebrand.md	263	llama-monitor	compatibility-identifier	accept-through-2.x	2,3,8	| Unix/macOS root | `~/.config/llama-monitor` | `~/.config/local-llm-foundry` | Legacy-root mode and explicit migration through 2.x |
+docs/plans/20260811-local_llm_foundry-rebrand.md	264	llama-monitor	compatibility-identifier	accept-through-2.x	2,3,8	| Windows root | `%APPDATA%\\llama-monitor` plus older `%USERPROFILE%\\.config\\llama-monitor` | `%APPDATA%\\local-llm-foundry` | Detect both legacy roots; never merge silently |
+docs/plans/20260811-local_llm_foundry-rebrand.md	264	llama-monitor	compatibility-identifier	accept-through-2.x	2,3,8	| Windows root | `%APPDATA%\\llama-monitor` plus older `%USERPROFILE%\\.config\\llama-monitor` | `%APPDATA%\\local-llm-foundry` | Detect both legacy roots; never merge silently |
+docs/plans/20260811-local_llm_foundry-rebrand.md	265	llama_monitor	compatibility-identifier	accept-through-2.x	2,3,8	| Environment prefix | `LLAMA_MONITOR_*` plus standalone legacy variables | `LOCAL_LLM_FOUNDRY_*` | New wins; unequal dual values fail with an actionable error |
+docs/plans/20260811-local_llm_foundry-rebrand.md	266	llama_monitor	compatibility-identifier	accept-through-2.x	2,3,8	| Encryption env | `LLAMA_MONITOR_ENCRYPTION_KEY` | `LOCAL_LLM_FOUNDRY_ENCRYPTION_KEY` | Accept both; keep legacy HKDF info string or explicitly re-encrypt |
+docs/plans/20260811-local_llm_foundry-rebrand.md	267	llama_monitor	compatibility-identifier	accept-through-2.x	2,3,8	| Form cookie | `llama_monitor_session` | `local_llm_foundry_session` | Accept both; login sets new; logout clears both |
+docs/plans/20260811-local_llm_foundry-rebrand.md	274	llama-monitor	public-brand	rewrite-current-documentation	14	| Release assets | `llama-monitor-<platform>` | `local-llm-foundry-<platform>` | 2.0 bridge publishes both names with identical checksummed payloads |
+docs/plans/20260811-local_llm_foundry-rebrand.md	999	llama_monitor	public-brand	rewrite-current-documentation	14	`[lib] name = "llama_monitor"`, and document why the internal crate remains
+docs/plans/20260811-local_llm_foundry-rebrand.md	1003	llama-monitor	compatibility-identifier	accept-through-2.x	2,3,8	- [ ] The legacy `llama-monitor` entrypoint emits one actionable deprecation
+docs/plans/20260811-local_llm_foundry-rebrand.md	1005	llama_monitor	public-brand	rewrite-current-documentation	14	- [ ] Keep Rust/test imports on `llama_monitor`; do not rename backend
+docs/plans/20260811-local_llm_foundry-rebrand.md	1079	llama-monitor	public-brand	rewrite-current-documentation	14	- [ ] Centralize and document existing `llama-monitor-*` and
+docs/plans/20260811-local_llm_foundry-rebrand.md	1080	llama_monitor	compatibility-identifier	accept-through-2.x	2,3,8	`llama_monitor_*` browser keys as frozen 2.x compatibility identifiers.
+docs/plans/20260811-local_llm_foundry-rebrand.md	1173	llama-monitor	public-brand	rewrite-current-documentation	14	- [ ] Preserve old CA/key identity; do not rename `llama-monitor CA` merely
+docs/plans/20260811-local_llm_foundry-rebrand.md	1303	llama-monitor	public-brand	rewrite-current-documentation	14	- [ ] Retain `arc-llama-monitor`/`arc-llama-monitor-fast` runner labels until
+docs/plans/20260811-local_llm_foundry-rebrand.md	1303	llama-monitor	public-brand	rewrite-current-documentation	14	- [ ] Retain `arc-llama-monitor`/`arc-llama-monitor-fast` runner labels until
+docs/plans/20260811-local_llm_foundry-rebrand.md	1313	llama-monitor	compatibility-identifier	accept-through-2.x	2,3,8	- the equivalent four `llama-monitor-*` aliases. These are four target builds
+docs/plans/20260811-local_llm_foundry-rebrand.md	1320	llama-monitor	public-brand	rewrite-current-documentation	14	`llama-monitor.exe`, `sensor_bridge.exe`, and
+docs/plans/20260811-local_llm_foundry-rebrand.md	1447	llama_monitor	public-brand	rewrite-current-documentation	14	`CI=1 LLAMA_MONITOR_USE_RELEASE=1 LLAMA_MONITOR_TEST_PORT=17778 rtk npm test`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1447	llama_monitor	public-brand	rewrite-current-documentation	14	`CI=1 LLAMA_MONITOR_USE_RELEASE=1 LLAMA_MONITOR_TEST_PORT=17778 rtk npm test`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1689	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-preferences`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1690	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-last-endpoint`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1691	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-last-session`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1692	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-previous-position`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1693	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-group-by-family`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1694	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-preset-sort`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1695	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-chat-font`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1696	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-enter-to-send`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1697	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-chat-telemetry-pinned`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1698	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-chat-style`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1699	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-models-prefs`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1700	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-chat-focus-mode`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1701	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-notifications`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1702	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-gpu-viz`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1703	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-system-viz`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1704	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-date-format`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1705	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-log-font-size`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1706	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-log-tail-enabled`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1707	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-log-tail-lines`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1708	llama_monitor	public-brand	rewrite-current-documentation	14	- `llama_monitor_sidebar_width`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1709	llama_monitor	public-brand	rewrite-current-documentation	14	- `llama_monitor_sidebar_expanded`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1710	llama_monitor	public-brand	rewrite-current-documentation	14	- `llama_monitor_context_notes_intro_hidden`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1714	llama_monitor	public-brand	rewrite-current-documentation	14	`appNavWidth`. Treat `llama_monitor_settings` as a likely stale test
+docs/plans/20260811-local_llm_foundry-rebrand.md	1757	llama-monitor	public-brand	rewrite-current-documentation	14	- HKDF info `llama-monitor-encryption-key`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1759	llama-monitor	public-brand	rewrite-current-documentation	14	- `.llama-monitor-provenance.json`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1760	llama-monitor	public-brand	rewrite-current-documentation	14	- `.llama-monitor-source.json`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1761	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-conversion.json`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1772	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-linux-x86_64`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1773	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-linux-aarch64`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1774	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-windows-x86_64.zip`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1775	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-macos-aarch64.tar.gz`
+docs/plans/20260811-local_llm_foundry-rebrand.md	1780	llama-monitor	public-brand	rewrite-current-documentation	14	- `llama-monitor-agent`
+docs/plans/20260811-local_llm_foundry-rebrand.md	2017	llama_monitor	public-brand	rewrite-current-documentation	14	- [ ] Internal `llama_monitor` crate and technology namespaces are documented.
 docs/reference/api.md	3	llama monitor	public-brand	rewrite-current-documentation	14	Llama Monitor serves its REST API on the same port as the web UI, typically `http://localhost:7778`.
 docs/reference/api.md	5	llama-monitor	public-brand	rewrite-current-documentation	14	This page documents the HTTP endpoints exposed by llama-monitor and the data shapes returned.
 docs/reference/api.md	26	llama-monitor	public-brand	rewrite-current-documentation	14	- `self_update` — in-place update of llama-monitor
 docs/reference/api.md	297	llama-monitor	public-brand	rewrite-current-documentation	14	Before attaching, llama-monitor performs the selected backend's non-mutating readiness
-docs/reference/api.md	1241	llama-monitor	public-brand	rewrite-current-documentation	14	- llama-monitor serializes its own inference requests per active session before forwarding them upstream.
-docs/reference/api.md	1773	llama-monitor	public-brand	rewrite-current-documentation	14	Creates a manual backup in `~/.config/llama-monitor/backups/chat_<timestamp>.db`.
-docs/reference/api.md	1967	llama-monitor	public-brand	rewrite-current-documentation	14	"fqdn": "llama-monitor.example.com",
-docs/reference/api.md	1998	llama-monitor	public-brand	rewrite-current-documentation	14	"fqdn": "llama-monitor.example.com",
-docs/reference/api.md	2816	llama-monitor	public-brand	rewrite-current-documentation	14	{ "dir": "/Users/nick/.config/llama-monitor/models" }
+docs/reference/api.md	1287	llama-monitor	public-brand	rewrite-current-documentation	14	- llama-monitor serializes its own inference requests per active session before forwarding them upstream.
+docs/reference/api.md	1819	llama-monitor	public-brand	rewrite-current-documentation	14	Creates a manual backup in `~/.config/llama-monitor/backups/chat_<timestamp>.db`.
+docs/reference/api.md	2013	llama-monitor	public-brand	rewrite-current-documentation	14	"fqdn": "llama-monitor.example.com",
+docs/reference/api.md	2044	llama-monitor	public-brand	rewrite-current-documentation	14	"fqdn": "llama-monitor.example.com",
+docs/reference/api.md	2862	llama-monitor	public-brand	rewrite-current-documentation	14	{ "dir": "/Users/nick/.config/llama-monitor/models" }
 docs/reference/apple-silicon-mtp-runtime-comparison.md	31	llama-monitor	public-brand	rewrite-current-documentation	14	still require local receipts before llama-monitor may make product claims.
 docs/reference/apple-silicon-mtp-runtime-comparison.md	164	llama-monitor	public-brand	rewrite-current-documentation	14	## Product decision for llama-monitor
 docs/reference/backend-inference.md	5	llama monitor	legitimate-technology	preserve-technical-name	preserve	Llama Monitor uses a backend-neutral inference abstraction that allows launching and managing both llama.cpp and Rapid-MLX servers through a common interface. This enables a unified dashboard, consistent preset management, and engine-aware 
