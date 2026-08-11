@@ -31,7 +31,9 @@ New GGUF downloads go to `gguf/`. Downloads that stop during a transient network
 failure are retained as `<filename>.part` beside a small `<filename>.part.json` resume
 record; the Library card offers Resume when that record is present. A legacy partial
 without resume metadata remains visible at the top of the list with an orange warning
-and can be deleted from the card.
+and can be deleted from the card. The card also offers Find source, which searches
+Hugging Face for matching repositories and lets the user confirm the exact GGUF file
+before resuming.
 
 At startup, Llama Monitor idempotently creates the canonical GGUF, Transformers, HF
 cache, staging, and download directories. On Apple Silicon it also creates the native
@@ -41,6 +43,13 @@ remains explicit.
 
 Migration is never automatic. Preview the exact plan with an API token, then execute
 that same `plan_id` with the database-admin token and the explicit confirmation value.
+
+Actionable model warnings also appear in the top-navigation Notifications menu. The
+toast is a short-lived prompt; the notification entry retains the full message,
+timestamp, and action after the toast expires. The active list is capped at the five
+highest-priority issues, while older, lower-priority, resolved, or dismissed entries
+move to the archive. Incomplete-download warnings are archived automatically after
+the inventory no longer contains incomplete or converting entries.
 
 ## Inventory metadata and backend awareness
 

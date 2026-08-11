@@ -1147,26 +1147,76 @@ fn api_models_download_resume(
                         "Resume path must be a .part file",
                     ));
                 }
-                let Some(metadata) = crate::model_download::load_resume_metadata(&canonical) else {
-                    return Ok(error_reply(
-                        warp::http::StatusCode::BAD_REQUEST,
-                        "This partial download has no app-owned resume metadata",
-                    ));
-                };
-                let filename = metadata
-                    .save_as
-                    .clone()
-                    .or_else(|| metadata.file_path.rsplit('/').next().map(str::to_owned));
-                let Some(filename) = filename else {
-                    return Ok(error_reply(
-                        warp::http::StatusCode::BAD_REQUEST,
-                        "Resume metadata has no destination filename",
-                    ));
+                let metadata = crate::model_download::load_resume_metadata(&canonical);
+                let (repo_id, file_path, filename) = if let Some(metadata) = metadata {
+                    let filename = metadata
+                        .save_as
+                        .clone()
+                        .or_else(|| metadata.file_path.rsplit('/').next().map(str::to_owned));
+                    let Some(filename) = filename else {
+                        return Ok(error_reply(
+                            warp::http::StatusCode::BAD_REQUEST,
+                            "Resume metadata has no destination filename",
+                        ));
+                    };
+                    (metadata.repo_id, metadata.file_path, filename)
+                } else {
+                    let repo_id = body["repo_id"].as_str().unwrap_or("").trim().to_string();
+                    let file_path = body["file_path"].as_str().unwrap_or("").trim().to_string();
+                    let filename = body["save_as"]
+                        .as_str()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_owned)
+                        .or_else(|| file_path.rsplit('/').next().map(str::to_owned));
+                    let valid_repo = repo_id.split_once('/').is_some_and(|(owner, name)| {
+                        !owner.is_empty()
+                            && !name.is_empty()
+                            && owner.bytes().all(|byte| {
+                                byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'
+                            })
+                            && name.bytes().all(|byte| {
+                                byte.is_ascii_alphanumeric()
+                                    || byte == b'_'
+                                    || byte == b'-'
+                                    || byte == b'.'
+                            })
+                    });
+                    let valid_file_path = !file_path.is_empty()
+                        && !file_path.starts_with('/')
+                        && !file_path.contains('\\')
+                        && file_path.split('/').all(|component| {
+                            !component.is_empty() && component != "." && component != ".."
+                        });
+                    let Some(filename) = filename else {
+                        return Ok(error_reply(
+                            warp::http::StatusCode::BAD_REQUEST,
+                            "Resume source has no destination filename",
+                        ));
+                    };
+                    let valid_filename = filename.to_ascii_lowercase().ends_with(".gguf")
+                        && !filename.contains('/')
+                        && !filename.contains('\\')
+                        && filename != "."
+                        && filename != "..";
+                    if !valid_repo || !valid_file_path || !valid_filename {
+                        return Ok(error_reply(
+                            warp::http::StatusCode::BAD_REQUEST,
+                            "Resume source must be a valid Hugging Face GGUF file",
+                        ));
+                    }
+                    (repo_id, file_path, filename)
                 };
                 let target_dir = canonical.parent().unwrap_or(&root).to_path_buf();
+                if target_dir.join(&filename).with_extension("part") != canonical {
+                    return Ok(error_reply(
+                        warp::http::StatusCode::BAD_REQUEST,
+                        "Resume source filename does not match the partial file",
+                    ));
+                }
                 match crate::model_download::start_download(
-                    &metadata.repo_id,
-                    &metadata.file_path,
+                    &repo_id,
+                    &file_path,
                     Some(&filename),
                     &target_dir,
                     crate::hf::hf_load_token(),

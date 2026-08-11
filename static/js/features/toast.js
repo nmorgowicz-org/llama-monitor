@@ -4,6 +4,244 @@
 import { escapeHtml } from '../core/format.js';
 
 const TOAST_AUTO_DISMISS = 6000;
+const NOTIFICATIONS_STORAGE_KEY = 'llama-monitor-notifications';
+const MAX_ACTIVE_NOTIFICATIONS = 5;
+const MAX_ARCHIVED_NOTIFICATIONS = 50;
+
+let notificationStateLoaded = false;
+let activeNotifications = new Map();
+let archivedNotifications = [];
+let notificationTab = 'active';
+const notificationHandlers = new Map();
+
+function notificationPriority(type) {
+    return { error: 3, warning: 2, info: 1, success: 0 }[type] || 0;
+}
+
+function notificationHandlerKey(notificationId, actionId) {
+    return `${notificationId}:${actionId}`;
+}
+
+function ensureNotificationState() {
+    if (notificationStateLoaded) return;
+    notificationStateLoaded = true;
+    try {
+        const saved = JSON.parse(localStorage.getItem(NOTIFICATIONS_STORAGE_KEY) || '{}');
+        activeNotifications = new Map(
+            Array.isArray(saved.active)
+                ? saved.active.filter(item => item?.id).map(item => [item.id, item])
+                : [],
+        );
+        archivedNotifications = Array.isArray(saved.archived)
+            ? saved.archived.filter(item => item?.id).slice(0, MAX_ARCHIVED_NOTIFICATIONS)
+            : [];
+    } catch {
+        activeNotifications = new Map();
+        archivedNotifications = [];
+    }
+}
+
+function saveNotificationState() {
+    try {
+        localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify({
+            active: [...activeNotifications.values()],
+            archived: archivedNotifications,
+        }));
+    } catch {
+        // Notification history is best effort and must never block the app.
+    }
+}
+
+function archiveNotification(record, reason) {
+    activeNotifications.delete(record.id);
+    archivedNotifications = [
+        { ...record, archivedAt: Date.now(), archiveReason: reason },
+        ...archivedNotifications.filter(item => item.id !== record.id),
+    ].slice(0, MAX_ARCHIVED_NOTIFICATIONS);
+}
+
+function enforceActiveLimit() {
+    const ranked = [...activeNotifications.values()].sort((a, b) => (
+        notificationPriority(b.type) - notificationPriority(a.type)
+        || (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)
+    ));
+    ranked.slice(MAX_ACTIVE_NOTIFICATIONS).forEach(record => {
+        archiveNotification(record, 'Archived because it is outside the top active issues.');
+    });
+}
+
+function formatNotificationTime(timestamp) {
+    if (!timestamp) return 'Unknown time';
+    const elapsed = Math.max(0, Date.now() - timestamp);
+    if (elapsed < 60_000) return 'Just now';
+    if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)}m ago`;
+    if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)}h ago`;
+    return new Intl.DateTimeFormat(undefined, {
+        month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    }).format(timestamp);
+}
+
+function createNotificationButton(label, className, handler) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = className;
+    button.textContent = label;
+    button.addEventListener('click', handler);
+    return button;
+}
+
+function invokeNotificationAction(record, action) {
+    const handler = notificationHandlers.get(notificationHandlerKey(record.id, action.id));
+    if (handler) handler();
+}
+
+function renderNotificationCenter() {
+    const root = document.getElementById('nav-notifications');
+    const list = document.getElementById('nav-notifications-list');
+    if (!root || !list) return;
+    ensureNotificationState();
+
+    const active = [...activeNotifications.values()].sort((a, b) => (
+        notificationPriority(b.type) - notificationPriority(a.type)
+        || (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)
+    ));
+    const records = notificationTab === 'active' ? active : archivedNotifications;
+    const badge = document.getElementById('nav-notifications-badge');
+    const activeCount = document.getElementById('nav-notifications-active-count');
+    const archivedCount = document.getElementById('nav-notifications-archived-count');
+    const clearArchived = document.getElementById('nav-notifications-clear');
+    if (badge) {
+        badge.hidden = active.length === 0;
+        badge.textContent = active.length > 9 ? '9+' : String(active.length);
+    }
+    if (activeCount) activeCount.textContent = active.length ? `(${active.length})` : '';
+    if (archivedCount) archivedCount.textContent = archivedNotifications.length ? `(${archivedNotifications.length})` : '';
+    if (clearArchived) clearArchived.disabled = archivedNotifications.length === 0;
+
+    document.querySelectorAll('[data-notification-tab]').forEach(tab => {
+        const selected = tab.dataset.notificationTab === notificationTab;
+        tab.classList.toggle('active', selected);
+        tab.setAttribute('aria-selected', String(selected));
+    });
+
+    list.replaceChildren();
+    if (!records.length) {
+        const empty = document.createElement('div');
+        empty.className = 'nav-notifications-empty';
+        empty.textContent = notificationTab === 'active'
+            ? 'No active issues.'
+            : 'No archived notifications yet.';
+        list.appendChild(empty);
+        return;
+    }
+
+    records.forEach(record => {
+        const item = document.createElement('article');
+        item.className = `nav-notification-item nav-notification-item--${record.type || 'info'}`;
+
+        const heading = document.createElement('div');
+        heading.className = 'nav-notification-heading';
+        const icon = document.createElement('span');
+        icon.className = 'nav-notification-icon';
+        icon.textContent = getToastIcon(record.type);
+        icon.setAttribute('aria-hidden', 'true');
+        const title = document.createElement('strong');
+        title.className = 'nav-notification-title';
+        title.textContent = record.title || 'Notification';
+        const time = document.createElement('time');
+        time.className = 'nav-notification-time';
+        time.dateTime = record.createdAt ? new Date(record.createdAt).toISOString() : '';
+        time.textContent = formatNotificationTime(record.createdAt);
+        heading.append(icon, title, time);
+
+        const message = document.createElement('p');
+        message.className = 'nav-notification-message';
+        message.textContent = record.message || '';
+
+        const footer = document.createElement('div');
+        footer.className = 'nav-notification-footer';
+        const actions = document.createElement('div');
+        actions.className = 'nav-notification-actions';
+        (record.actions || []).forEach(action => {
+            const handler = notificationHandlers.get(notificationHandlerKey(record.id, action.id));
+            const button = createNotificationButton(
+                action.label,
+                action.primary ? 'nav-notification-action primary' : 'nav-notification-action',
+                () => invokeNotificationAction(record, action),
+            );
+            button.disabled = !handler;
+            button.title = handler ? '' : 'This action will be available when the related feature is ready.';
+            actions.appendChild(button);
+        });
+        if (notificationTab === 'active') {
+            actions.appendChild(createNotificationButton(
+                'Archive',
+                'nav-notification-action nav-notification-action--quiet',
+                () => {
+                    archiveNotification(record, 'Archived by user.');
+                    saveNotificationState();
+                    renderNotificationCenter();
+                },
+            ));
+        }
+        footer.appendChild(actions);
+        if (record.archiveReason) {
+            const reason = document.createElement('span');
+            reason.className = 'nav-notification-archive-reason';
+            reason.textContent = record.archiveReason;
+            footer.appendChild(reason);
+        }
+
+        item.append(heading, message);
+        if ((record.actions || []).length || record.archiveReason) item.appendChild(footer);
+        list.appendChild(item);
+    });
+}
+
+function registerPersistentNotification(id, title, type, message, actions) {
+    ensureNotificationState();
+    const existing = activeNotifications.get(id);
+    const now = Date.now();
+    const record = {
+        id,
+        title: title || 'Notification',
+        type: type || 'info',
+        message: message || '',
+        actions: actions.map(action => ({
+            id: action.id,
+            label: action.label,
+            primary: !!action.primary,
+        })),
+        createdAt: existing?.createdAt || now,
+        updatedAt: now,
+    };
+    actions.forEach(action => {
+        if (typeof action.handler === 'function') {
+            notificationHandlers.set(notificationHandlerKey(id, action.id), action.handler);
+        }
+    });
+    archivedNotifications = archivedNotifications.filter(item => item.id !== id);
+    activeNotifications.set(id, record);
+    enforceActiveLimit();
+    saveNotificationState();
+    renderNotificationCenter();
+}
+
+export function resolveNotification(id, reason = 'Resolved automatically.') {
+    ensureNotificationState();
+    const record = activeNotifications.get(id);
+    if (!record) return;
+    archiveNotification(record, reason);
+    saveNotificationState();
+    renderNotificationCenter();
+}
+
+function clearArchivedNotifications() {
+    ensureNotificationState();
+    archivedNotifications = [];
+    saveNotificationState();
+    renderNotificationCenter();
+}
 
 function getToastIcon(type) {
     const icons = {
@@ -83,10 +321,13 @@ function updateToastProgress(toastElement, percent, message) {
 }
 
 export function showToastWithActions(title, type, message, actions = [], options = {}) {
-    const container = document.getElementById('toast-container');
-    if (!container) return;
+    const { notificationId = null, onDismiss = null, duration = Math.max(TOAST_AUTO_DISMISS, 5000) } = options;
+    if (notificationId) {
+        registerPersistentNotification(notificationId, title, type, message, actions);
+    }
 
-    const { onDismiss = null, duration = Math.max(TOAST_AUTO_DISMISS, 5000) } = options;
+    const container = document.getElementById('toast-container');
+    if (!container) return null;
 
     const toast = document.createElement('div');
     toast.className = 'toast toast-' + type + ' toast-with-actions';
@@ -171,6 +412,41 @@ function showToastProgress(title, type = 'info') {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initToast() {
+    ensureNotificationState();
+    const notifications = document.getElementById('nav-notifications');
+    const notificationsButton = document.getElementById('nav-notifications-btn');
+    const notificationsMenu = document.getElementById('nav-notifications-menu');
+    const clearArchived = document.getElementById('nav-notifications-clear');
+    if (notifications && notificationsButton && notificationsMenu) {
+        notificationsButton.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const open = notificationsMenu.hidden;
+            notificationsMenu.hidden = !open;
+            notificationsButton.setAttribute('aria-expanded', String(open));
+            if (open) renderNotificationCenter();
+        });
+        clearArchived?.addEventListener('click', clearArchivedNotifications);
+        notificationsMenu.querySelectorAll('[data-notification-tab]').forEach(tab => {
+            tab.addEventListener('click', () => {
+                notificationTab = tab.dataset.notificationTab || 'active';
+                renderNotificationCenter();
+            });
+        });
+        document.addEventListener('click', (event) => {
+            if (!notifications.contains(event.target)) {
+                notificationsMenu.hidden = true;
+                notificationsButton.setAttribute('aria-expanded', 'false');
+            }
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && !notificationsMenu.hidden) {
+                notificationsMenu.hidden = true;
+                notificationsButton.setAttribute('aria-expanded', 'false');
+                notificationsButton.focus();
+            }
+        });
+    }
+    renderNotificationCenter();
     // Event delegation for toast close buttons
     document.getElementById('toast-container')?.addEventListener('click', (e) => {
         const closeBtn = e.target.closest('[data-toast-close]');

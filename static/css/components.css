@@ -1897,6 +1897,12 @@ button:disabled {
   background: color-mix(in srgb, var(--color-text-muted) 5%, transparent);
 }
 
+.mm-card-action-note--warning {
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 28%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 7%, transparent);
+}
+
 .mm-model-card[data-lifecycle="invalid"] {
   border-color: color-mix(in srgb, var(--color-error) 24%, transparent);
 }
@@ -1919,6 +1925,10 @@ button:disabled {
   border: 1px solid color-mix(in srgb, var(--color-warning) 38%, transparent);
   border-radius: 9px;
   background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+}
+
+.mm-legacy-notice[hidden] {
+  display: none;
 }
 
 .mm-legacy-notice strong { color: var(--color-warning); }
@@ -2036,6 +2046,10 @@ button:disabled {
   padding-top: 6px;
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   margin-top: 2px;
+}
+
+.mm-card-actions--incomplete {
+  flex-wrap: wrap;
 }
 
 .mm-action-btn {

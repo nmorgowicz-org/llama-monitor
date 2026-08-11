@@ -187,6 +187,26 @@
                 </svg>
                 <span id="update-pill-text"></span>
             </button>
+            <div class="nav-notifications" id="nav-notifications">
+                <button class="nav-notifications-btn" id="nav-notifications-btn" type="button" aria-label="Notifications" aria-expanded="false" aria-controls="nav-notifications-menu" title="Notifications">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                    <span class="nav-notifications-badge" id="nav-notifications-badge" hidden></span>
+                </button>
+                <div class="nav-notifications-menu" id="nav-notifications-menu" role="dialog" aria-label="Notifications" hidden>
+                    <div class="nav-notifications-header">
+                        <div>
+                            <strong>Notifications</strong>
+                            <span class="nav-notifications-subtitle">Issues stay here until resolved.</span>
+                        </div>
+                        <button class="nav-notifications-clear" id="nav-notifications-clear" type="button">Clear archived</button>
+                    </div>
+                    <div class="nav-notifications-tabs" role="tablist" aria-label="Notification history">
+                        <button class="nav-notifications-tab active" type="button" role="tab" aria-selected="true" data-notification-tab="active">Active <span id="nav-notifications-active-count"></span></button>
+                        <button class="nav-notifications-tab" type="button" role="tab" aria-selected="false" data-notification-tab="archived">Archive <span id="nav-notifications-archived-count"></span></button>
+                    </div>
+                    <div class="nav-notifications-list" id="nav-notifications-list" role="tabpanel"></div>
+                </div>
+            </div>
             <button class="nav-cadence-chip" id="nav-cadence-chip" type="button" aria-expanded="false" aria-controls="nav-cadence-menu" title="Dashboard refresh cadence" style="display:none;">
                 <span class="nav-cadence-label">Cadence</span>
                 <span id="nav-cadence-value">500ms</span>

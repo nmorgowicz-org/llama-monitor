@@ -1298,9 +1298,7 @@ pub fn execute_migration_selected_hf(
     let original_root = models_dir.to_path_buf();
     let root = canonical_library_root(models_dir)?;
     let journal_path = root.join(".staging/library-migration-journal.json");
-    let mut journal = if journal_path.is_file() {
-        serde_json::from_reader::<_, MigrationJournal>(fs::File::open(&journal_path)?)?
-    } else {
+    let create_journal = || -> Result<MigrationJournal> {
         let plan = plan_migration_selected_hf(
             &original_root,
             persistence_files,
@@ -1318,7 +1316,25 @@ pub fn execute_migration_selected_hf(
             completed_rewrites: Vec::new(),
         };
         atomic_json(&journal_path, &journal)?;
-        journal
+        Ok(journal)
+    };
+    let mut journal = if journal_path.is_file() {
+        let existing =
+            serde_json::from_reader::<_, MigrationJournal>(fs::File::open(&journal_path)?)?;
+        if existing.state == MigrationState::Complete
+            && (existing.plan.plan_id != expected_plan_id
+                || existing.plan.models_dir != root
+                || existing.plan.selected_hf_repos != selected_hf_repos)
+        {
+            // A completed journal is only a historical receipt. Replace it with the
+            // current preview; an incomplete journal remains protected below so an
+            // interrupted migration can resume its original plan safely.
+            create_journal()?
+        } else {
+            existing
+        }
+    } else {
+        create_journal()?
     };
     if journal.plan.plan_id != expected_plan_id || journal.plan.models_dir != root {
         bail!("Migration journal does not match requested library and plan");
@@ -1362,7 +1378,14 @@ pub fn execute_migration_selected_hf(
     }
     journal.state = MigrationState::Complete;
     atomic_json(&journal_path, &journal)?;
-    Ok(journal.plan)
+    let completed_plan = journal.plan;
+    if let Err(error) = fs::remove_file(&journal_path) {
+        eprintln!(
+            "[warn] completed model-library migration journal could not be removed at {}: {error}",
+            journal_path.display()
+        );
+    }
+    Ok(completed_plan)
 }
 
 fn validate_move_state(
@@ -1814,6 +1837,40 @@ mod tests {
                 .unwrap()
                 .ends_with("gguf/model.gguf")
         );
+        assert!(
+            !temp
+                .path()
+                .join(".staging/library-migration-journal.json")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn completed_migration_journal_is_replaced_by_current_preview() {
+        let temp = tempfile::tempdir().unwrap();
+        let models = temp.path().join("models");
+        fs::create_dir(&models).unwrap();
+        fs::write(models.join("new.gguf"), b"gguf").unwrap();
+
+        let current_plan = plan_migration(&models, &[]).unwrap();
+        let mut stale_plan = current_plan.clone();
+        stale_plan.plan_id = "f".repeat(64);
+        let journal_path = models.join(".staging/library-migration-journal.json");
+        atomic_json(
+            &journal_path,
+            &MigrationJournal {
+                plan: stale_plan,
+                state: MigrationState::Complete,
+                completed_moves: Vec::new(),
+                completed_rewrites: Vec::new(),
+            },
+        )
+        .unwrap();
+
+        execute_migration(&models, &[], &current_plan.plan_id).unwrap();
+
+        assert!(models.join("gguf/new.gguf").is_file());
+        assert!(!journal_path.exists());
     }
 
     #[test]
@@ -1949,7 +2006,7 @@ mod tests {
             )
             .unwrap_err()
             .to_string()
-            .contains("journaled preview")
+            .contains("Migration preview is stale")
         );
         let persisted: serde_json::Value =
             serde_json::from_reader(fs::File::open(presets).unwrap()).unwrap();

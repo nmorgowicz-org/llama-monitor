@@ -4,7 +4,7 @@
 import { sessionState } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import { getPlatformInfo } from '../core/platform-info.js';
-import { showToast, showToastWithActions } from './toast.js';
+import { resolveNotification, showToast, showToastWithActions } from './toast.js';
 import Router from './router.js';
 import { _showConfirm } from './presets.js';
 import { openCardPanel, openSpawnWizard } from './spawn-wizard.js';
@@ -94,6 +94,8 @@ let initialized = false;
 let inventoryCache = null;
 let modelLibraryRoot = '';
 let startupInventoryChecked = false;
+
+const INCOMPLETE_DOWNLOAD_NOTIFICATION_ID = 'models-incomplete-downloads';
 
 let communitySourcesState = {
     initialized: false,
@@ -228,6 +230,9 @@ async function loadModels({ refresh = false } = {}) {
             });
             if (!resp.ok) throw new Error(`Model inventory failed (${resp.status})`);
             inventoryCache = await resp.json();
+            if (!inventoryCache.some(model => model.lifecycle === 'incomplete' || model.lifecycle === 'converting')) {
+                resolveNotification(INCOMPLETE_DOWNLOAD_NOTIFICATION_ID, 'No incomplete model downloads remain.');
+            }
         }
         const models = inventoryCache || [];
         renderLegacyMigrationNotice(models);
@@ -440,6 +445,8 @@ async function migrateLegacyLibrary() {
         const plan = await preview.json().catch(() => ({}));
         if (!preview.ok) throw new Error(plan.error || 'Could not preview legacy migration');
         if (!plan.moves?.length) {
+            invalidateModelInventory();
+            await loadModels({ refresh: true });
             showToast('The library is already organized.', 'info');
             return;
         }
@@ -479,10 +486,20 @@ async function notifyIncompleteDownloadsAtStartup() {
         const models = await response.json();
         const incomplete = models.filter(model => model.lifecycle === 'incomplete' || model.lifecycle === 'converting');
         if (incomplete.length) {
-            showToast(
-                `${incomplete.length} incomplete model download${incomplete.length === 1 ? '' : 's'} need attention. Open Model Library to resume or remove them.`,
+            showToastWithActions(
+                `${incomplete.length} incomplete model download${incomplete.length === 1 ? '' : 's'} need attention`,
                 'warning',
+                'Resume or remove them from the Model Library.',
+                [{
+                    id: 'open-model-library',
+                    label: 'Open Model Library',
+                    primary: true,
+                    handler: () => openModelsModal(),
+                }],
+                { notificationId: INCOMPLETE_DOWNLOAD_NOTIFICATION_ID },
             );
+        } else {
+            resolveNotification(INCOMPLETE_DOWNLOAD_NOTIFICATION_ID, 'No incomplete model downloads remain.');
         }
     } catch {
         // Startup notification is advisory; opening the Library performs the authoritative scan.
@@ -617,6 +634,8 @@ function buildModelCard(m) {
     const companion = inventory.companionKind !== null;
     const tags = Array.isArray(m.tags) ? m.tags : [];
     const relatedPresets = mmproj ? [] : findPresetsForModel(m);
+    const isPartialFile = inventory.lifecycle === 'incomplete'
+        && (m.path || '').toLowerCase().endsWith('.part');
 
     const card = document.createElement('article');
     card.className = 'mm-model-card';
@@ -738,6 +757,9 @@ function buildModelCard(m) {
     // Actions row
     const actions = document.createElement('div');
     actions.className = 'mm-card-actions';
+    if (inventory.lifecycle === 'incomplete' && (m.path || '').toLowerCase().endsWith('.part')) {
+        actions.classList.add('mm-card-actions--incomplete');
+    }
 
     if (!companion && inventory.launchable) {
         const serverRunning = isLocalServerRunning();
@@ -844,9 +866,11 @@ function buildModelCard(m) {
         }
     } else {
         const unavailable = document.createElement('div');
-        unavailable.className = 'mm-card-action-note';
+        unavailable.className = `mm-card-action-note${isPartialFile ? ' mm-card-action-note--warning' : ''}`;
         unavailable.setAttribute('role', 'status');
-        unavailable.textContent = inventoryActionNote(inventory);
+        unavailable.textContent = isPartialFile
+            ? 'Resume unavailable: this partial file has no download source metadata.'
+            : inventoryActionNote(inventory);
         actions.appendChild(unavailable);
     }
 
@@ -889,6 +913,14 @@ function buildModelCard(m) {
         resumeBtn.title = `Resume ${m.resume_download.repo_id}/${m.resume_download.file_path}`;
         resumeBtn.addEventListener('click', () => resumeModelDownload(m.path));
         actions.appendChild(resumeBtn);
+    } else if (isPartialFile) {
+        const findSourceBtn = document.createElement('button');
+        findSourceBtn.type = 'button';
+        findSourceBtn.className = 'mm-action-btn mm-action-btn--switch';
+        findSourceBtn.textContent = 'Find source';
+        findSourceBtn.title = 'Search Hugging Face for a matching repository and GGUF file';
+        findSourceBtn.addEventListener('click', () => openResumeSourcePicker(m));
+        actions.appendChild(findSourceBtn);
     }
 
     // Two delete paths, because a single-file model and a directory-shaped one have
@@ -901,8 +933,6 @@ function buildModelCard(m) {
     const isManagedDirectory = MANAGED_DIRECTORY_FORMATS.has(inventory.format)
         && MANAGED_DIRECTORY_SOURCES.has(inventory.source);
     const isManagedCache = !!m.managed_cache_repo;
-    const isPartialFile = inventory.lifecycle === 'incomplete'
-        && (m.path || '').toLowerCase().endsWith('.part');
     if (isGgufFile || isManagedDirectory || isManagedCache || isPartialFile) {
         const deleteBtn = document.createElement('button');
         deleteBtn.type = 'button';
@@ -1233,18 +1263,186 @@ function buildPresetSummary(presets) {
     return `Saved presets (${presets.length}): ${summary} +${presets.length - 1} more`;
 }
 
-async function resumeModelDownload(path) {
+function resumeSourceFilename(model) {
+    const filename = model.filename || model.path?.split(/[\\/]/).pop() || '';
+    const withoutPart = filename.replace(/\.part$/i, '');
+    return withoutPart.toLowerCase().endsWith('.gguf') ? withoutPart : `${withoutPart}.gguf`;
+}
+
+function createResumeSourcePicker(model) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '2000';
+    overlay.style.display = 'grid';
+    const dialog = document.createElement('div');
+    dialog.className = 'modal';
+    dialog.style.width = 'min(620px, calc(100vw - 32px))';
+    dialog.style.maxHeight = 'min(760px, calc(100vh - 32px))';
+    dialog.style.overflow = 'auto';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    const title = document.createElement('h3');
+    title.textContent = 'Find download source';
+    const message = document.createElement('p');
+    message.className = 'mm-card-meta';
+    message.textContent = `Search for the Hugging Face repository and GGUF file matching ${model.filename || 'this partial download'}. Confirm the file before resuming.`;
+    const searchRow = document.createElement('div');
+    searchRow.style.display = 'flex';
+    searchRow.style.gap = '8px';
+    const searchInput = document.createElement('input');
+    searchInput.className = 'mm-lib-search-input';
+    searchInput.style.flex = '1';
+    searchInput.placeholder = 'model name or owner/repo';
+    searchInput.value = resumeSourceFilename(model).replace(/\.gguf$/i, '');
+    searchInput.setAttribute('aria-label', 'Hugging Face model or repository search');
+    const searchButton = document.createElement('button');
+    searchButton.type = 'button';
+    searchButton.className = 'btn-modal-save';
+    searchButton.textContent = 'Search';
+    searchRow.append(searchInput, searchButton);
+    const status = document.createElement('div');
+    status.className = 'mm-card-action-note';
+    status.style.marginTop = '10px';
+    const results = document.createElement('div');
+    results.style.display = 'grid';
+    results.style.gap = '8px';
+    results.style.marginTop = '10px';
+    const actions = document.createElement('div');
+    actions.style.display = 'flex';
+    actions.style.justifyContent = 'flex-end';
+    actions.style.marginTop = '14px';
+    const cancelButton = document.createElement('button');
+    cancelButton.type = 'button';
+    cancelButton.className = 'btn-modal-cancel';
+    cancelButton.textContent = 'Cancel';
+    cancelButton.addEventListener('click', () => overlay.remove());
+    actions.appendChild(cancelButton);
+    dialog.append(title, message, searchRow, status, results, actions);
+    overlay.appendChild(dialog);
+    overlay.addEventListener('click', event => {
+        if (event.target === overlay) overlay.remove();
+    });
+    return { overlay, searchInput, searchButton, status, results };
+}
+
+async function openResumeSourcePicker(model) {
+    const picker = createResumeSourcePicker(model);
+    document.body.appendChild(picker.overlay);
+    picker.searchInput.focus();
+    const authHeaders = () => ({
+        ...(window.authHeaders ? window.authHeaders() : {}),
+        'Content-Type': 'application/json',
+    });
+    const expected = resumeSourceFilename(model).toLowerCase();
+    const loadFiles = async repoId => {
+        picker.status.textContent = `Loading GGUF files from ${repoId}…`;
+        picker.results.replaceChildren();
+        try {
+            const response = await fetch('/api/hf/files', {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ repo_id: repoId, format: 'gguf' }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data.ok) throw new Error(data.error || 'Could not list repository files');
+            const files = (data.files || [])
+                .filter(file => file.path && !file.is_mmproj && !file.is_draft_assistant)
+                .sort((a, b) => {
+                    const aName = a.path.split('/').pop().toLowerCase();
+                    const bName = b.path.split('/').pop().toLowerCase();
+                    return Number(bName === expected) - Number(aName === expected)
+                        || Number(bName.endsWith(expected)) - Number(aName.endsWith(expected))
+                        || aName.localeCompare(bName);
+                });
+            picker.status.textContent = files.length
+                ? `Choose the file to resume from ${repoId}.`
+                : 'No GGUF files were found in that repository.';
+            files.forEach(file => {
+                const row = document.createElement('div');
+                row.className = 'mm-card-action-note';
+                row.style.display = 'flex';
+                row.style.alignItems = 'center';
+                row.style.justifyContent = 'space-between';
+                row.style.gap = '10px';
+                const label = document.createElement('span');
+                label.textContent = `${file.path}${file.size ? ` · ${formatBytes(file.size)}` : ''}`;
+                label.title = file.path;
+                const resumeButton = document.createElement('button');
+                resumeButton.type = 'button';
+                resumeButton.className = 'mm-action-btn mm-action-btn--switch';
+                resumeButton.textContent = 'Resume';
+                resumeButton.addEventListener('click', async () => {
+                    resumeButton.disabled = true;
+                    await resumeModelDownload(model.path, {
+                        repo_id: repoId,
+                        file_path: file.path,
+                        save_as: file.path.split('/').pop(),
+                    }, picker.overlay);
+                    resumeButton.disabled = false;
+                });
+                row.append(label, resumeButton);
+                picker.results.appendChild(row);
+            });
+        } catch (error) {
+            picker.status.textContent = `Could not load repository files: ${error.message || error}`;
+        }
+    };
+    const search = async () => {
+        const query = picker.searchInput.value.trim();
+        if (!query) return;
+        picker.searchButton.disabled = true;
+        picker.status.textContent = 'Searching Hugging Face…';
+        picker.results.replaceChildren();
+        try {
+            let candidates;
+            if (/^[^/\s]+\/[^/\s]+$/.test(query)) {
+                candidates = [{ repoId: query, confidence: 1, reason: 'Repository entered directly' }];
+            } else {
+                const response = await fetch('/api/hf/resolve-origin', {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: JSON.stringify({ filename: query.endsWith('.gguf') ? query : `${query}.gguf`, size_bytes: 0 }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.candidates?.length) throw new Error(data.error || 'No matching repositories found');
+                candidates = data.candidates;
+            }
+            picker.status.textContent = 'Choose a repository to inspect its GGUF files.';
+            candidates.slice(0, 8).forEach(candidate => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'mm-card-action-note';
+                button.style.textAlign = 'left';
+                button.textContent = `${candidate.repoId} · ${candidate.reason || 'candidate'}${candidate.confidence != null ? ` · ${Math.round(candidate.confidence * 100)}% match` : ''}`;
+                button.addEventListener('click', () => loadFiles(candidate.repoId));
+                picker.results.appendChild(button);
+            });
+        } catch (error) {
+            picker.status.textContent = `Could not find a source: ${error.message || error}`;
+        } finally {
+            picker.searchButton.disabled = false;
+        }
+    };
+    picker.searchButton.addEventListener('click', search);
+    picker.searchInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter') { event.preventDefault(); search(); }
+    });
+    search();
+}
+
+async function resumeModelDownload(path, source = null, overlay = null) {
     try {
         const resp = await fetch('/api/models/download/resume', {
             method: 'POST',
             headers: window.authHeaders
                 ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
                 : { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path }),
+            body: JSON.stringify({ path, ...(source || {}) }),
         });
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok || !data.ok) throw new Error(data.error || 'Resume failed');
         showToast('Download resumed', 'success');
+        overlay?.remove();
         invalidateModelInventory();
         await loadModels({ refresh: true });
     } catch (error) {
