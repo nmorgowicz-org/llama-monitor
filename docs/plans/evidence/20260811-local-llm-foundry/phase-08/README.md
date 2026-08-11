@@ -25,17 +25,16 @@
 | `cargo build --release` | passed; generated static routes/assets include identity module |
 | `node tests/ui/capture/index.mjs --scenario welcome` | passed with elevated local process access; Token Ingot and migration toast visually verified |
 | Isolated Playwright UI suite | 265 passed, 5 skipped, 1 flaky, 4 failed on first run |
-| Targeted rerun of failed specs | 15 passed, 3 reproducible pre-existing state/request-count failures |
+| Targeted rerun after inventory-cache fix | 10 passed; 2 intermittent model-card interaction failures |
 
-The three remaining UI failures are not identity failures: two assert a single
-model inventory request where the current modal initialization makes two, and
-one expects a KV use-case selection that is not applied before the assertion.
-They must be resolved before the Phase 8 pass gate is closed. The stale TLS
+The inventory-cache fix removes the duplicate startup/library request failures.
+The remaining intermittent model-card failures are not identity failures and
+must be resolved before the Phase 8 pass gate is closed. The stale TLS
 placeholder expectation was corrected from `llama-monitor.example.com` to
 `foundry.example.com`.
 
 ## Open gate
 
-- [ ] Resolve and rerun the three reproducible UI state/request failures.
+- [ ] Resolve and rerun the remaining model-card interaction failures.
 - [ ] Rerun the full isolated Playwright suite with zero failures before marking
   Phase 8 complete.

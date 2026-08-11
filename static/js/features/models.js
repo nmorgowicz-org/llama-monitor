@@ -94,6 +94,7 @@ let initialized = false;
 let inventoryCache = null;
 let modelLibraryRoot = '';
 let startupInventoryChecked = false;
+let startupInventoryPromise = null;
 
 const INCOMPLETE_DOWNLOAD_NOTIFICATION_ID = 'models-incomplete-downloads';
 
@@ -177,7 +178,13 @@ function savePrefs() {
 
 export function openModelsModal() {
     document.getElementById('models-modal')?.classList.add('open');
-    loadModels({ refresh: true });
+    // Startup inventory notification already fetched a snapshot. Reuse it for
+    // the first open to avoid a duplicate request; invalidation paths clear the
+    // cache before operations that require a fresh scan.
+    void (async () => {
+        if (startupInventoryPromise) await startupInventoryPromise;
+        loadModels({ refresh: !inventoryCache });
+    })();
 }
 
 function closeModelsModal() {
@@ -484,6 +491,7 @@ async function notifyIncompleteDownloadsAtStartup() {
         });
         if (!response.ok) return;
         const models = await response.json();
+        inventoryCache = models;
         const incomplete = models.filter(model => model.lifecycle === 'incomplete' || model.lifecycle === 'converting');
         if (incomplete.length) {
             showToastWithActions(
@@ -2879,7 +2887,7 @@ function initCommunitySourcesTab() {
 export function initModels() {
     if (initialized) return;
     initialized = true;
-    void notifyIncompleteDownloadsAtStartup();
+    startupInventoryPromise = notifyIncompleteDownloadsAtStartup();
 
     // Initialize toolbar structure once (search, sort, view controls)
     ensureLibraryToolbar();
