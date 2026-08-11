@@ -99,7 +99,20 @@ impl AppPaths {
     }
 
     pub fn models_dir(&self) -> PathBuf {
+        if self.root == Self::canonical_default_root()
+            && let Ok(bytes) = std::fs::read(self.model_root_selection_file())
+            && let Ok(selection) = serde_json::from_slice::<ModelRootSelection>(&bytes)
+        {
+            return match selection.choice {
+                ModelRootChoice::KeepLegacy => selection.source,
+                ModelRootChoice::MoveIntoFoundry => selection.destination,
+            };
+        }
         self.root.join("models")
+    }
+
+    fn model_root_selection_file(&self) -> PathBuf {
+        self.root.join(".local-llm-foundry-model-root.json")
     }
 
     pub fn scripts_dir(&self) -> PathBuf {
@@ -165,6 +178,20 @@ impl AppPaths {
     pub fn chat_db_file(&self) -> PathBuf {
         self.config_file("chat.db")
     }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ModelRootChoice {
+    KeepLegacy,
+    MoveIntoFoundry,
+}
+
+#[derive(serde::Deserialize)]
+struct ModelRootSelection {
+    choice: ModelRootChoice,
+    source: PathBuf,
+    destination: PathBuf,
 }
 
 fn platform_root(slug: &str) -> PathBuf {

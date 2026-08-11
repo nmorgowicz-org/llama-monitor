@@ -46,6 +46,27 @@ remains explicit.
 Migration is never automatic. Preview the exact plan with an API token, then execute
 that same `plan_id` with the database-admin token and the explicit confirmation value.
 
+## Legacy model-root choice
+
+After the application-home upgrade, the Migration settings tab presents two explicit
+choices when the legacy default model root still exists:
+
+- **Keep legacy location** (`KEEP_LEGACY_MODEL_ROOT`) records the legacy models root as
+  an external, retained root. No model, cache, sidecar, or incomplete download is
+  copied or removed.
+- **Copy into Foundry** (`MOVE_MODELS_INTO_FOUNDRY`) previews the complete managed tree,
+  including GGUF/MLX/Transformers resources, Rapid-MLX runtimes and sidecars,
+  app-managed Hugging Face cache, staging files, partial downloads, and unknown
+  entries. Execution is copy-first, SHA-256 verified, resumable, and leaves the
+  legacy source available for rollback.
+
+The preview is authenticated with `api-token`; execution requires `db-admin-token`,
+the exact preview `plan_id`, and the matching confirmation string. A stale plan,
+changed source bytes, symlink, collision, or insufficient destination space fails
+closed. The selected root is persisted in a receipt-backed marker and becomes active
+after restart. Cleanup of the retained legacy source is intentionally a separate,
+receipt-scoped action and is never inferred from a successful copy.
+
 Actionable model warnings also appear in the top-navigation Notifications menu. The
 toast is a short-lived prompt; the notification entry retains the full message,
 timestamp, and action after the toast expires. The active list is capped at the five

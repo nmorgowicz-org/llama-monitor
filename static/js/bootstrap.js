@@ -31,6 +31,7 @@ import { initModels } from './features/models.js';
 import { initSensorBridge } from './features/sensor-bridge.js';
 import { initToast } from './features/toast.js';
 import { initAppHomeMigration } from './features/app-home-migration.js';
+import { initModelRootMigration } from './features/model-root-migration.js';
 import { initNetworkDetection } from './features/network-detection.js';
 import { initContextSidebar } from './features/chat-notes.js';
 import { initSuggestionsDropdown, closeSuggestionsDropdown } from './features/chat-suggestions.js';
@@ -150,6 +151,7 @@ async function initializeApp() {
     initSensorBridge();
     initToast();
     await initAppHomeMigration();
+    await initModelRootMigration();
     initNetworkDetection();
 
     // Phase 9: Guided generation features

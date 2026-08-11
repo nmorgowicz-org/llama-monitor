@@ -14,6 +14,7 @@ use super::common::{
 use crate::llama::vram_estimator::gguf_arch_to_heuristic_name;
 
 static MODEL_LIBRARY_MIGRATION_RUNNING: AtomicBool = AtomicBool::new(false);
+static MODEL_ROOT_RELOCATION_RUNNING: AtomicBool = AtomicBool::new(false);
 static MODEL_INVENTORY_SCAN_RUNNING: AtomicBool = AtomicBool::new(false);
 static IMPORT_RESOURCE_ESTIMATE_GATE: LazyLock<Arc<tokio::sync::Semaphore>> =
     LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(2)));
@@ -34,6 +35,23 @@ impl MigrationExecutionGuard {
 impl Drop for MigrationExecutionGuard {
     fn drop(&mut self) {
         MODEL_LIBRARY_MIGRATION_RUNNING.store(false, Ordering::Release);
+    }
+}
+
+struct ModelRootRelocationGuard;
+
+impl ModelRootRelocationGuard {
+    fn acquire() -> Option<Self> {
+        MODEL_ROOT_RELOCATION_RUNNING
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| Self)
+    }
+}
+
+impl Drop for ModelRootRelocationGuard {
+    fn drop(&mut self) {
+        MODEL_ROOT_RELOCATION_RUNNING.store(false, Ordering::Release);
     }
 }
 
@@ -78,6 +96,215 @@ fn migration_import_roots(state: &AppState, models_dir: &std::path::Path) -> Vec
         .filter(|config_root| *config_root != models_dir && config_root.is_dir())
         .map(|path| vec![path.to_path_buf()])
         .unwrap_or_default()
+}
+
+fn model_root_relocation_paths(
+    state: &AppState,
+    config: &AppConfig,
+) -> anyhow::Result<(PathBuf, PathBuf)> {
+    let canonical = crate::paths::AppPaths::canonical_default_root().join("models");
+    let legacy = crate::paths::AppPaths::legacy_default_root().join("models");
+    let configured =
+        get_effective_models_dir(state).unwrap_or_else(|| config.default_models_dir.clone());
+    let source = if configured == canonical
+        && crate::models::root_relocation::load_selection(&canonical)?.is_none()
+        && legacy.is_dir()
+    {
+        legacy
+    } else {
+        configured
+    };
+    if source == canonical {
+        anyhow::bail!("the model root is already the Foundry root");
+    }
+    if source != legacy {
+        anyhow::bail!("custom or external model roots must be managed separately");
+    }
+    Ok((source, canonical))
+}
+
+fn api_model_root_relocation_status(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "root-relocation" / "status")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let state = state.clone();
+            let config = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+                let canonical = crate::paths::AppPaths::canonical_default_root().join("models");
+                let legacy = crate::paths::AppPaths::legacy_default_root().join("models");
+                let selected = crate::models::root_relocation::load_selection(&canonical).map_err(
+                    |error| error_reply(warp::http::StatusCode::INTERNAL_SERVER_ERROR, error),
+                )?;
+                let configured = get_effective_models_dir(&state)
+                    .unwrap_or_else(|| config.default_models_dir.clone());
+                let source = if configured == canonical && selected.is_none() && legacy.is_dir() {
+                    legacy.clone()
+                } else {
+                    configured
+                };
+                Ok::<_, warp::Rejection>(Box::new(warp::reply::json(&serde_json::json!({
+                    "source": source,
+                    "destination": canonical,
+                    "legacy_root": legacy,
+                    "source_exists": source.is_dir(),
+                    "selection": selected,
+                    "custom_root": source != legacy && source != canonical,
+                    "relocation_required": source == legacy && source.is_dir(),
+                }))) as Box<dyn warp::reply::Reply>)
+            }
+        })
+}
+
+#[derive(serde::Deserialize)]
+struct ModelRootRelocationPreviewRequest {
+    choice: crate::models::root_relocation::ModelRootChoice,
+}
+
+#[derive(serde::Deserialize)]
+struct ModelRootRelocationExecuteRequest {
+    #[serde(default)]
+    plan_id: String,
+    #[serde(default)]
+    choice: Option<crate::models::root_relocation::ModelRootChoice>,
+    #[serde(default)]
+    confirmation: String,
+}
+
+fn api_model_root_relocation_preview(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "root-relocation" / "preview")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<
+            ModelRootRelocationPreviewRequest,
+        >())
+        .and_then(
+            move |auth: Option<String>, request: ModelRootRelocationPreviewRequest| {
+                let state = state.clone();
+                let config = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &config) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let (source, destination) = match model_root_relocation_paths(&state, &config) {
+                        Ok(paths) => paths,
+                        Err(error) => {
+                            return Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, error));
+                        }
+                    };
+                    let persistence = migration_persistence_files(&state);
+                    let result = tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    tokio::task::spawn_blocking(move || {
+                        crate::models::root_relocation::plan_model_root_relocation_with_persistence(
+                            &source,
+                            &destination,
+                            request.choice,
+                            &persistence,
+                        )
+                    }),
+                )
+                .await;
+                    match result {
+                        Ok(Ok(Ok(plan))) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                            &plan,
+                        ))
+                            as Box<dyn warp::reply::Reply>),
+                        Ok(Ok(Err(error))) => {
+                            Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, error))
+                        }
+                        Ok(Err(error)) => Ok(error_reply(
+                            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                            error,
+                        )),
+                        Err(_) => Ok(error_reply(
+                            warp::http::StatusCode::REQUEST_TIMEOUT,
+                            "Model-root relocation preview timed out",
+                        )),
+                    }
+                }
+            },
+        )
+}
+
+fn api_model_root_relocation_execute(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "root-relocation" / "execute")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<ModelRootRelocationExecuteRequest>())
+        .and_then(move |auth: Option<String>, request: ModelRootRelocationExecuteRequest| {
+            let state = state.clone();
+            let config = app_config.clone();
+            async move {
+                if !check_db_admin_token(&auth, &config) {
+                    return Ok(unauthorized_db_admin_token());
+                }
+                let Some(choice) = request.choice else {
+                    return Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, "model-root choice is required"));
+                };
+                let confirmation = match choice {
+                    crate::models::root_relocation::ModelRootChoice::KeepLegacy => "KEEP_LEGACY_MODEL_ROOT",
+                    crate::models::root_relocation::ModelRootChoice::MoveIntoFoundry => "MOVE_MODELS_INTO_FOUNDRY",
+                };
+                if request.confirmation != confirmation || request.plan_id.len() != 64 {
+                    return Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, "model-root relocation requires the preview plan_id and exact confirmation"));
+                }
+                let Some(_guard) = ModelRootRelocationGuard::acquire() else {
+                    return Ok(error_reply(warp::http::StatusCode::CONFLICT, "A model-root relocation is already running"));
+                };
+                let (source, destination) = match model_root_relocation_paths(&state, &config) {
+                    Ok(paths) => paths,
+                    Err(error) => return Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, error)),
+                };
+                let persistence = migration_persistence_files(&state);
+                let expected_plan_id = request.plan_id;
+                let result = tokio::time::timeout(
+                    std::time::Duration::from_secs(600),
+                    tokio::task::spawn_blocking(move || {
+                        let plan = crate::models::root_relocation::plan_model_root_relocation_with_persistence(
+                            &source,
+                            &destination,
+                            choice,
+                            &persistence,
+                        )?;
+                        if plan.plan_id != expected_plan_id {
+                            anyhow::bail!("model-root relocation preview is stale; refresh and try again");
+                        }
+                        crate::models::root_relocation::execute_model_root_relocation(&plan)
+                    }),
+                )
+                .await;
+                match result {
+                    Ok(Ok(Ok(receipt))) => {
+                        if receipt.destination.is_dir()
+                            && let Ok(discovered) = crate::models::scan_gguf_library(&receipt.destination)
+                        {
+                            *state.discovered_models.lock().unwrap() = discovered;
+                        }
+                        Ok::<_, warp::Rejection>(Box::new(warp::reply::json(&serde_json::json!({
+                            "ok": true,
+                            "receipt": receipt,
+                            "restart_required": true,
+                        }))) as Box<dyn warp::reply::Reply>)
+                    }
+                    Ok(Ok(Err(error))) => Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, error)),
+                    Ok(Err(error)) => Ok(error_reply(warp::http::StatusCode::INTERNAL_SERVER_ERROR, error)),
+                    Err(_) => Ok(error_reply(warp::http::StatusCode::REQUEST_TIMEOUT, "Model-root relocation timed out")),
+                }
+            }
+        })
 }
 
 /// Where the user-wide Hugging Face cache lives, when it exists at all.
@@ -2442,6 +2669,27 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
 
     let mut r = api_models_download_start(state.clone(), config.clone())
         .or(api_models_download_status(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_model_root_relocation_status(
+            state.clone(),
+            config.clone(),
+        ))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_model_root_relocation_preview(
+            state.clone(),
+            config.clone(),
+        ))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_model_root_relocation_execute(
+            state.clone(),
+            config.clone(),
+        ))
         .unify()
         .boxed();
     r = r

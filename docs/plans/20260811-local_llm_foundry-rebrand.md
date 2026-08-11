@@ -33,6 +33,7 @@ acceptance gates, not implementation uncertainty.
 | 3 | Closed 2026-08-11: pure fixture matrix, sanitized public error codes, schema compatibility, auth protocol, and receipt manifest pass. Mutation/free-space/native permission behavior is owned by Phases 4/12. |
 | 4 | Closed 2026-08-11: mutation core, lock/journal/resume, free-space/permission fixtures, rollback/cleanup queues, receipts, and CLI/API gates pass. Native Windows execution remains Phase 12. |
 | 5 | Closed 2026-08-11: fresh canonical default, selected-root routing, helper/docs updates, Windows early logging, and persisted-path policy pass. Model relocation is isolated to Phase 6. |
+| 6 | Closed 2026-08-11 for source-level macOS/Linux and cross-target contract: model-root preview/keep-or-copy API, receipt-backed selection, hash/free-space/collision/symlink protections, resumable copy, persistence rewrites, Migration settings controls, and focused gates pass. Native Windows model-root qualification is an explicit Phase 12 return marker. |
 
 ## 1. Purpose and execution contract
 
@@ -957,7 +958,7 @@ moving custom/external data or losing incomplete work.
 - `src/models/library.rs` extensions or a new relocation module
 - `src/web/api/models.rs` migration endpoints
 - model state/preset/session rewrite integration
-- migration center frontend portion owned later by Phase 8
+- migration center model-root controls introduced here; broader migration UX polish remains Phase 8
 - model-library/HF/VRAM/spawn-wizard docs as applicable
 
 **Verification**

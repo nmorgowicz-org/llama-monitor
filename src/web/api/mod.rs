@@ -1179,4 +1179,39 @@ mod tests {
             .await;
         assert_eq!(response.status(), 401);
     }
+
+    #[tokio::test]
+    async fn model_root_relocation_status_requires_api_token() {
+        let response = warp::test::request()
+            .method("GET")
+            .path("/api/models/root-relocation/status")
+            .reply(&make_all_routes())
+            .await;
+        assert_eq!(response.status(), 401);
+    }
+
+    #[tokio::test]
+    async fn model_root_relocation_preview_requires_api_token() {
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/models/root-relocation/preview")
+            .header("Content-Type", "application/json")
+            .body(r#"{"choice":"keep_legacy"}"#)
+            .reply(&make_all_routes())
+            .await;
+        assert_eq!(response.status(), 401);
+    }
+
+    #[tokio::test]
+    async fn model_root_relocation_execute_requires_db_admin_token() {
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/models/root-relocation/execute")
+            .header("Content-Type", "application/json")
+            .header("Authorization", "Bearer test-token")
+            .body(r#"{"choice":"keep_legacy","plan_id":"0000000000000000000000000000000000000000000000000000000000000000","confirmation":"KEEP_LEGACY_MODEL_ROOT"}"#)
+            .reply(&make_all_routes())
+            .await;
+        assert_eq!(response.status(), 401);
+    }
 }

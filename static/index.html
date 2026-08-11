@@ -5898,6 +5898,21 @@
                           </div>
                           <pre id="app-home-migration-plan" style="display:none;max-height:220px;overflow:auto;margin-top:14px;white-space:pre-wrap;"></pre>
                       </div>
+                      <div class="settings-card" id="model-root-relocation-card" style="margin-top:14px;">
+                          <h4>Model library location</h4>
+                          <div class="settings-help" id="model-root-relocation-state">Checking model-root status…</div>
+                          <div class="settings-help" id="model-root-relocation-summary"></div>
+                          <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;">
+                              <label class="toggle-label"><input type="radio" name="model-root-choice" value="keep_legacy" checked> Keep legacy location</label>
+                              <label class="toggle-label"><input type="radio" name="model-root-choice" value="move_into_foundry"> Copy into Foundry</label>
+                          </div>
+                          <p class="settings-help">Keep leaves models, caches, sidecars, and incomplete downloads where they are. Copying is resumable and retains the legacy source as a rollback point.</p>
+                          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+                              <button type="button" class="btn secondary" id="model-root-relocation-preview">Preview model-root choice</button>
+                              <button type="button" class="btn primary" id="model-root-relocation-execute" disabled>Save choice</button>
+                          </div>
+                          <pre id="model-root-relocation-plan" hidden style="max-height:260px;overflow:auto;margin-top:14px;white-space:pre-wrap;"></pre>
+                      </div>
                   </div>
                   <div class="settings-pane" id="settings-chat">
                       <h3>Guided Generation</h3>

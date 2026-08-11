@@ -841,6 +841,52 @@ The repository selection must match the preview. The operation is journaled and
 restartable; a stale preview, collision, path escape, or changed persistence file is
 rejected before a new plan starts.
 
+### `GET /api/models/root-relocation/status`
+Auth: api-token.
+
+Returns the legacy default model root, Foundry destination, current selection marker,
+and whether an explicit choice is required. Custom/external model roots are reported
+but are never eligible for implicit relocation.
+
+### `POST /api/models/root-relocation/preview`
+Auth: api-token.
+
+Builds a read-only, deterministic plan for the default legacy model root. Choose one
+of the two explicit policies:
+
+```json
+{ "choice": "keep_legacy" }
+```
+
+or:
+
+```json
+{ "choice": "move_into_foundry" }
+```
+
+Move previews include managed models, runtimes, caches, sidecars, partial downloads,
+unknown entries, free-space headroom, SHA-256 identities, and absolute persistence
+path rewrites.
+
+### `POST /api/models/root-relocation/execute`
+Auth: db-admin-token.
+
+Executes the exact root-relocation preview. The choice, 64-character `plan_id`, and
+matching confirmation are required:
+
+```json
+{
+  "choice": "move_into_foundry",
+  "plan_id": "<64-character preview id>",
+  "confirmation": "MOVE_MODELS_INTO_FOUNDRY"
+}
+```
+
+`KEEP_LEGACY_MODEL_ROOT` writes a receipt-backed external-root selection without
+copying. `MOVE_MODELS_INTO_FOUNDRY` copies first, verifies hashes, rewrites persisted
+absolute model paths once, retains the source, and returns `restart_required: true`.
+Cleanup is a separate receipt-scoped operation.
+
 ### `POST /api/models/refresh`
 Auth: api-token.
 Rescans `models_dir`.

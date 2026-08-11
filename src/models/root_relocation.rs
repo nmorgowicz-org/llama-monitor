@@ -5,6 +5,7 @@
 //! without guessing from filenames or touching external Hugging Face roots.
 
 use std::fs;
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -34,6 +35,8 @@ pub struct ModelRelocationEntry {
     pub class: ModelResourceClass,
     pub bytes: u64,
     pub is_directory: bool,
+    #[serde(default)]
+    pub sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,7 +48,18 @@ pub struct ModelRelocationPlan {
     pub destination: PathBuf,
     pub entries: Vec<ModelRelocationEntry>,
     pub required_copy_bytes: u64,
+    #[serde(default)]
+    pub available_destination_bytes: Option<u64>,
+    #[serde(default)]
+    pub persistence_rewrites: Vec<ModelRelocationRewrite>,
     pub retained_external_roots: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelRelocationRewrite {
+    pub file: PathBuf,
+    pub replacements: usize,
+    pub sha256: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,7 +71,19 @@ pub struct ModelRelocationReceipt {
     pub copied_entries: Vec<PathBuf>,
     pub retained_source: bool,
     #[serde(default)]
+    pub rewritten_files: Vec<PathBuf>,
+    #[serde(default)]
     pub retained_external_roots: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelRootSelection {
+    pub schema_version: u32,
+    pub choice: ModelRootChoice,
+    pub plan_id: String,
+    pub source: PathBuf,
+    pub destination: PathBuf,
+    pub retained_source: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +97,15 @@ pub fn plan_model_root_relocation(
     source: &Path,
     destination: &Path,
     choice: ModelRootChoice,
+) -> Result<ModelRelocationPlan> {
+    plan_model_root_relocation_with_persistence(source, destination, choice, &[])
+}
+
+pub fn plan_model_root_relocation_with_persistence(
+    source: &Path,
+    destination: &Path,
+    choice: ModelRootChoice,
+    persistence_files: &[PathBuf],
 ) -> Result<ModelRelocationPlan> {
     let metadata = fs::symlink_metadata(source).context("model root is not readable")?;
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
@@ -97,6 +132,12 @@ pub fn plan_model_root_relocation(
     } else {
         0
     };
+    let available_destination_bytes = available_space(destination);
+    let persistence_rewrites = if choice == ModelRootChoice::MoveIntoFoundry {
+        plan_persistence_rewrites(persistence_files, source, destination)?
+    } else {
+        Vec::new()
+    };
     let retained_external_roots = if choice == ModelRootChoice::KeepLegacy {
         vec![source.to_path_buf()]
     } else {
@@ -108,6 +149,7 @@ pub fn plan_model_root_relocation(
         source,
         destination,
         &entries,
+        &persistence_rewrites,
         &retained_external_roots,
     ))?));
     Ok(ModelRelocationPlan {
@@ -118,6 +160,8 @@ pub fn plan_model_root_relocation(
         destination: destination.to_path_buf(),
         entries,
         required_copy_bytes,
+        available_destination_bytes,
+        persistence_rewrites,
         retained_external_roots,
     })
 }
@@ -130,6 +174,13 @@ pub fn relocation_receipt_path(plan: &ModelRelocationPlan) -> PathBuf {
             ".local-llm-foundry-model-relocation-{}.json",
             plan.plan_id
         ))
+}
+
+pub fn relocation_selection_path(plan: &ModelRelocationPlan) -> PathBuf {
+    plan.destination
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(".local-llm-foundry-model-root.json")
 }
 
 fn relocation_journal_path(plan: &ModelRelocationPlan) -> PathBuf {
@@ -146,15 +197,29 @@ fn relocation_journal_path(plan: &ModelRelocationPlan) -> PathBuf {
 /// receipt-scoped cleanup action; rerunning a completed plan returns its receipt.
 pub fn execute_model_root_relocation(plan: &ModelRelocationPlan) -> Result<ModelRelocationReceipt> {
     if plan.choice == ModelRootChoice::KeepLegacy {
-        return Ok(ModelRelocationReceipt {
+        let receipt = ModelRelocationReceipt {
             schema_version: 1,
             plan_id: plan.plan_id.clone(),
             source: plan.source.clone(),
             destination: plan.destination.clone(),
             copied_entries: Vec::new(),
             retained_source: true,
+            rewritten_files: Vec::new(),
             retained_external_roots: plan.retained_external_roots.clone(),
-        });
+        };
+        write_receipt(plan, &receipt)?;
+        write_selection(
+            plan,
+            &ModelRootSelection {
+                schema_version: 1,
+                choice: plan.choice,
+                plan_id: plan.plan_id.clone(),
+                source: plan.source.clone(),
+                destination: plan.destination.clone(),
+                retained_source: true,
+            },
+        )?;
+        return Ok(receipt);
     }
     if let Ok(file) = fs::File::open(relocation_receipt_path(plan))
         && let Ok(receipt) = serde_json::from_reader(file)
@@ -176,6 +241,14 @@ pub fn execute_model_root_relocation(plan: &ModelRelocationPlan) -> Result<Model
         }
         current
     };
+    if let Some(available) = current.available_destination_bytes
+        && available < current.required_copy_bytes
+    {
+        bail!(
+            "insufficient free space for model relocation ({} bytes required)",
+            current.required_copy_bytes
+        );
+    }
     let mut journal = if journal_path.is_file() {
         let journal: ModelRelocationJournal =
             serde_json::from_reader(fs::File::open(&journal_path)?)?;
@@ -208,7 +281,10 @@ pub fn execute_model_root_relocation(plan: &ModelRelocationPlan) -> Result<Model
             continue;
         }
         if destination.exists() {
-            if fs::metadata(&destination)?.len() != entry.bytes {
+            let destination_hash = sha256_file(&destination)?;
+            if fs::metadata(&destination)?.len() != entry.bytes
+                || entry.sha256.as_deref() != Some(destination_hash.as_str())
+            {
                 bail!(
                     "model relocation refuses to overwrite {}",
                     destination.display()
@@ -234,9 +310,37 @@ pub fn execute_model_root_relocation(plan: &ModelRelocationPlan) -> Result<Model
             );
         }
         fs::rename(&temporary, &destination)?;
+        if entry.sha256.as_deref() != Some(sha256_file(&destination)?.as_str()) {
+            bail!(
+                "model relocation hash verification failed for {}",
+                entry.relative_path.display()
+            );
+        }
         copied_entries.push(entry.relative_path.clone());
         journal.completed_entries.push(entry.relative_path.clone());
         fs::write(&journal_path, serde_json::to_vec_pretty(&journal)?)?;
+    }
+    let mut rewritten_files = Vec::new();
+    for rewrite in &current.persistence_rewrites {
+        if !rewrite.file.is_file() {
+            continue;
+        }
+        if sha256_file(&rewrite.file)? != rewrite.sha256 {
+            bail!(
+                "model-root relocation persistence file changed: {}",
+                rewrite.file.display()
+            );
+        }
+        let mut value: serde_json::Value = serde_json::from_reader(fs::File::open(&rewrite.file)?)?;
+        let replacements = [(
+            plan.source.to_string_lossy().into_owned(),
+            plan.destination.to_string_lossy().into_owned(),
+        )]
+        .into_iter()
+        .collect();
+        replace_json_paths(&mut value, &replacements)?;
+        write_json_atomic(&rewrite.file, &value)?;
+        rewritten_files.push(rewrite.file.clone());
     }
     let receipt = ModelRelocationReceipt {
         schema_version: 1,
@@ -245,12 +349,21 @@ pub fn execute_model_root_relocation(plan: &ModelRelocationPlan) -> Result<Model
         destination: plan.destination.clone(),
         copied_entries,
         retained_source: true,
+        rewritten_files,
         retained_external_roots: plan.retained_external_roots.clone(),
     };
-    let path = relocation_receipt_path(plan);
-    let temporary = path.with_extension("json.local-llm-foundry-part");
-    fs::write(&temporary, serde_json::to_vec_pretty(&receipt)?)?;
-    fs::rename(temporary, path)?;
+    write_receipt(plan, &receipt)?;
+    write_selection(
+        plan,
+        &ModelRootSelection {
+            schema_version: 1,
+            choice: plan.choice,
+            plan_id: plan.plan_id.clone(),
+            source: plan.source.clone(),
+            destination: plan.destination.clone(),
+            retained_source: true,
+        },
+    )?;
     let _ = fs::remove_file(journal_path);
     Ok(receipt)
 }
@@ -278,12 +391,196 @@ fn collect(root: &Path, current: &Path, entries: &mut Vec<ModelRelocationEntry>)
                 0
             },
             is_directory,
+            sha256: if metadata.is_file() {
+                Some(sha256_file(&path)?)
+            } else {
+                None
+            },
         });
         if is_directory {
             collect(root, &path, entries)?;
         }
     }
     Ok(())
+}
+
+fn plan_persistence_rewrites(
+    persistence_files: &[PathBuf],
+    source: &Path,
+    destination: &Path,
+) -> Result<Vec<ModelRelocationRewrite>> {
+    let replacements = [(
+        source.to_string_lossy().into_owned(),
+        destination.to_string_lossy().into_owned(),
+    )]
+    .into_iter()
+    .collect();
+    persistence_files
+        .iter()
+        .filter(|file| file.is_file())
+        .map(|file| {
+            let value: serde_json::Value = serde_json::from_reader(fs::File::open(file)?)?;
+            let replacements_count = count_json_replacements(&value, &replacements);
+            if replacements_count == 0 {
+                return Ok(None);
+            }
+            Ok(Some(ModelRelocationRewrite {
+                file: file.clone(),
+                replacements: replacements_count,
+                sha256: sha256_file(file)?,
+            }))
+        })
+        .filter_map(|result| result.transpose())
+        .collect()
+}
+
+fn replace_json_paths(
+    value: &mut serde_json::Value,
+    replacements: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
+    match value {
+        serde_json::Value::String(text) => {
+            if let Some(replacement) = replacement_for_path(text, replacements) {
+                *text = replacement;
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                replace_json_paths(item, replacements)?;
+            }
+        }
+        serde_json::Value::Object(map) => {
+            let old = std::mem::take(map);
+            for (key, mut child) in old {
+                replace_json_paths(&mut child, replacements)?;
+                let rewritten_key = replacement_for_path(&key, replacements).unwrap_or(key);
+                if map.insert(rewritten_key.clone(), child).is_some() {
+                    bail!("model-root persistence rewrite collided at {rewritten_key}");
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn count_json_replacements(
+    value: &serde_json::Value,
+    replacements: &std::collections::BTreeMap<String, String>,
+) -> usize {
+    match value {
+        serde_json::Value::String(text) => {
+            usize::from(replacement_for_path(text, replacements).is_some())
+        }
+        serde_json::Value::Array(items) => items
+            .iter()
+            .map(|item| count_json_replacements(item, replacements))
+            .sum(),
+        serde_json::Value::Object(map) => map
+            .iter()
+            .map(|(key, item)| {
+                usize::from(replacement_for_path(key, replacements).is_some())
+                    + count_json_replacements(item, replacements)
+            })
+            .sum(),
+        _ => 0,
+    }
+}
+
+fn replacement_for_path(
+    value: &str,
+    replacements: &std::collections::BTreeMap<String, String>,
+) -> Option<String> {
+    if let Some(exact) = replacements.get(value) {
+        return Some(exact.clone());
+    }
+    let value_path = Path::new(value);
+    if !value_path.is_absolute() {
+        return None;
+    }
+    replacements.iter().find_map(|(source, destination)| {
+        let relative = value_path.strip_prefix(Path::new(source)).ok()?;
+        if relative.as_os_str().is_empty() {
+            return None;
+        }
+        Some(
+            Path::new(destination)
+                .join(relative)
+                .to_string_lossy()
+                .into_owned(),
+        )
+    })
+}
+
+fn write_json_atomic(path: &Path, value: &serde_json::Value) -> Result<()> {
+    let temporary = path.with_extension("json.local-llm-foundry-part");
+    fs::write(&temporary, serde_json::to_vec_pretty(value)?)?;
+    fs::rename(temporary, path)?;
+    Ok(())
+}
+
+fn available_space(destination: &Path) -> Option<u64> {
+    let mut probe = destination.to_path_buf();
+    while !probe.exists() {
+        if !probe.pop() {
+            return None;
+        }
+    }
+    sysinfo::Disks::new_with_refreshed_list()
+        .list()
+        .iter()
+        .filter(|disk| probe.starts_with(disk.mount_point()))
+        .max_by_key(|disk| disk.mount_point().as_os_str().len())
+        .map(sysinfo::Disk::available_space)
+}
+
+fn sha256_file(path: &Path) -> Result<String> {
+    let file = fs::File::open(path)?;
+    let mut reader = BufReader::new(file);
+    let mut digest = Sha256::new();
+    let mut buffer = [0u8; 128 * 1024];
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Ok(hex_digest(&digest.finalize()))
+}
+
+fn write_receipt(plan: &ModelRelocationPlan, receipt: &ModelRelocationReceipt) -> Result<()> {
+    let path = relocation_receipt_path(plan);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let temporary = path.with_extension("json.local-llm-foundry-part");
+    fs::write(&temporary, serde_json::to_vec_pretty(receipt)?)?;
+    fs::rename(temporary, path)?;
+    Ok(())
+}
+
+fn write_selection(plan: &ModelRelocationPlan, selection: &ModelRootSelection) -> Result<()> {
+    let path = relocation_selection_path(plan);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let temporary = path.with_extension("json.local-llm-foundry-part");
+    fs::write(&temporary, serde_json::to_vec_pretty(selection)?)?;
+    fs::rename(temporary, path)?;
+    Ok(())
+}
+
+pub fn load_selection(destination: &Path) -> Result<Option<ModelRootSelection>> {
+    let path = destination
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(".local-llm-foundry-model-root.json");
+    match fs::File::open(path) {
+        Ok(file) => Ok(Some(serde_json::from_reader(file)?)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn classify(path: &Path) -> ModelResourceClass {
@@ -324,6 +621,12 @@ mod tests {
         assert_eq!(plan.required_copy_bytes, 0);
         assert_eq!(plan.retained_external_roots, vec![source.clone()]);
         assert!(!destination.exists());
+        let receipt = execute_model_root_relocation(&plan).unwrap();
+        assert!(receipt.retained_source);
+        assert!(relocation_receipt_path(&plan).is_file());
+        let selection = load_selection(&destination).unwrap().unwrap();
+        assert_eq!(selection.choice, ModelRootChoice::KeepLegacy);
+        assert_eq!(selection.source, source);
     }
 
     #[test]
@@ -384,5 +687,64 @@ mod tests {
         assert!(source.join("gguf/model.gguf").is_file());
         let replay = execute_model_root_relocation(&plan).unwrap();
         assert_eq!(replay.plan_id, receipt.plan_id);
+        assert!(load_selection(&destination).unwrap().is_some());
+    }
+
+    #[test]
+    fn source_content_change_invalidates_preview_before_copy() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("legacy-models");
+        let destination = root.path().join("foundry-models");
+        fs::create_dir_all(source.join("gguf")).unwrap();
+        let model = source.join("gguf/model.gguf");
+        fs::write(&model, b"model").unwrap();
+        let plan =
+            plan_model_root_relocation(&source, &destination, ModelRootChoice::MoveIntoFoundry)
+                .unwrap();
+        fs::write(model, b"changed").unwrap();
+        assert!(execute_model_root_relocation(&plan).is_err());
+        assert!(!destination.join("gguf/model.gguf").exists());
+    }
+
+    #[test]
+    fn move_rewrites_persisted_absolute_model_paths_once() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("legacy-models");
+        let destination = root.path().join("foundry-models");
+        let settings = root.path().join("ui-settings.json");
+        fs::create_dir_all(source.join("gguf")).unwrap();
+        fs::write(source.join("gguf/model.gguf"), b"model").unwrap();
+        fs::write(
+            &settings,
+            serde_json::to_vec(&serde_json::json!({
+                "models_dir": source.to_string_lossy(),
+                "recent": [source.join("gguf/model.gguf")],
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let plan = plan_model_root_relocation_with_persistence(
+            &source,
+            &destination,
+            ModelRootChoice::MoveIntoFoundry,
+            std::slice::from_ref(&settings),
+        )
+        .unwrap();
+        assert_eq!(plan.persistence_rewrites.len(), 1);
+        let receipt = execute_model_root_relocation(&plan).unwrap();
+        assert_eq!(receipt.rewritten_files, vec![settings.clone()]);
+        let rewritten: serde_json::Value =
+            serde_json::from_reader(fs::File::open(settings).unwrap()).unwrap();
+        assert_eq!(
+            rewritten["models_dir"],
+            destination.to_string_lossy().to_string()
+        );
+        assert_eq!(
+            rewritten["recent"][0],
+            destination
+                .join("gguf/model.gguf")
+                .to_string_lossy()
+                .to_string()
+        );
     }
 }
