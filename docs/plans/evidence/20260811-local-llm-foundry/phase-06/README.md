@@ -26,6 +26,9 @@ explicit Phase 12 return marker.
   both retain the source until a later explicit cleanup action.
 - Persisted absolute model paths are rewritten once only when the move receipt
   authorizes the relocation.
+- Execution revalidates previews with the same persistence-file inputs used to
+  create them, so authorized path-rewrite plans do not produce a false stale
+  preview rejection.
 
 ## Explicit return marker
 
@@ -43,7 +46,7 @@ explicit Phase 12 return marker.
 | Check | Result |
 |---|---|
 | `cargo test models::root_relocation` | passed |
-| `cargo test` | 2,375 passed, 26 ignored (host-permission run) |
+| `cargo test` | 1,236 passed, 13 ignored (current host run) |
 | `cargo clippy -- -D warnings` | passed in current closure run |
 | Phase 0/2/3 validators | passed in current closure run |
 | `cargo test root_relocation` | passed after API/UI integration |

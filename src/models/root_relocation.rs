@@ -235,7 +235,17 @@ pub fn execute_model_root_relocation(plan: &ModelRelocationPlan) -> Result<Model
         current.entries = entries;
         current
     } else {
-        let current = plan_model_root_relocation(&plan.source, &plan.destination, plan.choice)?;
+        let persistence_files = plan
+            .persistence_rewrites
+            .iter()
+            .map(|rewrite| rewrite.file.clone())
+            .collect::<Vec<_>>();
+        let current = plan_model_root_relocation_with_persistence(
+            &plan.source,
+            &plan.destination,
+            plan.choice,
+            &persistence_files,
+        )?;
         if current.plan_id != plan.plan_id {
             bail!("model relocation preview is stale");
         }

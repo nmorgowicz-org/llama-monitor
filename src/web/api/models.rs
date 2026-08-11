@@ -110,7 +110,7 @@ fn model_root_relocation_paths(
         && crate::models::root_relocation::load_selection(&canonical)?.is_none()
         && legacy.is_dir()
     {
-        legacy
+        legacy.clone()
     } else {
         configured
     };
@@ -139,9 +139,15 @@ fn api_model_root_relocation_status(
                 }
                 let canonical = crate::paths::AppPaths::canonical_default_root().join("models");
                 let legacy = crate::paths::AppPaths::legacy_default_root().join("models");
-                let selected = crate::models::root_relocation::load_selection(&canonical).map_err(
-                    |error| error_reply(warp::http::StatusCode::INTERNAL_SERVER_ERROR, error),
-                )?;
+                let selected = match crate::models::root_relocation::load_selection(&canonical) {
+                    Ok(selection) => selection,
+                    Err(error) => {
+                        return Ok(error_reply(
+                            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                            error,
+                        ));
+                    }
+                };
                 let configured = get_effective_models_dir(&state)
                     .unwrap_or_else(|| config.default_models_dir.clone());
                 let source = if configured == canonical && selected.is_none() && legacy.is_dir() {
