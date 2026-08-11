@@ -9,7 +9,8 @@ use subtle::ConstantTimeEq;
 
 use crate::config::{DashboardAuthConfig, TlsMode, generate_random_token};
 
-const FORM_SESSION_COOKIE: &str = "llama_monitor_session";
+const FORM_SESSION_COOKIE: &str = "local_llm_foundry_session";
+const LEGACY_FORM_SESSION_COOKIE: &str = "llama_monitor_session";
 const FORM_SESSION_TTL_SECS: u64 = 60 * 60 * 12;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -264,7 +265,8 @@ impl AuthManager {
 
     pub fn authenticate_form(&self, cookie_header: Option<&str>) -> Option<String> {
         let _ = self.snapshot().form.as_ref()?;
-        let token = parse_cookie(cookie_header, FORM_SESSION_COOKIE)?;
+        let token = parse_cookie(cookie_header, FORM_SESSION_COOKIE)
+            .or_else(|| parse_cookie(cookie_header, LEGACY_FORM_SESSION_COOKIE))?;
         let now = unix_now();
         let mut sessions = self.sessions.lock().ok()?;
         sessions.retain(|_, session| session.expires_at > now);
@@ -315,7 +317,9 @@ impl AuthManager {
     }
 
     pub fn revoke_form_session(&self, cookie_header: Option<&str>) {
-        let Some(token) = parse_cookie(cookie_header, FORM_SESSION_COOKIE) else {
+        let Some(token) = parse_cookie(cookie_header, FORM_SESSION_COOKIE)
+            .or_else(|| parse_cookie(cookie_header, LEGACY_FORM_SESSION_COOKIE))
+        else {
             return;
         };
         if let Ok(mut sessions) = self.sessions.lock() {
@@ -368,6 +372,15 @@ impl AuthManager {
     pub fn expired_session_cookie_header(&self) -> String {
         let mut cookie =
             format!("{FORM_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+        if self.tls_enabled {
+            cookie.push_str("; Secure");
+        }
+        cookie
+    }
+
+    pub fn expired_legacy_session_cookie_header(&self) -> String {
+        let mut cookie =
+            format!("{LEGACY_FORM_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
         if self.tls_enabled {
             cookie.push_str("; Secure");
         }
