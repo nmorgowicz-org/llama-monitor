@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "product": {
+    "name": "Local LLM Foundry",
+    "short_name": "Foundry",
+    "slug": "local-llm-foundry",
+    "visual_direction": "token-ingot",
+    "mark_master": "assets/brand/token-ingot.svg",
+    "mark_monochrome": "assets/brand/token-ingot-mono.svg"
+  },
+  "public_identity": {
+    "cargo_package": "local-llm-foundry",
+    "binary": "local-llm-foundry",
+    "windows_binary": "local-llm-foundry.exe",
+    "repository": "nmorgowicz-org/local-llm-foundry",
+    "repository_url": "https://github.com/nmorgowicz-org/local-llm-foundry"
+  },
+  "internal_compatibility": {
+    "rust_library": "llama_monitor",
+    "backend_terms": ["llama.cpp", "llama-server", "GGUF", "MLX", "Rapid-MLX", "LHM"],
+    "runtime_aliases_until": "3.0.0-earliest"
+  },
+  "application_roots": {
+    "unix_macos": "~/.config/local-llm-foundry",
+    "windows": "%APPDATA%\\local-llm-foundry",
+    "managed_models_relative": "models",
+    "legacy_unix_macos": "~/.config/llama-monitor",
+    "legacy_windows": "%APPDATA%\\llama-monitor"
+  },
+  "release_bridge": {
+    "2.0.x": {
+      "canonical_assets": true,
+      "legacy_asset_aliases": true
+    },
+    "2.1.0": {
+      "canonical_assets": true,
+      "legacy_asset_aliases": false
+    }
+  },
+  "compatibility_rules": [
+    "Existing browser storage keys remain stable through 2.x.",
+    "Existing API routes and unbranded serialized fields remain stable through 2.x.",
+    "Legacy application roots and external model roots are never automatically deleted or silently moved.",
+    "The encryption HKDF identifier remains an internal compatibility constant."
+  ]
+}

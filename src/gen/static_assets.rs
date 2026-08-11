@@ -3,6 +3,23 @@
 
 //! Re-exported static asset constants for embedding at compile time.
 
+pub static TOKEN_INGOT_1024_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-1024.png");
+pub static TOKEN_INGOT_128_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-128.png");
+pub static TOKEN_INGOT_16_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-16.png");
+pub static TOKEN_INGOT_180_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-180.png");
+pub static TOKEN_INGOT_192_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-192.png");
+pub static TOKEN_INGOT_20_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-20.png");
+pub static TOKEN_INGOT_22_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-22.png");
+pub static TOKEN_INGOT_24_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-24.png");
+pub static TOKEN_INGOT_256_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-256.png");
+pub static TOKEN_INGOT_32_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-32.png");
+pub static TOKEN_INGOT_512_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-512.png");
+pub static TOKEN_INGOT_64_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-64.png");
+pub static TOKEN_INGOT_MASKABLE_192_PNG: &[u8] =
+    include_bytes!("../../static/brand/token-ingot-maskable-192.png");
+pub static TOKEN_INGOT_MASKABLE_512_PNG: &[u8] =
+    include_bytes!("../../static/brand/token-ingot-maskable-512.png");
+pub static TOKEN_INGOT_ICO: &[u8] = include_bytes!("../../static/brand/token-ingot.ico");
 pub const COMPACT_HTML: &str = include_str!("../../static/compact.html");
 pub const CSS_AGENT_MODAL: &str = include_str!("../../static/css/agent-modal.css");
 pub const CSS_AUTH: &str = include_str!("../../static/css/auth.css");
@@ -38,6 +55,8 @@ pub const CORE_FORMAT_JS: &str = include_str!("../../static/js/core/format.js");
 pub const CORE_PLATFORM_INFO_JS: &str = include_str!("../../static/js/core/platform-info.js");
 pub const CORE_TOOLTIP_JS: &str = include_str!("../../static/js/core/tooltip.js");
 pub const FEATURES_ANIMATE_JS: &str = include_str!("../../static/js/features/animate.js");
+pub const FEATURES_APP_HOME_MIGRATION_JS: &str =
+    include_str!("../../static/js/features/app-home-migration.js");
 pub const FEATURES_ATTACH_DETACH_JS: &str =
     include_str!("../../static/js/features/attach-detach.js");
 pub const FEATURES_AUTH_JS: &str = include_str!("../../static/js/features/auth.js");
