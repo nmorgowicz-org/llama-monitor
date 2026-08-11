@@ -55,7 +55,7 @@ const DEFAULT_RECIPE = resolve('scripts/spec-decode-recipe.json');
 /// reading somewhere else would be measuring a model the app cannot serve. Exported to
 /// the suite, and from there to rapid-mlx, since neither reads this recipe.
 const DEFAULT_HF_HUB_CACHE = join(
-  homedir(), '.config', 'llama-monitor', 'models', 'cache', 'huggingface', 'hub',
+  homedir(), '.config', 'local-llm-foundry', 'models', 'cache', 'huggingface', 'hub',
 );
 
 const USAGE = `Requalify Rapid-MLX speculative decoding. Usually takes no arguments:
@@ -360,15 +360,20 @@ function installedVersion(bin) {
 // report with an argument error that looks like the report's fault.
 function resolveMonitorBin() {
   if (process.env.LLAMA_MONITOR_BIN) return process.env.LLAMA_MONITOR_BIN;
-  const built = ['release', 'debug']
-    .map((profile) => resolve('target', profile, 'llama-monitor'))
+  const built = ['release', 'debug'].flatMap((profile) =>
+    ['local-llm-foundry', 'llama-monitor']
+      .map((name) => resolve('target', profile, name))
+  )
     .filter((candidate) => existsSync(candidate))
     .map((candidate) => ({ candidate, mtime: statSync(candidate).mtimeMs }))
     .sort((left, right) => right.mtime - left.mtime);
   if (built.length) return built[0].candidate;
-  const which = spawnSync('command', ['-v', 'llama-monitor'], { encoding: 'utf8', shell: true });
-  const found = (which.stdout ?? '').trim();
-  return found || null;
+  for (const name of ['local-llm-foundry', 'llama-monitor']) {
+    const which = spawnSync('command', ['-v', name], { encoding: 'utf8', shell: true });
+    const found = (which.stdout ?? '').trim();
+    if (found) return found;
+  }
+  return null;
 }
 
 /// Record the verdict against the installed runtime. Returns whether it landed.

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use warp::Filter;
 
 use crate::config::AppConfig;
+use crate::paths::AppPaths;
 use crate::state::AppState;
 
 use super::common::{ApiCtx, ApiRoute, check_api_token, unauthorized_api_token};
@@ -135,12 +136,7 @@ struct ReleaseRecord {
 }
 
 fn chat_templates_releases_dir() -> Option<std::path::PathBuf> {
-    dirs::home_dir().map(|h| {
-        h.join(".config")
-            .join("llama-monitor")
-            .join("chat-templates")
-            .join("releases")
-    })
+    Some(AppPaths::default_active_root().join("chat-templates/releases"))
 }
 
 fn release_index_path(name: &str) -> Option<std::path::PathBuf> {
@@ -601,11 +597,7 @@ fn api_chat_template_upload(
                 // Persist the template to the config directory so it can be
                 // referenced by the spawn wizard via --chat-template-file.
                 let saved_path: Option<String> = (|| {
-                    let home = dirs::home_dir()?;
-                    let dir = home
-                        .join(".config")
-                        .join("llama-monitor")
-                        .join("chat-templates");
+                    let dir = AppPaths::default_active_root().join("chat-templates");
                     std::fs::create_dir_all(&dir).ok()?;
                     let path = dir.join(format!("{template_id}.jinja"));
                     std::fs::write(&path, template.as_bytes()).ok()?;
@@ -639,19 +631,7 @@ fn api_chat_template_dir(
                     return Ok(unauthorized_api_token());
                 }
 
-                let Some(home) = dirs::home_dir() else {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({
-                            "ok": false,
-                            "error": "Could not determine home directory"
-                        })),
-                    ));
-                };
-
-                let dir = home
-                    .join(".config")
-                    .join("llama-monitor")
-                    .join("chat-templates");
+                let dir = AppPaths::default_active_root().join("chat-templates");
                 if let Err(e) = std::fs::create_dir_all(&dir) {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
@@ -727,21 +707,9 @@ fn api_chat_template_install_hf(
                 }
 
                 // Stable on-disk location
-                let dest = match dirs::home_dir() {
-                    Some(h) => h
-                        .join(".config")
-                        .join("llama-monitor")
-                        .join("chat-templates")
-                        .join(format!("{name}.jinja")),
-                    None => {
-                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&serde_json::json!({
-                                "ok": false,
-                                "error": "Could not determine home directory"
-                            })),
-                        ))
-                    }
-                };
+                let dest = AppPaths::default_active_root()
+                    .join("chat-templates")
+                    .join(format!("{name}.jinja"));
 
                 // Return cached file if it already exists and force is not set
                 if dest.exists() && !force {
@@ -969,21 +937,9 @@ fn api_chat_template_install_url(
                     }
                 };
 
-                let dest = match dirs::home_dir() {
-                    Some(home) => home
-                        .join(".config")
-                        .join("llama-monitor")
-                        .join("chat-templates")
-                        .join(format!("{name}.jinja")),
-                    None => {
-                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&serde_json::json!({
-                                "ok": false,
-                                "error": "Could not determine home directory"
-                            })),
-                        ));
-                    }
-                };
+                let dest = AppPaths::default_active_root()
+                    .join("chat-templates")
+                    .join(format!("{name}.jinja"));
 
                 if dest.exists() && !force {
                     let existing_meta = read_template_install_meta(&template_meta_path(&dest));
@@ -1110,19 +1066,7 @@ fn api_chat_template_active(
                     return Ok(unauthorized_api_token());
                 }
 
-                let Some(home) = dirs::home_dir() else {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({
-                            "ok": false,
-                            "error": "Could not determine home directory"
-                        })),
-                    ));
-                };
-
-                let dir = home
-                    .join(".config")
-                    .join("llama-monitor")
-                    .join("chat-templates");
+                let dir = AppPaths::default_active_root().join("chat-templates");
 
                 let mut list: Vec<serde_json::Value> = Vec::new();
                 if let Ok(entries) = std::fs::read_dir(&dir) {
@@ -1220,13 +1164,11 @@ fn api_chat_template_releases(
                 }
                 let releases = releases_json;
 
-                let active_sha = dirs::home_dir()
-                    .map(|h| {
-                        h.join(".config")
-                            .join("llama-monitor")
-                            .join("chat-templates")
-                            .join(format!("{name}.jinja"))
-                    })
+                let active_sha = Some(
+                    AppPaths::default_active_root()
+                        .join("chat-templates")
+                        .join(format!("{name}.jinja")),
+                )
                     .and_then(|dest| read_template_install_meta(&template_meta_path(&dest)))
                     .map(|m| m.sha256);
 
@@ -1286,16 +1228,9 @@ fn api_chat_template_activate(
                     ));
                 };
 
-                let Some(dest) = dirs::home_dir().map(|h| {
-                    h.join(".config")
-                        .join("llama-monitor")
-                        .join("chat-templates")
-                        .join(format!("{name}.jinja"))
-                }) else {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({ "ok": false, "error": "Could not determine home directory" })),
-                    ));
-                };
+                let dest = AppPaths::default_active_root()
+                    .join("chat-templates")
+                    .join(format!("{name}.jinja"));
 
                 if let Err(e) = std::fs::write(&dest, &content) {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -1560,11 +1495,7 @@ struct SmokeTestItem {
 }
 
 fn chat_template_dir_path() -> Option<std::path::PathBuf> {
-    dirs::home_dir().map(|h| {
-        h.join(".config")
-            .join("llama-monitor")
-            .join("chat-templates")
-    })
+    Some(AppPaths::default_active_root().join("chat-templates"))
 }
 
 fn resolve_template_file_path(name: &str) -> Option<std::path::PathBuf> {

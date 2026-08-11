@@ -92,7 +92,10 @@ pub(crate) fn validate_remote_command(cmd: &str) -> bool {
         .split('\\')
         .next_back()
         .unwrap_or(first);
-    if !(stem == "llama-monitor" || stem == "llama-monitor.exe") {
+    if !(matches!(
+        stem,
+        "llama-monitor" | "llama-monitor.exe" | "local-llm-foundry" | "local-llm-foundry.exe"
+    )) {
         return false;
     }
 
@@ -207,7 +210,7 @@ const AGENT_IDLE_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 const REMOTE_AGENT_AUTOSTART_TIMEOUT: Duration = Duration::from_secs(15);
 const REMOTE_AGENT_AUTOSTART_SUPPRESS_DURATION: Duration = Duration::from_secs(120);
 const GITHUB_LATEST_RELEASE_URL: &str =
-    "https://api.github.com/repos/nmorgowicz-org/llama-monitor/releases/latest";
+    "https://api.github.com/repos/nmorgowicz-org/local-llm-foundry/releases/latest";
 
 fn unix_timestamp_seconds() -> u64 {
     std::time::SystemTime::now()
@@ -374,9 +377,7 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
         .parse::<SocketAddr>()
         .context("invalid agent bind address")?;
 
-    let agent_config_dir = dirs::config_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("llama-monitor");
+    let agent_config_dir = app_config.app_paths.root.clone();
 
     // Use explicit token, or auto-generate and persist one
     let token = match app_config.agent_token.clone() {
@@ -490,9 +491,7 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
     let agent_info_token = token.clone(); // for authenticated /agent/info endpoint
 
     // Build token set: primary_token + all from agent-tokens.json
-    let agent_config_dir = dirs::config_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("llama-monitor");
+    let agent_config_dir = app_config.app_paths.root.clone();
     let extra_tokens = load_agent_tokens(&agent_config_dir);
     let mut allowed_tokens: Vec<String> = Vec::new();
     allowed_tokens.push(token.clone());
@@ -1038,7 +1037,7 @@ pub async fn latest_release_info() -> Result<LatestReleaseInfo> {
         .timeout(Duration::from_secs(30))
         .build()?
         .get(GITHUB_LATEST_RELEASE_URL)
-        .header(reqwest::header::USER_AGENT, "llama-monitor")
+        .header(reqwest::header::USER_AGENT, "local-llm-foundry")
         .send()
         .await?
         .error_for_status()?
@@ -1157,7 +1156,7 @@ pub async fn detect_remote_agent(req: RemoteAgentDetectRequest) -> RemoteAgentDe
             remote_os,
             install_path
                 .as_deref()
-                .unwrap_or("~/.config/llama-monitor/bin/llama-monitor"),
+                .unwrap_or("~/.config/local-llm-foundry/bin/local-llm-foundry"),
         )
         .await
     } else {
@@ -1739,7 +1738,7 @@ pub(crate) async fn default_start_command_for_os_with(
     default_start_command_for_os(os, &resolved_path)
 }
 
-const WINDOWS_AGENT_TASK_NAME: &str = "LlamaMonitorAgent";
+const WINDOWS_AGENT_TASK_NAME: &str = "LocalLLMFoundryAgent";
 const WINDOWS_AGENT_LEGACY_TASK_NAME: &str = "llama-monitor-agent";
 const WINDOWS_SENSOR_BRIDGE_TASK_NAME: &str = "LlamaMonitorSensorBridge";
 
@@ -1759,7 +1758,7 @@ schtasks /End /TN "LlamaMonitorAgent" >nul 2>&1
 schtasks /Delete /TN "LlamaMonitorAgent" /F >nul 2>&1
 schtasks /End /TN "llama-monitor-agent" >nul 2>&1
 schtasks /Delete /TN "llama-monitor-agent" /F >nul 2>&1
-echo Llama Monitor agent service removed.
+echo Local LLM Foundry agent service removed.
 echo You may delete this folder.
 pause
 "#;
@@ -1911,10 +1910,18 @@ impl LatestReleaseInfo {
 
 fn asset_info_from_github_asset(asset: GithubAsset) -> Option<ReleaseAssetInfo> {
     let (platform, arch, archive) = match asset.name.as_str() {
-        "llama-monitor-windows-x86_64.zip" => ("windows", "x86_64", true),
-        "llama-monitor-linux-x86_64" => ("linux", "x86_64", false),
-        "llama-monitor-linux-aarch64" => ("linux", "aarch64", false),
-        "llama-monitor-macos-aarch64.tar.gz" => ("macos", "aarch64", true),
+        "local-llm-foundry-windows-x86_64.zip" | "llama-monitor-windows-x86_64.zip" => {
+            ("windows", "x86_64", true)
+        }
+        "local-llm-foundry-linux-x86_64" | "llama-monitor-linux-x86_64" => {
+            ("linux", "x86_64", false)
+        }
+        "local-llm-foundry-linux-aarch64" | "llama-monitor-linux-aarch64" => {
+            ("linux", "aarch64", false)
+        }
+        "local-llm-foundry-macos-aarch64.tar.gz" | "llama-monitor-macos-aarch64.tar.gz" => {
+            ("macos", "aarch64", true)
+        }
         _ => return None,
     };
 
@@ -2303,15 +2310,17 @@ fn agent_client_for_url<'a>(
 
 fn install_path_for_os(os: RemoteOs) -> Option<&'static str> {
     match os {
-        RemoteOs::Windows => Some("%APPDATA%\\llama-monitor\\bin\\llama-monitor.exe"),
-        RemoteOs::Unix | RemoteOs::Macos => Some("~/.config/llama-monitor/bin/llama-monitor"),
+        RemoteOs::Windows => Some("%APPDATA%\\local-llm-foundry\\bin\\local-llm-foundry.exe"),
+        RemoteOs::Unix | RemoteOs::Macos => {
+            Some("~/.config/local-llm-foundry/bin/local-llm-foundry")
+        }
         RemoteOs::Unknown => None,
     }
 }
 
 pub(crate) fn default_install_path_for_os(os: RemoteOs) -> String {
     install_path_for_os(os)
-        .unwrap_or("/tmp/llama-monitor")
+        .unwrap_or("/tmp/local-llm-foundry")
         .to_string()
 }
 

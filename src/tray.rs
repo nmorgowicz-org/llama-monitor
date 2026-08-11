@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(feature = "webview-popover")]
@@ -137,7 +138,7 @@ fn create_tray_icon() -> Icon {
         .unwrap_or_else(|_| Icon::from_rgba(vec![0, 0, 0, 255], 1, 1).unwrap())
 }
 
-pub fn run_tray(state: AppState, port: u16) -> anyhow::Result<()> {
+pub fn run_tray(state: AppState, port: u16, app_root: PathBuf) -> anyhow::Result<()> {
     #[cfg(not(feature = "webview-popover"))]
     let _ = port;
 
@@ -174,6 +175,7 @@ pub fn run_tray(state: AppState, port: u16) -> anyhow::Result<()> {
         tray: None,
         icon: create_tray_icon(),
         port,
+        app_root,
         menu_quit_id: None,
         menu_open_id: None,
         menu_open_logs_id: None,
@@ -202,6 +204,7 @@ struct TrayApp {
     tray: Option<TrayIcon>,
     icon: Icon,
     port: u16,
+    app_root: PathBuf,
     /// Right-click context-menu item ids (so every platform/config has a way to quit
     /// and open the dashboard, independent of the WebView2 popover).
     menu_quit_id: Option<tray_icon::menu::MenuId>,
@@ -343,7 +346,7 @@ impl ApplicationHandler for TrayApp {
             } else if self.menu_open_id.as_ref() == Some(&menu_event.id) {
                 open_dashboard(self.port);
             } else if self.menu_open_logs_id.as_ref() == Some(&menu_event.id) {
-                open_logs_folder();
+                open_logs_folder(&self.app_root);
             }
         }
 
@@ -751,13 +754,9 @@ fn open_dashboard(port: u16) {
 /// - Linux: xdg-open
 ///
 /// If the logs directory doesn't exist, creates it.
-fn open_logs_folder() {
-    let Some(config_dir) = dirs::config_dir() else {
-        eprintln!("[tray] failed to open logs folder: could not determine config dir");
-        return;
-    };
-
-    let logs_dir = config_dir.join("llama-monitor").join("logs");
+fn open_logs_folder(app_root: &std::path::Path) {
+    let config_dir = app_root.to_path_buf();
+    let logs_dir = crate::paths::AppPaths::from_root(config_dir.clone()).logs_dir();
 
     // Defensive: canonicalize and ensure it is still under config_dir
     // to guard against future config_dir overrides with .. segments.

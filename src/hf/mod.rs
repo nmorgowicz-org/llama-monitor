@@ -2121,7 +2121,9 @@ fn extract_quant_like_token(filename: &str) -> Option<String> {
 
 // ── Token management ──────────────────────────────────────────────────────────
 
-/// Load HF token: 1) HUGGING_FACE_HUB_TOKEN env var  2) ~/.config/llama-monitor/hf-token.
+/// Load HF token: 1) HUGGING_FACE_HUB_TOKEN env var  2) the active application
+/// root's `hf-token` file. The legacy path remains readable while the explicit
+/// root migration is pending.
 /// If the file is encrypted, decrypt_value handles it; otherwise treated as plaintext.
 pub fn hf_load_token() -> Option<String> {
     if let Ok(v) = std::env::var("HUGGING_FACE_HUB_TOKEN")
@@ -2129,19 +2131,16 @@ pub fn hf_load_token() -> Option<String> {
     {
         return Some(v.trim().to_string());
     }
-    dirs::home_dir().and_then(|home| {
-        let path = home.join(".config").join("llama-monitor").join("hf-token");
-        std::fs::read_to_string(&path)
-            .ok()
-            .map(|s| crate::config::decrypt_value(s.trim()))
-            .filter(|s| !s.is_empty())
-    })
+    let path = crate::paths::AppPaths::default_active_root().join("hf-token");
+    std::fs::read_to_string(&path)
+        .ok()
+        .map(|s| crate::config::decrypt_value(s.trim()))
+        .filter(|s| !s.is_empty())
 }
 
-/// Save HF token to ~/.config/llama-monitor/hf-token (encrypted if key available).
+/// Save HF token to the active application root (encrypted if key available).
 pub fn hf_save_token(token: &str) -> Result<()> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home directory not found"))?;
-    let dir = home.join(".config").join("llama-monitor");
+    let dir = crate::paths::AppPaths::default_active_root();
     std::fs::create_dir_all(&dir).context("Failed to create config dir")?;
     let stored = crate::config::encrypt_value(token.trim());
     std::fs::write(dir.join("hf-token"), &stored).context("Failed to write HF token")?;

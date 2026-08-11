@@ -380,19 +380,7 @@ pub fn process_store() -> SpecDecodeVerdictStore {
 }
 
 fn default_config_dir() -> PathBuf {
-    #[cfg(windows)]
-    {
-        dirs::config_dir()
-            .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".config"))
-            .join("llama-monitor")
-    }
-    #[cfg(not(windows))]
-    {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".config")
-            .join("llama-monitor")
-    }
+    crate::paths::AppPaths::default_active_root()
 }
 
 /// The lane's `requalification.json`, narrowed to the fields a verdict needs.

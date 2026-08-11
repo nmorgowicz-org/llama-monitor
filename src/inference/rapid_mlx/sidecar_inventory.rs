@@ -76,13 +76,10 @@ pub fn init_sidecar_root(config_dir: &Path) {
 
 /// Resolve the sidecar root for the current process.
 fn sidecar_root() -> PathBuf {
-    SIDECAR_ROOT.get().cloned().unwrap_or_else(|| {
-        // Fallback: assume default config dir
-        dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("/tmp"))
-            .join("llama-monitor")
-            .join(SIDECAR_SUBDIR)
-    })
+    SIDECAR_ROOT
+        .get()
+        .cloned()
+        .unwrap_or_else(|| crate::paths::AppPaths::default_active_root().join(SIDECAR_SUBDIR))
 }
 
 /// Discover all sidecars under the managed root. Returns an empty list if the

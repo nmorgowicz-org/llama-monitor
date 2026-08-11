@@ -1758,12 +1758,18 @@ fn hex_digest(bytes: &[u8]) -> String {
 
 /// Returns the base directory where template overlay directories are stored.
 /// Creates it if it does not exist. Returns `None` only if home directory cannot be determined.
+static TEMPLATE_OVERLAY_ROOT: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn init_template_overlay_root(config_dir: &Path) {
+    let _ = TEMPLATE_OVERLAY_ROOT.set(config_dir.join("rapid-mlx").join("template-overlays"));
+}
+
 fn template_overlay_base_dir() -> Option<PathBuf> {
-    let base = dirs::home_dir()?
-        .join(".config")
-        .join("llama-monitor")
-        .join("rapid-mlx")
-        .join("template-overlays");
+    let base = TEMPLATE_OVERLAY_ROOT.get().cloned().unwrap_or_else(|| {
+        crate::paths::AppPaths::default_active_root()
+            .join("rapid-mlx")
+            .join("template-overlays")
+    });
     let _ = std::fs::create_dir_all(&base);
     Some(base)
 }
@@ -1814,8 +1820,13 @@ pub(crate) fn create_template_overlay(
     // Create overlay directory named by hashing the original model path
     let base =
         template_overlay_base_dir().ok_or_else(|| anyhow!("Could not determine home directory"))?;
-    let hash = hex_digest(model_dir.as_bytes());
-    let overlay_dir = base.join(&hash[..16]); // Use first 16 chars for shorter path
+    let hash = hex_digest(&Sha256::digest(model_dir.as_bytes()));
+    // Include the template path in the suffix so parallel callers with the
+    // same model directory cannot overwrite each other's overlay contents.
+    // The stable model prefix preserves the existing deterministic/debuggable
+    // naming contract.
+    let template_hash = hex_digest(&Sha256::digest(template_path.as_bytes()));
+    let overlay_dir = base.join(format!("{}-{}", &hash[..16], &template_hash[..8]));
     let _ = std::fs::create_dir_all(&overlay_dir);
 
     // Symlink all files from the original model directory (skip existing symlinks to rebuild)
@@ -1829,7 +1840,7 @@ pub(crate) fn create_template_overlay(
 
             // Only symlink files (not subdirectories) — Rapid-MLX reads flat model files
             if src.is_file() {
-                let _ = std::os::unix::fs::symlink(&src, &dest);
+                let _ = create_file_symlink(&src, &dest);
             }
         }
     }
@@ -1840,6 +1851,16 @@ pub(crate) fn create_template_overlay(
         .with_context(|| "Failed to write chat_template.jinja into overlay directory")?;
 
     Ok(overlay_dir.to_string_lossy().into_owned())
+}
+
+#[cfg(unix)]
+fn create_file_symlink(src: &Path, dest: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(src, dest)
+}
+
+#[cfg(windows)]
+fn create_file_symlink(src: &Path, dest: &Path) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_file(src, dest)
 }
 
 #[cfg(test)]
@@ -2490,6 +2511,7 @@ mod tests {
         let path2 = create_template_overlay(&model_path, Some(&template_path)).unwrap();
 
         assert_eq!(path1, path2);
-        assert!(path1.contains(&hex_digest(model_path.as_bytes())[..16]));
+        let model_hash = hex_digest(&Sha256::digest(model_path.as_bytes()));
+        assert!(path1.contains(&model_hash[..16]));
     }
 }

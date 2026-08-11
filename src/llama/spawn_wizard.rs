@@ -1285,11 +1285,7 @@ fn extract_int_after(prefix: &str, line: &str) -> Option<u32> {
 }
 
 fn model_cache_dir() -> Result<PathBuf, String> {
-    let home = dirs::home_dir().ok_or_else(|| "Home directory not found".to_string())?;
-    let dir = home
-        .join(".config")
-        .join("llama-monitor")
-        .join("model-cache");
+    let dir = crate::paths::AppPaths::default_active_root().join("model-cache");
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("Failed to create model-cache dir: {}", e))?;
     Ok(dir)

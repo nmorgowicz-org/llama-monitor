@@ -5,7 +5,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 
-const DEFAULT_SERVER = '/Users/nick/.config/llama-monitor/bin/llama-server';
+const DEFAULT_SERVER = '/Users/nick/.config/local-llm-foundry/bin/llama-server';
 const DEFAULT_PORT = 18088;
 // Qwen's chat template and code corpus tokenize at about 2.54 tokens/word.
 // These values were calibrated from the 65,536 row (25,000 words -> 63,435

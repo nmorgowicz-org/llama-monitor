@@ -32,7 +32,7 @@ Usage
 -----
     python3 scripts/build-mtp-head.py \
         --bf16-source nightmedia/Qwen3.6-27B-Architect-Polaris2-Fable-B-F451-Tess \
-        --mlx-model ~/.config/llama-monitor/models/mlx/native/nightmedia-27b-mxfp8-mlx
+        --mlx-model ~/.config/local-llm-foundry/models/mlx/native/nightmedia-27b-mxfp8-mlx
 
 See docs/reference/rapid-mlx-mtp-evidence.md for the requalification procedure
 this feeds.
@@ -53,7 +53,7 @@ from typing import Any, NoReturn
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VENDORED_EXTRACTOR = REPO_ROOT / "scripts" / "vendor" / "rapid-mlx" / "extract_mtp_weights.py"
-DEFAULT_SIDECAR_ROOT = Path.home() / ".config" / "llama-monitor" / "models" / "rapid-mlx" / "mtp-sidecars"
+DEFAULT_SIDECAR_ROOT = Path.home() / ".config" / "local-llm-foundry" / "models" / "rapid-mlx" / "mtp-sidecars"
 
 # Upstream's output filename, inside --mlx-model. We move it out under our own
 # name; the app's managed sidecar layout uses `mtp.safetensors`.
