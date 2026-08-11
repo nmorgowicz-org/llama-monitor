@@ -2,6 +2,7 @@
 
 pub mod acme;
 pub mod agent;
+pub mod app_migration;
 pub mod certs;
 pub mod chat_storage;
 pub mod cli;
@@ -9,6 +10,7 @@ pub mod collections;
 pub mod config;
 pub mod gpu;
 pub mod hf;
+pub mod identity;
 pub mod inference;
 pub mod lhm;
 pub mod lhm_persistence;
@@ -17,6 +19,7 @@ pub mod memory_availability;
 pub mod model_download;
 pub mod model_vision;
 pub mod models;
+pub mod paths;
 pub mod platform;
 pub mod presets;
 pub mod remote_ssh;
