@@ -435,11 +435,20 @@
                                 </div>
                             </div>
                             <div class="launch-filter-bar-right">
-                                <label class="launch-filter-toggle" title="Group cards by model family">
-                                    <input type="checkbox" id="setup-filter-group-by-family">
-                                    <span class="launch-filter-toggle-label">Group by family</span>
-                                </label>
-                            </div>
+                        <label class="launch-filter-toggle" title="Group cards by model family">
+                            <input type="checkbox" id="setup-filter-group-by-family">
+                            <span class="launch-filter-toggle-label">Group by family</span>
+                        </label>
+                        <label class="launch-filter-sort" for="setup-filter-sort">
+                            <span class="launch-filter-label">Sort</span>
+                            <select class="launch-filter-select" id="setup-filter-sort" aria-label="Sort preset cards">
+                                <option value="last_launched">Last launched</option>
+                                <option value="name">Name</option>
+                                <option value="size">Model size</option>
+                                <option value="backend">Backend</option>
+                            </select>
+                        </label>
+                    </div>
                         </div>
 
                         <!-- Preset cards grid (populated by renderLaunchGrid) -->
@@ -3598,37 +3607,16 @@
                             <span class="usecase-icon">🤖</span>
                             <div class="usecase-body">
                                 <div class="usecase-name">Agentic / RAG</div>
-                                <div class="usecase-desc">Tool calling, agents, retrieval. q8_0 KV minimum for coherent context.</div>
+        <div class="usecase-desc">Tool calling, research, agents, and retrieval. q8_0 KV minimum for coherent context.</div>
                             </div>
                         </div>
-                        <div class="usecase-card" data-usecase="tool_research" tabindex="0" role="button">
-                            <span class="usecase-icon">🔎</span>
-                            <div class="usecase-body">
-                                <div class="usecase-name">Tool / research agent</div>
-                                <div class="usecase-desc">Long-running retrieval and tool loops with room for parallel requests.</div>
-                            </div>
-                        </div>
-                        <div class="usecase-card" data-usecase="general" tabindex="0" role="button">
-                            <span class="usecase-icon">💬</span>
-                            <div class="usecase-body">
-                                <div class="usecase-name">General chat</div>
-                                <div class="usecase-desc">Conversation, summarization, coding. Balanced quality and context.</div>
-                            </div>
-                        </div>
-                        <div class="usecase-card" data-usecase="roleplay" tabindex="0" role="button">
-                            <span class="usecase-icon">🎭</span>
-                            <div class="usecase-body">
-                                <div class="usecase-name">Roleplay / creative</div>
-                                <div class="usecase-desc">Fiction, long narratives. Context beats precision — q4_0 KV accepted.</div>
-                            </div>
-                        </div>
-                        <div class="usecase-card" data-usecase="batch_eval" tabindex="0" role="button">
-                            <span class="usecase-icon">📊</span>
-                            <div class="usecase-body">
-                                <div class="usecase-name">Deterministic batch / eval</div>
-                                <div class="usecase-desc">Repeatable, greedy evaluation runs with predictable scheduling.</div>
-                            </div>
-                        </div>
+      <div class="usecase-card" data-usecase="general" tabindex="0" role="button">
+        <span class="usecase-icon">💬</span>
+        <div class="usecase-body">
+          <div class="usecase-name">General chat / roleplay</div>
+          <div class="usecase-desc">Conversation, summarization, coding, and creative writing. Context beats precision — q4_0 KV accepted.</div>
+        </div>
+      </div>
                     </div>
                     <section class="wizard-engine-section" aria-labelledby="wizard-engine-title">
                         <div class="wizard-section-title" id="wizard-engine-title">Choose your inference engine</div>

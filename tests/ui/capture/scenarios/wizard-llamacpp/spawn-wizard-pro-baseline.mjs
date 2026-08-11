@@ -121,7 +121,7 @@ export default async function({ page, baseUrl }) {
   await page.evaluate(async () => {
     const { showStep } = await import('/js/features/spawn-wizard.js');
     showStep(0);
-    document.querySelector('.usecase-card[data-usecase="roleplay"]')?.click();
+    document.querySelector('.usecase-card[data-usecase="general"]')?.click();
     showStep(1);
     const select = document.getElementById('view-mode-select');
     if (select?.value !== 'pro') {

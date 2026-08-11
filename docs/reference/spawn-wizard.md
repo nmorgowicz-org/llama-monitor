@@ -8,7 +8,7 @@
 
 The Spawn Wizard is the guided flow for creating a model server. It provides:
 
-- Guided disclosure with five workload intents (agentic / tool-research / general / roleplay / deterministic batch-eval)
+- Guided disclosure with two workload intents (agentic / RAG / tools and general chat / roleplay)
 - Engine selection between llama.cpp and Rapid-MLX
 - Model source input (local GGUF, Hugging Face, or import)
 - Architecture-aware VRAM breakdown and context fit modes
@@ -149,7 +149,7 @@ model source input on the same step:
 Guided disclosure keeps safe defaults visible; every applicable control is reachable in the canonical All settings drawer.
 - **Workload cards** map to typed `workload_scenario` values sent to the backend VRAM estimator.
 
-The workload mapping is: `agentic` → `interactive_coding_agent`, `tool_research` → `tool_research_agent`, `general` → `general_chat`, `roleplay` → `roleplay_storytelling`, and `batch_eval` → `deterministic_batch_eval`.
+The two visible intents map as follows: `agentic` → `interactive_coding_agent` for tool calling, research, agents, and retrieval; `general` → `general_chat` for conversation, coding, summarization, and creative writing. Legacy `tool_research`, `roleplay`, and `batch_eval` values remain readable for older saved state but are no longer presented as duplicate cards.
 
 Engine selection, model source input, and model-specific options also live on this step. See
 [Engine selection](#engine-selection) below.

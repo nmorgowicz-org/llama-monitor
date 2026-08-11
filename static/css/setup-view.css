@@ -1855,6 +1855,32 @@ body.setup-active .sidebar-nav {
     background: var(--bg-button-hover, rgba(255, 255, 255, 0.08));
 }
 
+.setup-endpoint-dismiss {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+    border-radius: 50%;
+    background: transparent;
+    color: var(--fg-muted, var(--color-text-muted));
+    font-size: 18px;
+    line-height: 20px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.setup-endpoint-dismiss:hover {
+    color: var(--color-error, #fb7185);
+    border-color: currentColor;
+    background: rgba(251, 113, 133, 0.1);
+}
+
+.setup-endpoint-dismiss:disabled {
+    opacity: 0.5;
+    cursor: wait;
+}
+
 /* Manual attach section */
 .setup-endpoint-manual {
     border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
@@ -3977,9 +4003,15 @@ body.setup-active .sidebar-nav {
 }
 
 .launch-filter-group {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--gap-xs);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--gap-xs);
+}
+
+.launch-filter-sort {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--gap-xs);
 }
 
 .launch-filter-label {

@@ -512,10 +512,7 @@ import {
 // consumed by the backend VRAM estimator.
 const USE_CASE_TO_PROFILE = {
   agentic: 'interactive_coding_agent',
-  tool_research: 'tool_research_agent',
   general: 'general_chat',
-  roleplay: 'roleplay_storytelling',
-  batch_eval: 'deterministic_batch_eval',
 };
 
 // The one concrete thing a use-case should change on llama.cpp: how hard the KV cache is
@@ -530,10 +527,7 @@ const USE_CASE_TO_PROFILE = {
 // recommendation.
 const USE_CASE_TO_KV_DTYPE = {
   agentic: 'q8_0',
-  tool_research: 'q8_0',
-  general: 'q8_0',
-  roleplay: 'q4_0',
-  batch_eval: 'q8_0',
+  general: 'q4_0',
 };
 
 
@@ -1856,7 +1850,7 @@ function applyUseCaseKvDtype(useCase) {
 }
 
 // Provenance chips (M3-B): small pill next to KV labels showing where the value came from.
-const USE_CASE_PROV_LABELS = { agentic: 'Agentic', general: 'General', roleplay: 'Roleplay' };
+const USE_CASE_PROV_LABELS = { agentic: 'Agentic / RAG / tools', general: 'General chat / roleplay', roleplay: 'General chat / roleplay' };
 
 function _updateKvProvenanceChips() {
   if (wizardState.engine.selected === 'rapid_mlx') return;

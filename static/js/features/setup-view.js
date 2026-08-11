@@ -3,7 +3,7 @@
 
 import { setupViewState, chat, sessionState } from '../core/app-state.js';
 import { getPlatformInfo } from '../core/platform-info.js';
-import { doAttachFromSetup, doRestoreSession } from './attach-detach.js';
+import { doAttachFromSetup } from './attach-detach.js';
 import { presetModelSource } from './presets.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast, showConfirmDialog, showPromptDialog } from './toast.js';
@@ -157,7 +157,8 @@ const launchFilters = {
     size: null,
     tags: [],
     collection: null,
-    groupByFamily: false
+    groupByFamily: false,
+    sortBy: 'last_launched',
 };
 // ── Memory bar (segmented, platform-aware) ─────────────────────────────────────
 // Unified (macOS): single pool, Metal cap, reclaimable cache.
@@ -846,12 +847,16 @@ export function renderLaunchGrid() {
     const allPresets = sessionState.presets || [];
     const userPresets = allPresets.filter(p => !p.id.startsWith('default-'));
     const hasUserPresets = userPresets.length > 0;
+    const filterBar = document.getElementById('setup-filter-bar');
+    if (filterBar && filterBar.dataset.initialized !== '1') initLaunchFilters();
     let presets = _visiblePresetsLocal(allPresets);
     const activePresetId = sessionState.activeSessionPresetId || '';
     const showNewConfigCard = presets.length <= 2;
 
-    // Apply filters
+    // Apply filters and the user-selected ordering. Sorting is intentionally
+    // done after filtering so the visible list remains stable while browsing.
     presets = _filterPresets(presets);
+    presets = _sortPresets(presets);
 
     // Optional grouped view
     if (launchFilters.groupByFamily && presets.length > 4) {
@@ -869,6 +874,35 @@ export function renderLaunchGrid() {
         if (dz) dz._dzInited = true;
     }
     fetchAndRenderMemoryBar();
+}
+
+function _sortPresets(presets) {
+    const sorted = [...presets];
+    const name = p => String(p.name || p.model_path || p.hf_repo || '').toLocaleLowerCase();
+    const size = p => Number(
+        p.model_size_bytes || p.file_size_bytes || p.size_bytes || p.model_size || 0,
+    );
+    const lastLaunched = p => _spawnLastLaunched.get(p.id) || Number(p.last_launched_at || 0);
+    sorted.sort((a, b) => {
+        let delta;
+        switch (launchFilters.sortBy) {
+            case 'name':
+                delta = name(a).localeCompare(name(b));
+                break;
+            case 'size':
+                delta = size(b) - size(a);
+                break;
+            case 'backend':
+                delta = String(a.backend || '').localeCompare(String(b.backend || '')) || name(a).localeCompare(name(b));
+                break;
+            case 'last_launched':
+            default:
+                delta = lastLaunched(b) - lastLaunched(a);
+                break;
+        }
+        return delta || name(a).localeCompare(name(b));
+    });
+    return sorted;
 }
 
 function _filterPresets(presets) {
@@ -1421,18 +1455,14 @@ export function renderRecentEndpoints(sessions, activeId) {
     if (!list || !container) return;
 
     const allSessions = Array.isArray(sessions) ? sessions : [];
-    // Attach sessions reconnect to their endpoint. Spawn sessions restore their
-    // persisted, secret-scrubbed launch envelope.
+    // Only remote attach sessions belong in this reconnect list. Local presets
+    // already have first-class cards in the right pane and should not be
+    // duplicated as stale "recent servers" here.
     const attachSessions = allSessions.filter(session => !!session.mode?.Attach);
-    const spawnSessions = allSessions.filter(session => !!session.mode?.Spawn);
 
-    if (!allSessions.length) {
-        container.style.display = 'none';
-        setAttachButtonLabel(attachBtn, 'Attach');
-        return;
-    }
-
-    container.style.display = (attachSessions.length || spawnSessions.length) ? '' : 'none';
+    const hasAttachSessions = attachSessions.length > 0;
+    container.style.display = hasAttachSessions ? '' : 'none';
+    if (!hasAttachSessions) setAttachButtonLabel(attachBtn, 'Attach');
     list.innerHTML = '';
 
     // Stamp preset cards with the last time they were spawned (for "last launched" display).
@@ -1445,6 +1475,11 @@ export function renderRecentEndpoints(sessions, activeId) {
         }
     }
     _applyLastLaunchedToCards();
+    // Refresh the right-pane order now that session-backed launch timestamps
+    // are available for the default "Last launched" sort.
+    renderLaunchGrid();
+
+    if (!hasAttachSessions) return;
 
     // Attach and Spawn cards use distinct reconnect/restore paths below.
     const buildCard = (session) => {
@@ -1530,9 +1565,45 @@ export function renderRecentEndpoints(sessions, activeId) {
             ? 'Resume'
             : (session.last_connected_at ? 'Reconnect' : 'Connect');
 
+        const dismissBtn = document.createElement('button');
+        dismissBtn.type = 'button';
+        dismissBtn.className = 'setup-endpoint-dismiss';
+        dismissBtn.textContent = '×';
+        dismissBtn.title = 'Dismiss saved endpoint';
+        dismissBtn.setAttribute('aria-label', `Dismiss saved endpoint ${session.name || endpoint || ''}`.trim());
+        dismissBtn.addEventListener('click', async (event) => {
+            event.stopPropagation();
+            dismissBtn.disabled = true;
+            try {
+                const baseHeaders = window.authHeaders ? window.authHeaders() : {};
+                const tokenResponse = await fetch('/api/db/admin-token', { headers: baseHeaders });
+                const tokenData = tokenResponse.ok ? await tokenResponse.json().catch(() => ({})) : {};
+                const headers = tokenData.token
+                    ? { Authorization: `Bearer ${tokenData.token}` }
+                    : baseHeaders;
+                const response = await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, {
+                    method: 'DELETE',
+                    headers,
+                });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    throw new Error(data.error || `HTTP ${response.status}`);
+                }
+                card.remove();
+                if (!list.children.length) {
+                    container.style.display = 'none';
+                    setAttachButtonLabel(attachBtn, 'Attach');
+                }
+                showToast('Saved endpoint dismissed', 'success');
+            } catch (error) {
+                dismissBtn.disabled = false;
+                showToast(`Could not dismiss endpoint: ${error.message}`, 'error');
+            }
+        });
         card.appendChild(statusDot);
         card.appendChild(infoWrap);
         card.appendChild(connectBtn);
+        card.appendChild(dismissBtn);
 
         connectBtn.addEventListener('click', (e) => { e.stopPropagation(); doConnect(); });
         card.addEventListener('click', doConnect);
@@ -1541,53 +1612,6 @@ export function renderRecentEndpoints(sessions, activeId) {
     };
 
     attachSessions.forEach(session => list.appendChild(buildCard(session)));
-    spawnSessions.forEach(session => {
-        const card = document.createElement('div');
-        card.className = 'setup-endpoint-card setup-spawn-restore-card';
-        const infoWrap = document.createElement('div');
-        infoWrap.className = 'setup-endpoint-info';
-        const nameEl = document.createElement('div');
-        nameEl.className = 'setup-endpoint-name';
-        nameEl.textContent = session.name || session.model_identity || 'Saved model';
-        const detailEl = document.createElement('div');
-        detailEl.className = 'setup-endpoint-url';
-        detailEl.textContent = session.backend === 'rapid_mlx' ? 'Rapid-MLX' : 'llama.cpp';
-        const metaEl = document.createElement('div');
-        metaEl.className = 'setup-endpoint-meta';
-        metaEl.textContent = session.launch_requires_api_key
-            ? 'API key required to restore'
-            : 'Ready to restore';
-        infoWrap.append(nameEl, detailEl, metaEl);
-        const restoreBtn = document.createElement('button');
-        restoreBtn.className = 'setup-endpoint-connect';
-        restoreBtn.textContent = 'Restore';
-        const restore = async () => {
-            let apiKey = null;
-            if (session.launch_requires_api_key) {
-                apiKey = await showPromptDialog(
-                    'Restore protected model',
-                    'Enter the API key for this session. It is used only for this launch and is not saved.',
-                    '',
-                    { type: 'password', confirmLabel: 'Restore' },
-                );
-                if (apiKey == null) return;
-            }
-            restoreBtn.disabled = true;
-            try {
-                await doRestoreSession(session.id, apiKey);
-                showToast('Session restored', 'success');
-            } catch (error) {
-                showToast(`Restore failed: ${error.message}`, 'error');
-            } finally {
-                restoreBtn.disabled = false;
-            }
-        };
-        restoreBtn.addEventListener('click', event => { event.stopPropagation(); restore(); });
-        card.addEventListener('click', restore);
-        card.append(infoWrap, restoreBtn);
-        list.appendChild(card);
-    });
-
     // Live health-check attach sessions that aren't already confirmed Running
     attachSessions.forEach((session, i) => {
         if (session.status === 'Running') return;
@@ -1756,10 +1780,12 @@ export async function initLaunchFilters() {
     const bar = document.getElementById('setup-filter-bar');
     if (!bar) return;
 
-    // Only populate if we have multiple presets (avoid clutter with 0-2)
+    // Keep the sort control available as soon as there is a user preset. The
+    // right pane is the canonical local-preset list, even when there are only
+    // one or two cards; hiding the entire toolbar made ordering undiscoverable.
     const presets = sessionState.presets || [];
     const userPresets = presets.filter(p => !p.id.startsWith('default-'));
-    if (userPresets.length < 3) {
+    if (userPresets.length === 0) {
         bar.style.display = 'none';
         return;
     }
@@ -1896,6 +1922,20 @@ export async function initLaunchFilters() {
             renderLaunchGrid();
         });
     }
+    const sortSelect = document.getElementById('setup-filter-sort');
+    if (sortSelect) {
+        const savedSort = localStorage.getItem('llama-monitor-preset-sort');
+        if (savedSort && ['last_launched', 'name', 'size', 'backend'].includes(savedSort)) {
+            launchFilters.sortBy = savedSort;
+            sortSelect.value = savedSort;
+        }
+        sortSelect.addEventListener('change', () => {
+            launchFilters.sortBy = sortSelect.value;
+            localStorage.setItem('llama-monitor-preset-sort', launchFilters.sortBy);
+            renderLaunchGrid();
+        });
+    }
+    bar.dataset.initialized = '1';
 }
 
 function updateFilterPillActive(container, activeId) {

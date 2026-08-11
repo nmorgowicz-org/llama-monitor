@@ -77,6 +77,18 @@ async function installPresetMocks(page, options = {}) {
     body: JSON.stringify({ sessions: options.sessions || [], active_session_id: '' }),
   }));
 
+  await page.route('**/api/sessions/remote-1', async route => {
+    if (route.request().method() === 'DELETE') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true }),
+      });
+      return;
+    }
+    await route.continue();
+  });
+
   await page.route('**/api/db/admin-token', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -179,6 +191,37 @@ async function boot(page) {
 }
 
 test.describe('preset flow', () => {
+  test('welcome recent list keeps remote endpoints only and supports dismissal', async ({ page }) => {
+    await installPresetMocks(page, {
+      sessions: [
+        {
+          id: 'remote-1',
+          name: 'Remote endpoint',
+          backend: 'llama_cpp',
+          status: 'Disconnected',
+          mode: { Attach: { endpoint: 'http://192.168.2.16:8001' } },
+          last_connected_at: 1,
+        },
+        {
+          id: 'local-1',
+          name: 'Local preset launch',
+          backend: 'rapid_mlx',
+          status: 'Stopped',
+          mode: { Spawn: { preset_id: 'original' } },
+          preset_id: 'original',
+          last_connected_at: 2,
+        },
+      ],
+    });
+    await boot(page);
+    await expect(page.locator('#setup-filter-sort')).toHaveValue('last_launched');
+    await expect(page.locator('#setup-endpoint-list .setup-endpoint-card')).toHaveCount(1);
+    await expect(page.locator('.setup-endpoint-dismiss')).toHaveCount(1);
+    await page.locator('.setup-endpoint-dismiss').click();
+    await expect(page.locator('#setup-endpoint-list .setup-endpoint-card')).toHaveCount(0);
+    await expect(page.locator('#setup-recent-endpoints')).toBeHidden();
+  });
+
   test('duplicating from the preset editor selects and reopens the copy', async ({ page }) => {
     await installPresetMocks(page, {
       presets: [preset('original', 'Original'), preset('other', 'Other')],
@@ -326,8 +369,8 @@ test.describe('preset flow', () => {
     expect(state.presets.find(p => p.id === 'copy-1')?.rapid_mlx).toEqual(editedRapidConfig);
   });
 
-  test('protected session restore uses the native password modal and transient key', async ({ page }) => {
-    const state = await installPresetMocks(page, {
+  test('local spawn sessions are not duplicated in recent remote endpoints', async ({ page }) => {
+    await installPresetMocks(page, {
       sessions: [{
         id: 'protected-session',
         name: 'Private model',
@@ -340,25 +383,10 @@ test.describe('preset flow', () => {
         mode: { Spawn: { port: 8001 } },
         status: 'Stopped',
       }],
-      spawnPort: 8001,
     });
     await boot(page);
-
-    const restoreButton = page.locator('.setup-spawn-restore-card .setup-endpoint-connect');
-    await expect(restoreButton).toHaveText('Restore');
-    await restoreButton.click();
-
-    const prompt = page.locator('.modal-overlay .modal').filter({ hasText: 'Restore protected model' });
-    await expect(prompt).toBeVisible();
-    await expect(prompt.locator('input[type="password"]')).toBeVisible();
-    await prompt.locator('input').fill('transient-only');
-    await prompt.getByRole('button', { name: 'Restore' }).click();
-
-    await expect.poll(() => state.spawnPayloads.length).toBe(1);
-    expect(state.spawnPayloads[0]).toEqual({
-      session_id: 'protected-session',
-      api_key: 'transient-only',
-    });
+    await expect(page.locator('.setup-spawn-restore-card')).toHaveCount(0);
+    await expect(page.locator('#setup-recent-endpoints')).toBeHidden();
   });
 
   test('protected attached endpoint reconnects with a transient native prompt key', async ({ page }) => {

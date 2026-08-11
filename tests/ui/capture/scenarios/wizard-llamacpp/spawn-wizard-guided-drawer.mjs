@@ -177,13 +177,13 @@ export default async function(ctx) {
     await captureShot(page, 'spawn-wizard-guided-drawer-pro-available.png', { fullPage: true, runtimeTag: 'llamacpp-local', expandSelector: '.wizard-body' });
  const workloadState = await page.evaluate(async () => {
      const { wizardState } = await import('/js/features/spawn-wizard.js');
-     document.querySelector('.usecase-card[data-usecase="tool_research"]')?.click();
-     const selected = document.querySelector('.usecase-card[data-usecase="tool_research"]')?.classList.contains('selected');
+     document.querySelector('.usecase-card[data-usecase="agentic"]')?.click();
+     const selected = document.querySelector('.usecase-card[data-usecase="agentic"]')?.classList.contains('selected');
      const scenario = wizardState.hardware.workloadScenario;
      document.querySelector('.usecase-card[data-usecase="agentic"]')?.click();
      return { selected, scenario };
  });
- if (!workloadState.selected || workloadState.scenario !== 'tool_research_agent') {
+ if (!workloadState.selected || workloadState.scenario !== 'interactive_coding_agent') {
      throw new Error(`Workload intent did not map to backend scenario: ${JSON.stringify(workloadState)}`);
  }
  const proState = await page.evaluate(() => ({
@@ -192,7 +192,7 @@ export default async function(ctx) {
         text: document.querySelector('#view-mode-select option[value="pro"]')?.textContent || '',
         workloadCards: document.querySelectorAll('.usecase-card[data-usecase]').length,
     }));
-    if (proState.value === 'pro' || proState.optionDisabled || !/pro/i.test(proState.text) || proState.workloadCards !== 5) {
+    if (proState.value === 'pro' || proState.optionDisabled || !/pro/i.test(proState.text) || proState.workloadCards !== 2) {
         throw new Error(`Pro availability is not honest: ${JSON.stringify(proState)}`);
     }
 }

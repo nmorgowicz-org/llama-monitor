@@ -107,7 +107,11 @@ export function updateCtxTrainWarning() {
 
 // Minimum-context guidance: warn when auto-size lands below the target for the use case.
 // Never warn when the user has manually typed or picked a high value — that's intentional.
-export const CTX_TARGETS = { agentic: 131072, general: 32768, roleplay: 65536 };
+// The Guided picker intentionally has two intents: tool-heavy agentic work and
+// general/creative conversation. Keep the older roleplay key as a compatibility
+// alias for restored state, but give the consolidated general profile its
+// context-first target.
+export const CTX_TARGETS = { agentic: 131072, general: 65536, roleplay: 65536 };
 
 export function showCtxFitWarning(ctx, useCase, manualSet = false) {
   const el = document.getElementById('ctx-fit-warning');
