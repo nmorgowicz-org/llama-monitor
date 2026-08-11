@@ -1,0 +1,25 @@
+{
+  "platform": "x86_64-pc-windows-gnu",
+  "checked_sources": [
+    "src/paths.rs",
+    "src/main.rs",
+    "src/tray.rs",
+    "src/certs.rs",
+    "src/agent.rs"
+  ],
+  "contract": {
+    "appdata_root": "%APPDATA%\\local-llm-foundry",
+    "legacy_root": "%APPDATA%\\llama-monitor",
+    "older_legacy_root": "%USERPROFILE%\\.config\\llama-monitor",
+    "logs": "<selected-root>\\logs",
+    "certificates": "<selected-root>\\certs"
+  },
+  "source_checks": [
+    "AppPaths::windows_root joins the supplied APPDATA path without filesystem access.",
+    "main.rs redirects Windows logs through AppPaths::logs_dir.",
+    "tray.rs receives the selected app root and never derives a product slug.",
+    "certs.rs uses the selected root; macOS-only legacy migration is cfg-gated.",
+    "agent.rs accepts legacy and canonical remote-agent binary names as a 2.x compatibility bridge."
+  ],
+  "required_command": "cargo check --target x86_64-pc-windows-gnu"
+}
