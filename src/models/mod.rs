@@ -13,6 +13,9 @@ pub mod gguf_recovery;
 pub mod library;
 pub mod local_adopt;
 pub mod provenance;
+// Pure Phase 6 planner; migration-center wiring is owned by the later UX/API phase.
+#[cfg_attr(not(test), allow(dead_code))]
+pub mod root_relocation;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DiscoveredModel {

@@ -25,6 +25,7 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
@@ -242,7 +243,30 @@ fn survey_source(dir: &Path) -> Result<(u64, usize, usize)> {
 
 /// Same-filesystem check, which is what decides link versus copy.
 fn same_filesystem(a: &Path, b: &Path) -> Result<bool> {
-    Ok(fs::metadata(a)?.dev() == fs::metadata(b)?.dev())
+    #[cfg(unix)]
+    {
+        Ok(fs::metadata(a)?.dev() == fs::metadata(b)?.dev())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (a, b);
+        // Windows has no stable std metadata device-id equivalent. Copying is
+        // the conservative choice; it preserves correctness when a volume
+        // boundary or filesystem hard-link policy is unknown.
+        Ok(false)
+    }
+}
+
+fn has_shared_hardlink(meta: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        meta.nlink() > 1
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        false
+    }
 }
 
 /// The library's own `mlx/native`, created if the library exists but has never held one.
@@ -575,7 +599,7 @@ fn measure_managed(dir: &Path) -> Result<(u64, usize, bool)> {
             } else if meta.is_file() {
                 files += 1;
                 bytes += meta.len();
-                if meta.nlink() > 1 {
+                if has_shared_hardlink(&meta) {
                     shared = true;
                 }
             }

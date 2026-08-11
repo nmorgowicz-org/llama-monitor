@@ -1,7 +1,9 @@
 # Model library
 
 Llama Monitor keeps every app-managed model under the configured `models_dir`. The
-default is `~/.config/llama-monitor/models/`. The directory is backend-neutral:
+default is `~/.config/local-llm-foundry/models/`. Legacy-active installs continue
+using `~/.config/llama-monitor/models/` until the user explicitly migrates. The
+directory is backend-neutral:
 
 ```text
 models/
