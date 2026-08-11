@@ -1,0 +1,54 @@
+{
+  "production_master": "assets/brand/token-ingot.svg",
+  "results": [
+    {
+      "file": "assets/brand/token-ingot.svg",
+      "sha256": "917c2a4d061c451279a7a6899d9fae56b21487e58c7fa85868c7bfdcc552c877",
+      "xml_like": true,
+      "forbidden_tokens": []
+    },
+    {
+      "file": "assets/brand/token-ingot-dark.svg",
+      "sha256": "11c507aaf5dff75a75e94cd76b6c3bb2e872d410f13240d54968e7e10657ef71",
+      "xml_like": true,
+      "forbidden_tokens": []
+    },
+    {
+      "file": "assets/brand/token-ingot-light.svg",
+      "sha256": "ed4e82cadd9d697f69900acacf56eae3b6bbdaa1dfe17f1413062f9e691accac",
+      "xml_like": true,
+      "forbidden_tokens": []
+    },
+    {
+      "file": "assets/brand/token-ingot-mono.svg",
+      "sha256": "09a418c26f750248cfbbff3759000be94131537c195c854f6b3905b4bb70bea7",
+      "xml_like": true,
+      "forbidden_tokens": []
+    },
+    {
+      "file": "assets/brand/token-ingot-one-color-black.svg",
+      "sha256": "40a995f221032dc8eb391344cb00a37a99c56388793819fa0f39bb7e91aa57bc",
+      "xml_like": true,
+      "forbidden_tokens": []
+    },
+    {
+      "file": "assets/brand/token-ingot-one-color-white.svg",
+      "sha256": "6ef0dde2112cbab1a12ffa5ce33404021c623d294665c12b11f18024b2026a23",
+      "xml_like": true,
+      "forbidden_tokens": []
+    },
+    {
+      "file": "assets/brand/token-ingot-macos-template.svg",
+      "sha256": "40a995f221032dc8eb391344cb00a37a99c56388793819fa0f39bb7e91aa57bc",
+      "xml_like": true,
+      "forbidden_tokens": []
+    },
+    {
+      "file": "static/icon.svg",
+      "sha256": "662f5e9d8c3e54e05b0e2becd4408fa52cebfc46d3fd968cd901da387ad68b40",
+      "xml_like": true,
+      "forbidden_tokens": []
+    }
+  ],
+  "pass": true
+}

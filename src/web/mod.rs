@@ -497,6 +497,16 @@ pub async fn handle_rejection(
     }
 
     if let Some(api_err) = err.find::<ApiError>() {
+        if let Some(code) = &api_err.public_code {
+            return Ok(Box::new(warp::reply::with_status(
+                warp::reply::json(&serde_json::json!({
+                    "ok": false,
+                    "error": "application_home_migration_failed",
+                    "error_code": code,
+                })),
+                api_err.status,
+            )));
+        }
         return Ok(Box::new(warp::reply::with_status(
             api_err.message.clone(),
             api_err.status,

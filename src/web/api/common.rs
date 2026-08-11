@@ -24,6 +24,7 @@ pub(crate) struct ApiCtx {
 pub(crate) struct ApiError {
     pub(crate) status: StatusCode,
     pub(crate) message: String,
+    pub(crate) public_code: Option<String>,
 }
 
 impl ApiError {
@@ -31,6 +32,7 @@ impl ApiError {
         Self {
             status,
             message: message.into(),
+            public_code: None,
         }
     }
 
@@ -48,6 +50,19 @@ impl ApiError {
 
     pub(crate) fn gateway_timeout(message: impl Into<String>) -> Self {
         Self::new(StatusCode::GATEWAY_TIMEOUT, message)
+    }
+
+    pub(crate) fn migration(error: &anyhow::Error) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: error.to_string(),
+            public_code: Some(
+                serde_json::to_string(&crate::app_migration::public_error_code(error))
+                    .unwrap_or_else(|_| "\"io_failure\"".to_string())
+                    .trim_matches('"')
+                    .to_string(),
+            ),
+        }
     }
 
     pub(crate) fn from_reqwest(err: reqwest::Error) -> Self {

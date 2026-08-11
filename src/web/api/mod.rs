@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use warp::Filter;
 
+mod app_home_migration;
 mod auth;
 mod benchmark;
 mod browse;
@@ -62,6 +63,7 @@ pub fn api_routes(
     };
 
     let preset_routes = preset_routes::routes(ctx.clone());
+    let app_home_migration_routes = app_home_migration::routes(ctx.clone());
     let template_routes = templates::routes(ctx.clone());
     let browse_routes = browse::routes(ctx.clone());
     let chat_storage = state.chat_storage.clone();
@@ -92,6 +94,7 @@ pub fn api_routes(
         .or(browse_with_chat)
         .or(db_routes)
         .or(preset_routes)
+        .or(app_home_migration_routes)
         .or(template_routes)
         .or(models_routes)
         .or(config_routes)
@@ -368,7 +371,7 @@ mod tests {
             .get("set-cookie")
             .and_then(|value| value.to_str().ok())
             .expect("set-cookie header");
-        assert!(set_cookie.contains("llama_monitor_session="));
+        assert!(set_cookie.contains("local_llm_foundry_session="));
 
         let status_resp = warp::test::request()
             .method("GET")
@@ -1130,5 +1133,50 @@ mod tests {
             .await;
         assert_eq!(response.status(), 404);
         assert!(String::from_utf8_lossy(response.body()).contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn app_home_migration_status_requires_api_token() {
+        let response = warp::test::request()
+            .method("GET")
+            .path("/api/app-home-migration/status")
+            .reply(&make_all_routes())
+            .await;
+        assert_eq!(response.status(), 401);
+    }
+
+    #[tokio::test]
+    async fn app_home_migration_status_accepts_api_token() {
+        let response = warp::test::request()
+            .method("GET")
+            .path("/api/app-home-migration/status")
+            .header("Authorization", "Bearer test-token")
+            .reply(&make_all_routes())
+            .await;
+        assert_eq!(response.status(), 200);
+        assert!(String::from_utf8_lossy(response.body()).contains("migration_required"));
+    }
+
+    #[tokio::test]
+    async fn app_home_migration_preview_requires_api_token() {
+        let response = warp::test::request()
+            .method("GET")
+            .path("/api/app-home-migration/preview")
+            .reply(&make_all_routes())
+            .await;
+        assert_eq!(response.status(), 401);
+    }
+
+    #[tokio::test]
+    async fn app_home_migration_queue_requires_db_admin_token() {
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/app-home-migration/queue")
+            .header("Content-Type", "application/json")
+            .header("Authorization", "Bearer test-token")
+            .body(r#"{"plan_id":"test","confirmation":"MIGRATE TO LOCAL LLM FOUNDRY"}"#)
+            .reply(&make_all_routes())
+            .await;
+        assert_eq!(response.status(), 401);
     }
 }

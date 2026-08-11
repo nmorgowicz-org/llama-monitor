@@ -3103,3 +3103,51 @@ Most handlers return JSON error payloads rather than relying on HTTP status alon
 ```json
 { "error": "No active session" }
 ```
+## Application-home migration
+
+These endpoints support the Local LLM Foundry 2.0 application-home upgrade.
+They never move managed models or delete the legacy root automatically.
+
+### `GET /api/app-home-migration/status`
+
+Requires `api-token`. Returns the detected root state and canonical, legacy,
+and active paths. Paths are metadata only; no directory is created.
+
+### `GET /api/app-home-migration/preview`
+
+Requires `api-token`. In `legacy_active` state, returns a deterministic plan id,
+copy entries, retained entries, and byte totals. Other states return `plan:
+null` and require recovery or explicit configuration rather than guessing.
+
+### `POST /api/app-home-migration/queue`
+
+Requires `db-admin-token` and JSON:
+
+```json
+{
+  "plan_id": "<preview plan id>",
+  "confirmation": "MIGRATE TO LOCAL LLM FOUNDRY"
+}
+```
+
+The server re-plans before writing a sibling queue marker. A changed source,
+destination collision, wrong confirmation, or stale plan is rejected. Queueing
+does not migrate in the live process; the next maintenance restart executes the
+copy-first plan, writes a receipt, and retains the legacy root for rollback.
+
+### `POST /api/app-home-migration/rollback/preview`
+
+Requires `api-token`. Returns a receipt-scoped rollback plan only when a verified
+Stage A receipt exists and the retained legacy root is still present.
+
+### `POST /api/app-home-migration/rollback/queue`
+
+Requires `db-admin-token` and the exact confirmation string `ROLL BACK TO LLAMA
+MONITOR`. Queues receipt-scoped canonical-root removal for the next controlled
+restart; the legacy root is never modified.
+
+### `POST /api/app-home-migration/cleanup`
+
+Requires `db-admin-token` and the exact confirmation string `DELETE LEGACY ROOT
+AFTER VERIFIED MIGRATION`. Queues removal of only the receipt-verified legacy
+root for the next controlled restart; no inferred or external path is deleted.

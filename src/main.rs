@@ -11,6 +11,7 @@
 
 mod acme;
 mod agent;
+mod app_migration;
 mod certs;
 mod chat_storage;
 mod cli;
@@ -18,6 +19,7 @@ mod collections;
 mod config;
 mod gpu;
 mod hf;
+mod identity;
 mod inference;
 mod lhm;
 mod lhm_persistence;
@@ -26,6 +28,7 @@ mod memory_availability;
 mod model_download;
 mod model_vision;
 mod models;
+mod paths;
 mod platform;
 mod presets;
 mod remote_ssh;
@@ -41,6 +44,8 @@ use clap::Parser;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+
+use crate::app_migration::RootState;
 
 /// Windows-only: attach to the parent console if running from a terminal.
 /// Safe to call from Explorer; it will simply fail to attach in that case.
@@ -106,7 +111,7 @@ fn maybe_alloc_console(is_interactive: bool) -> bool {
 /// - launched interactively with --headless/--agent, OR
 /// - console allocation failed.
 #[cfg(windows)]
-fn redirect_output_to_log_if_no_console() {
+fn redirect_output_to_log_if_no_console(log_dir: &std::path::Path) {
     unsafe {
         #[link(name = "kernel32")]
         unsafe extern "system" {
@@ -117,14 +122,11 @@ fn redirect_output_to_log_if_no_console() {
         if !GetConsoleWindow().is_null() {
             return;
         }
-        // No console → log to %APPDATA%\llama-monitor\logs\llama-monitor.log
-        let Some(dir) = dirs::config_dir().map(|d| d.join("llama-monitor").join("logs")) else {
-            return;
-        };
-        if std::fs::create_dir_all(&dir).is_err() {
+        // No console → log under the already-selected application root.
+        if std::fs::create_dir_all(log_dir).is_err() {
             return;
         }
-        let path = dir.join("llama-monitor.log");
+        let path = log_dir.join("local-llm-foundry.log");
         let Ok(file) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -154,80 +156,6 @@ fn maybe_alloc_console() -> bool {
     false
 }
 
-/// Windows-only: if the new config dir (%APPDATA%\llama-monitor) does not yet exist but the
-/// legacy location (%USERPROFILE%\.config\llama-monitor) does, move the legacy dir to the new
-/// location so users upgrading from older builds keep their presets/tokens/etc.
-///
-/// This is best-effort: any failure is logged but never blocks startup.
-#[cfg(windows)]
-fn migrate_legacy_config_dir(new_dir: &std::path::Path) {
-    if new_dir.exists() {
-        // New location already exists — nothing to migrate.
-        return;
-    }
-    let legacy_dir = match dirs::home_dir() {
-        Some(home) => home.join(".config").join("llama-monitor"),
-        None => return,
-    };
-    if !legacy_dir.exists() {
-        // Neither location exists yet — first run, nothing to migrate.
-        return;
-    }
-    eprintln!(
-        "[migrate] found legacy config at {}; migrating to {}",
-        legacy_dir.display(),
-        new_dir.display()
-    );
-    // Ensure parent of new_dir exists.
-    if let Some(parent) = new_dir.parent()
-        && let Err(e) = std::fs::create_dir_all(parent)
-    {
-        eprintln!(
-            "[migrate] could not create parent dir {}: {e} — migration skipped, startup continues",
-            parent.display()
-        );
-        return;
-    }
-    // Attempt atomic rename first (same-volume, instant).
-    if std::fs::rename(&legacy_dir, new_dir).is_ok() {
-        eprintln!(
-            "[migrate] moved legacy config from {} to {}",
-            legacy_dir.display(),
-            new_dir.display()
-        );
-        return;
-    }
-    // Rename failed (e.g. cross-volume). Fall back to recursive copy, leaving the legacy dir
-    // in place as a backup so no data is lost even if the copy is partial.
-    eprintln!("[migrate] rename failed; falling back to copy (legacy dir will remain as backup)");
-    fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
-        std::fs::create_dir_all(dst)?;
-        for entry in std::fs::read_dir(src)? {
-            let entry = entry?;
-            let ty = entry.file_type()?;
-            let dst_path = dst.join(entry.file_name());
-            if ty.is_dir() {
-                copy_dir_all(&entry.path(), &dst_path)?;
-            } else {
-                std::fs::copy(entry.path(), &dst_path)?;
-            }
-        }
-        Ok(())
-    }
-    if let Err(e) = copy_dir_all(&legacy_dir, new_dir) {
-        eprintln!(
-            "[migrate] copy failed: {e} — startup continues, config remains at {}",
-            legacy_dir.display()
-        );
-    } else {
-        eprintln!(
-            "[migrate] copied legacy config from {} to {} (legacy dir left as backup)",
-            legacy_dir.display(),
-            new_dir.display()
-        );
-    }
-}
-
 use crate::chat_storage::ChatStorage;
 use crate::config::{
     DashboardAuthConfig, TlsMode, clear_auth_config, harden_file_permissions, load_auth_config,
@@ -253,15 +181,210 @@ fn main() -> Result<()> {
     #[cfg(windows)]
     attach_parent_console();
 
-    let args = cli::AppArgs::parse();
+    let mut args = cli::AppArgs::parse();
+    let migration_command = args.app_home_migration_status
+        || args.app_home_migration_preview
+        || args.app_home_migrate
+        || args.app_home_rollback_preview
+        || args.app_home_rollback
+        || args.app_home_cleanup;
+    let mut default_inspection = if args.config_dir.is_none() {
+        Some(app_migration::inspect_default_roots()?)
+    } else {
+        None
+    };
+
+    if migration_command {
+        let Some(inspection) = default_inspection else {
+            return Err(anyhow::anyhow!(
+                "application-home migration commands require the default roots; --config-dir is explicit and cannot be reinterpreted"
+            ));
+        };
+        if args.app_home_migration_status {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "state": inspection.state,
+                    "canonical_root": inspection.canonical_root,
+                    "legacy_root": inspection.legacy_root,
+                    "active_root": inspection.active_root,
+                }))?
+            );
+            return Ok(());
+        }
+        if args.app_home_rollback_preview || args.app_home_rollback {
+            if inspection.state != RootState::RollbackAvailable {
+                return Err(anyhow::anyhow!(
+                    "application-root rollback requires a verified migrated canonical root (state: {:?})",
+                    inspection.state
+                ));
+            }
+            let plan = app_migration::plan_application_home_rollback(
+                &inspection.canonical_root,
+                &inspection.legacy_root,
+            )?;
+            if args.app_home_rollback_preview {
+                println!("{}", serde_json::to_string_pretty(&plan)?);
+                return Ok(());
+            }
+            if args.confirm.as_deref() != Some("ROLL BACK TO LLAMA MONITOR") {
+                return Err(anyhow::anyhow!(
+                    "--app-home-rollback requires --confirm 'ROLL BACK TO LLAMA MONITOR'"
+                ));
+            }
+            app_migration::execute_application_home_rollback(&plan)?;
+            println!("{}", serde_json::to_string_pretty(&plan)?);
+            return Ok(());
+        }
+        if args.app_home_cleanup {
+            if inspection.state != RootState::RollbackAvailable {
+                return Err(anyhow::anyhow!(
+                    "application-root cleanup requires a verified migrated canonical root (state: {:?})",
+                    inspection.state
+                ));
+            }
+            let plan = app_migration::plan_application_home_cleanup(
+                &inspection.canonical_root,
+                &inspection.legacy_root,
+            )?;
+            if args.confirm.as_deref() != Some("DELETE LEGACY ROOT AFTER VERIFIED MIGRATION") {
+                return Err(anyhow::anyhow!(
+                    "--app-home-cleanup requires --confirm 'DELETE LEGACY ROOT AFTER VERIFIED MIGRATION'"
+                ));
+            }
+            app_migration::queue_application_home_cleanup(&plan)?;
+            println!("{}", serde_json::to_string_pretty(&plan)?);
+            return Ok(());
+        }
+        let (source, destination) = match inspection.state {
+            RootState::LegacyActive => (inspection.legacy_root, inspection.canonical_root),
+            RootState::Fresh | RootState::NewActive => {
+                return Err(anyhow::anyhow!(
+                    "no legacy application root requires migration (state: {:?})",
+                    inspection.state
+                ));
+            }
+            RootState::Conflict => {
+                return Err(anyhow::anyhow!(
+                    "application roots conflict; no migration plan will be guessed"
+                ));
+            }
+            state => {
+                return Err(anyhow::anyhow!(
+                    "application-root migration state {:?} requires recovery handling",
+                    state
+                ));
+            }
+        };
+        let plan = app_migration::plan_application_home(&source, &destination)?;
+        if args.app_home_migration_preview {
+            println!("{}", serde_json::to_string_pretty(&plan)?);
+            return Ok(());
+        }
+        if args.confirm.as_deref() != Some("MIGRATE TO LOCAL LLM FOUNDRY") {
+            return Err(anyhow::anyhow!(
+                "--app-home-migrate requires --confirm 'MIGRATE TO LOCAL LLM FOUNDRY'"
+            ));
+        }
+        let receipt = app_migration::execute_application_home(&plan)?;
+        println!("{}", serde_json::to_string_pretty(&receipt)?);
+        return Ok(());
+    }
+
+    // A rollback is queued by the authenticated migration center and consumed
+    // before normal root selection, so no live process ever switches roots
+    // halfway through initialization.
+    if args.config_dir.is_none()
+        && let Some(request) = app_migration::load_rollback_request()?
+    {
+        app_migration::execute_queued_rollback(&request)
+            .context("queued application-home rollback failed")?;
+    }
+    if args.config_dir.is_none()
+        && let Some(request) = app_migration::load_cleanup_request()?
+    {
+        app_migration::execute_queued_cleanup(&request)
+            .context("queued legacy-root cleanup failed")?;
+    }
+
+    // Root inspection is pure and must happen before AppConfig can create
+    // tokens, load protected config, initialize encryption, or create model
+    // directories. Legacy-only installs remain on their existing root until
+    // the explicit migration flow is implemented; both-root conflicts stop.
+    if args.config_dir.is_none() {
+        let inspection = default_inspection
+            .take()
+            .expect("default inspection captured above");
+        if inspection.state == RootState::MigrationQueued {
+            let request = app_migration::load_migration_request()?
+                .ok_or_else(|| anyhow::anyhow!("migration queue marker is missing"))?;
+            let plan = app_migration::plan_application_home(&request.source, &request.destination)?;
+            if plan.plan_id != request.plan_id {
+                return Err(anyhow::anyhow!(
+                    "queued migration preview is stale; generate a new preview"
+                ));
+            }
+            app_migration::execute_application_home(&plan)
+                .context("queued application-home migration failed")?;
+            default_inspection = Some(app_migration::inspect_default_roots()?);
+        } else {
+            default_inspection = Some(inspection);
+        }
+        let inspection = default_inspection
+            .as_ref()
+            .expect("inspection restored after queued migration");
+        let selected = match inspection.state {
+            RootState::Fresh | RootState::NewActive => inspection.canonical_root.clone(),
+            RootState::LegacyActive => inspection.legacy_root.clone(),
+            RootState::Conflict => {
+                return Err(anyhow::anyhow!(
+                    "application roots conflict: both {} and {} contain state; run the explicit migration flow",
+                    inspection.legacy_root.display(),
+                    inspection.canonical_root.display()
+                ));
+            }
+            RootState::CustomConfig
+            | RootState::BothIdentical
+            | RootState::MigrationQueued
+            | RootState::Migrating
+            | RootState::MigrationFailed
+            | RootState::RollbackAvailable => inspection.canonical_root.clone(),
+        };
+        args.config_dir = Some(selected);
+    }
+
+    // Establish the encryption key before AppConfig loads protected config
+    // files or initializes token stores.
+    if !args.clear_auth_config
+        && let Some(config_dir) = args.config_dir.as_deref()
+    {
+        config::init_encryption_key(config_dir)
+            .map_err(|_| anyhow::anyhow!("encryption environment aliases are conflicting"))?;
+    }
 
     #[cfg(windows)]
     {
         let is_interactive = !(args.headless || args.agent);
         let _console_allocated = maybe_alloc_console(is_interactive);
-        redirect_output_to_log_if_no_console();
     }
-    let app_config = Arc::new(config::AppConfig::from_args(args.clone()));
+    #[cfg(windows)]
+    redirect_output_to_log_if_no_console(
+        &crate::paths::AppPaths::from_root(
+            args.config_dir
+                .clone()
+                .expect("startup root selected before logging"),
+        )
+        .logs_dir(),
+    );
+    let app_config = Arc::new(if args.clear_auth_config {
+        config::AppConfig::from_args_pure(args.clone())
+    } else {
+        config::AppConfig::from_args(args.clone())
+    });
+    // Install the selected root for helpers that run outside the request
+    // context.  This is intentionally after pure root inspection and before
+    // any subsystem initializes stores or certificates.
+    crate::paths::AppPaths::set_active_root(&app_config.config_dir);
 
     if args.clear_auth_config {
         match clear_auth_config(&app_config.config_dir) {
@@ -288,27 +411,17 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // On Windows: if legacy ~/.config/llama-monitor exists but the new default
-    // %APPDATA%\llama-monitor does not, move legacy dir before config is read.
-    // Explicit --config-dir paths intentionally start clean.
-    #[cfg(windows)]
-    if args.config_dir.is_none() {
-        migrate_legacy_config_dir(&app_config.config_dir);
-    }
-
     // Measured speculative-decoding verdicts live beside the managed runtimes, so the
     // store has to learn the resolved config directory before any capability snapshot is
     // generated.
     inference::rapid_mlx::spec_decode_store::set_store_root(&app_config.config_dir);
     hf::mtp_pin_cache::init_pin_cache(&app_config.config_dir);
     inference::rapid_mlx::sidecar_inventory::init_sidecar_root(&app_config.config_dir);
+    inference::rapid_mlx::model_resolver::init_template_overlay_root(&app_config.config_dir);
 
     if let Some(report) = args.ingest_spec_decode_report.clone() {
         return ingest_spec_decode_report(&report);
     }
-
-    // Initialize at-rest encryption (auto-generates key if needed)
-    config::init_encryption_key(&app_config.config_dir);
 
     // Harden permissions on secret files (Unix: 0600)
     harden_file_permissions(&app_config.ui_settings_file);
@@ -1094,7 +1207,7 @@ fn main() -> Result<()> {
     #[cfg(feature = "native-tray")]
     {
         if should_start_tray(&args) {
-            if let Err(e) = crate::tray::run_tray(state, port) {
+            if let Err(e) = crate::tray::run_tray(state, port, app_config.config_dir.clone()) {
                 eprintln!("[warn] Tray unavailable: {e}");
                 eprintln!("[info] Continuing in headless mode with web/API server");
             }
@@ -1312,6 +1425,13 @@ mod tests {
                 form_auth: None,
                 ingest_spec_decode_report: None,
                 clear_auth_config: false,
+                app_home_migration_status: false,
+                app_home_migration_preview: false,
+                app_home_migrate: false,
+                app_home_rollback_preview: false,
+                app_home_rollback: false,
+                app_home_cleanup: false,
+                confirm: None,
                 agent_port: 7779,
                 agent_token: None,
                 remote_agent_url: None,
@@ -1357,6 +1477,13 @@ mod tests {
             form_auth: None,
             ingest_spec_decode_report: None,
             clear_auth_config: false,
+            app_home_migration_status: false,
+            app_home_migration_preview: false,
+            app_home_migrate: false,
+            app_home_rollback_preview: false,
+            app_home_rollback: false,
+            app_home_cleanup: false,
+            confirm: None,
             agent_port: 7779,
             agent_token: None,
             remote_agent_url: None,
@@ -1394,6 +1521,13 @@ mod tests {
             form_auth: None,
             ingest_spec_decode_report: None,
             clear_auth_config: false,
+            app_home_migration_status: false,
+            app_home_migration_preview: false,
+            app_home_migrate: false,
+            app_home_rollback_preview: false,
+            app_home_rollback: false,
+            app_home_cleanup: false,
+            confirm: None,
             agent_port: 7779,
             agent_token: None,
             remote_agent_url: None,
@@ -1432,6 +1566,13 @@ mod tests {
             form_auth: None,
             ingest_spec_decode_report: None,
             clear_auth_config: false,
+            app_home_migration_status: false,
+            app_home_migration_preview: false,
+            app_home_migrate: false,
+            app_home_rollback_preview: false,
+            app_home_rollback: false,
+            app_home_cleanup: false,
+            confirm: None,
             agent_port: 7779,
             agent_token: None,
             remote_agent_url: None,
@@ -1471,6 +1612,13 @@ mod tests {
             form_auth: None,
             ingest_spec_decode_report: None,
             clear_auth_config: false,
+            app_home_migration_status: false,
+            app_home_migration_preview: false,
+            app_home_migrate: false,
+            app_home_rollback_preview: false,
+            app_home_rollback: false,
+            app_home_cleanup: false,
+            confirm: None,
             agent_port: 7779,
             agent_token: None,
             remote_agent_url: None,
@@ -1510,6 +1658,13 @@ mod tests {
             form_auth: None,
             ingest_spec_decode_report: None,
             clear_auth_config: false,
+            app_home_migration_status: false,
+            app_home_migration_preview: false,
+            app_home_migrate: false,
+            app_home_rollback_preview: false,
+            app_home_rollback: false,
+            app_home_cleanup: false,
+            confirm: None,
             agent_port: 7779,
             agent_token: None,
             remote_agent_url: None,

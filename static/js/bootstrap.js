@@ -30,6 +30,7 @@ import { initConfig } from './features/config.js';
 import { initModels } from './features/models.js';
 import { initSensorBridge } from './features/sensor-bridge.js';
 import { initToast } from './features/toast.js';
+import { initAppHomeMigration } from './features/app-home-migration.js';
 import { initNetworkDetection } from './features/network-detection.js';
 import { initContextSidebar } from './features/chat-notes.js';
 import { initSuggestionsDropdown, closeSuggestionsDropdown } from './features/chat-suggestions.js';
@@ -148,6 +149,7 @@ async function initializeApp() {
     initModels();
     initSensorBridge();
     initToast();
+    await initAppHomeMigration();
     initNetworkDetection();
 
     // Phase 9: Guided generation features
@@ -213,7 +215,7 @@ async function initializeApp() {
     Router.register('/settings', () => {
       // Support hash-based tab targeting: /settings#models, /settings#session, etc.
       // Sanitize against the real tab values to avoid using arbitrary hashes.
-      const allowedTabs = ['chat', 'models', 'session', 'performance', 'gpu', 'loaders', 'security', 'appearance'];
+      const allowedTabs = ['chat', 'models', 'session', 'performance', 'gpu', 'loaders', 'security', 'appearance', 'migration'];
       const hash = (location.hash || '').replace('#', '').trim();
       const tab = allowedTabs.includes(hash) ? hash : null;
       openSettingsModal(tab);
