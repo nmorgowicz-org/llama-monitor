@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "codes": [
+    "invalid_root",
+    "unsafe_entry",
+    "destination_conflict",
+    "stale_plan",
+    "queue_conflict",
+    "permission_denied",
+    "io_failure"
+  ],
+  "rule": "public responses expose error_code and generic error; local paths remain diagnostics only"
+}
