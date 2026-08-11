@@ -1,7 +1,20 @@
 [package]
-name = "llama-monitor"
+name = "local-llm-foundry"
 version = "1.8.1"
 edition = "2024"
+autobins = false
+
+[lib]
+name = "llama_monitor"
+path = "src/lib.rs"
+
+[[bin]]
+name = "local-llm-foundry"
+path = "src/main.rs"
+
+[[bin]]
+name = "llama-monitor"
+path = "src/bin/llama-monitor.rs"
 
 [features]
 default = ["native-tray", "webview-popover"]

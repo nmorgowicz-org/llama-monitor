@@ -24,6 +24,8 @@ pub mod platform;
 pub mod presets;
 pub mod remote_ssh;
 pub mod repo_context;
+/// Shared application runner used by canonical and legacy binaries.
+pub mod runner;
 pub mod state;
 pub mod system;
 #[cfg(feature = "native-tray")]

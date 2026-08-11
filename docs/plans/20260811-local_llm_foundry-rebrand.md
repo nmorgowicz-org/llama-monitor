@@ -17,8 +17,9 @@
 | 3 — migration protocol + fixtures | Complete | Versioned schemas, pure planner, deterministic/stale/idempotent checks, full pure fixture matrix, sanitized error contract, API auth protocol, and compatibility receipts verified. |
 | 4 — application-home migration core | Complete | Copy-first queued maintenance migration, lock/journal/resume, free-space preflight, rollback/cleanup queues, sanitized receipts, and fixture gates verified; native Windows execution remains a Phase 12 qualification marker. |
 | 5 — path/config/resource default-root switch | Complete | Fresh canonical defaults, selected-root consumer routing, helper/docs updates, Windows early logging, and persisted-path policy receipt verified. |
-| 6 — model-library relocation path integration | In progress | Explicit keep/move model decisions and receipt-scoped relocation are next; external roots remain untouched. |
-| 7+ — package/release/repository and final qualification | Not started | Execute only after each preceding gate closes. |
+| 6 — model-library relocation path integration | Complete | Receipt-backed keep/move selection, resumable verified copy, persistence rewrites, and source-retention policy passed; native Windows qualification remains a Phase 12 marker. |
+| 7 — package, crate, binary, CLI, and backend identity | Complete | Canonical/legacy entrypoints, parity tests, release build, JS gates, and Windows GNU cross-check passed; native Windows execution remains a Phase 12 marker. |
+| 8+ — frontend, release, repository, and final qualification | Not started | Execute only after each preceding gate closes. |
 
 ### Phase closure blockers
 
@@ -34,6 +35,7 @@ acceptance gates, not implementation uncertainty.
 | 4 | Closed 2026-08-11: mutation core, lock/journal/resume, free-space/permission fixtures, rollback/cleanup queues, receipts, and CLI/API gates pass. Native Windows execution remains Phase 12. |
 | 5 | Closed 2026-08-11: fresh canonical default, selected-root routing, helper/docs updates, Windows early logging, and persisted-path policy pass. Model relocation is isolated to Phase 6. |
 | 6 | Closed 2026-08-11 for source-level macOS/Linux and cross-target contract: model-root preview/keep-or-copy API, receipt-backed selection, hash/free-space/collision/symlink protections, resumable copy, persistence rewrites, Migration settings controls, and focused gates pass. Native Windows model-root qualification is an explicit Phase 12 return marker. |
+| 7 | Closed 2026-08-11: canonical package and binary, thin legacy alias, shared runner, CLI parity receipt, full Rust/JS/release gates, and Windows GNU target check pass. Native Windows launch and installed-binary discovery remain an explicit Phase 12 return marker. |
 
 ## 1. Purpose and execution contract
 
@@ -995,22 +997,23 @@ Make Local LLM Foundry the executable/package identity while preserving a safe
 
 **Tasks**
 
-- [ ] Rename Cargo package to `local-llm-foundry`, add an explicit
+- [x] Rename Cargo package to `local-llm-foundry`, add an explicit
   `[lib] name = "llama_monitor"`, and document why the internal crate remains
   stable in 2.0.
-- [ ] Move application entry logic into a shared runner and create thin
+- [x] Move application entry logic into a shared runner and create thin
   canonical and legacy binary entrypoints.
-- [ ] The legacy `llama-monitor` entrypoint emits one actionable deprecation
+- [x] The legacy `llama-monitor` entrypoint emits one actionable deprecation
   warning, preserves argv/exit codes, and invokes the identical runner.
-- [ ] Keep Rust/test imports on `llama_monitor`; do not rename backend
+- [x] Keep Rust/test imports on `llama_monitor`; do not rename backend
   `llama` modules.
-- [ ] Update clap name, help, version output, examples, recovery commands, and
-  shell completion artifacts.
-- [ ] Add new environment variables and the alias resolver from Phase 2.
-- [ ] Update process/executable discovery to exact-match both names.
-- [ ] Update default installed binary paths without changing
+- [x] Update clap name, help, and version output. Current-doc examples,
+  recovery copy, and any generated shell completions remain owned by Phase 10.
+- [x] Carry forward the new environment variables and alias resolver from
+  Phase 2.
+- [x] Update process/executable discovery to exact-match both names.
+- [x] Update default installed binary paths without changing
   `llama-server`.
-- [ ] Add tests comparing canonical and legacy CLI behavior, paths, migration
+- [x] Add tests comparing canonical and legacy CLI behavior, paths, migration
   plan IDs, error text, and exit codes.
 
 **Owned files**

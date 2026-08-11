@@ -4,6 +4,7 @@ use std::path::PathBuf;
 #[derive(Parser, Debug, Clone)]
 #[command(
     name = "local-llm-foundry",
+    bin_name = "local-llm-foundry",
     version,
     about = "Web dashboard for local inference server management and GPU monitoring"
 )]
