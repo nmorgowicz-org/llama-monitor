@@ -1464,6 +1464,7 @@ function bindEvents() {
   });
 
   dom.browseModelBtn?.addEventListener('click', async () => {
+    const rapid = wizardState.engine.selected === 'rapid_mlx';
     let defaultPath = dom.modelPathInput?.value.trim() || '';
     if (!defaultPath) {
       // Fetch the effective models directory so Browse opens there by default.
@@ -1473,6 +1474,11 @@ function bindEvents() {
         if (r.ok) {
           const d = await r.json();
           defaultPath = d.dir || '';
+          if (defaultPath) {
+            const separator = defaultPath.includes('\\') ? '\\' : '/';
+            const subdir = rapid ? ['mlx', 'native'] : ['gguf'];
+            defaultPath = defaultPath.replace(/[\\/]+$/, '') + separator + subdir.join(separator);
+          }
         }
       } catch { /* ignore — fall back to home */ }
     } else {
@@ -1482,8 +1488,12 @@ function bindEvents() {
       parts.pop();
       defaultPath = parts.join(sep) || (defaultPath.includes('\\') ? 'C:\\' : '/');
     }
-    const rapid = wizardState.engine.selected === 'rapid_mlx';
-    openDeferredFileBrowser('spawn-model-path', rapid ? 'dir' : 'gguf', defaultPath, rapid ? '' : 'model');
+    openDeferredFileBrowser(
+      'spawn-model-path',
+      rapid ? 'dir' : 'gguf',
+      defaultPath,
+      { kind: 'model', engine: rapid ? 'rapid_mlx' : 'llama_cpp' },
+    );
   });
   dom.importBrowseBtn?.addEventListener('click', () => openModelFileBrowser('spawn-import-path', 'gguf', null, 'model'));
 
@@ -3927,8 +3937,15 @@ function _buildBrowseDropdown(dropdownEl, targetInputId, allDirs) {
 
     btn.addEventListener('click', () => {
       _closeBrowseDropdowns();
-      const ctx = targetInputId === 'spawn-model-path' ? 'model' : '';
-      openDeferredFileBrowser(targetInputId, 'gguf', dir, ctx);
+      const rapid = targetInputId === 'spawn-model-path' && wizardState.engine.selected === 'rapid_mlx';
+      const separator = dir.includes('\\') ? '\\' : '/';
+      const browseDir = rapid
+        ? dir.replace(/[\\/]+$/, '') + separator + ['mlx', 'native'].join(separator)
+        : dir.replace(/[\\/]+$/, '') + separator + 'gguf';
+      const ctx = targetInputId === 'spawn-model-path'
+        ? { kind: 'model', engine: rapid ? 'rapid_mlx' : 'llama_cpp' }
+        : 'model';
+      openDeferredFileBrowser(targetInputId, rapid ? 'dir' : 'gguf', browseDir, ctx);
     });
     dropdownEl.appendChild(btn);
   });

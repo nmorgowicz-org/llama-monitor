@@ -93,6 +93,24 @@ export function seedNestedMlxFixture() {
     }));
 }
 
+export function seedCanonicalMlxFixture() {
+    const fixtureDir = join(TEMP_APP_CONFIG_DIR, 'models', 'mlx', 'native', 'capture-native-mlx');
+    fs.mkdirSync(fixtureDir, { recursive: true });
+    fs.writeFileSync(join(fixtureDir, 'config.json'), JSON.stringify({
+        model_type: 'qwen3_6',
+        hidden_size: 1024,
+        num_hidden_layers: 8,
+        num_attention_heads: 8,
+        num_key_value_heads: 2,
+    }));
+    fs.writeFileSync(join(fixtureDir, 'model.safetensors.index.json'), JSON.stringify({
+        metadata: { total_size: 400_000_000 },
+        weight_map: { 'model.embed_tokens.weight': 'model.safetensors' },
+    }));
+    fs.writeFileSync(join(fixtureDir, 'tokenizer.json'), '{}');
+    fs.writeFileSync(join(fixtureDir, 'model.safetensors'), 'capture weights');
+}
+
 export function seedModelsDirFixture() {
     const modelsDir = join(TEMP_APP_CONFIG_DIR, 'models');
     fs.mkdirSync(modelsDir, { recursive: true });

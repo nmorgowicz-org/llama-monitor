@@ -56,6 +56,11 @@
     width: min(760px, var(--modal-available-width));
 }
 
+#file-browser-modal .file-browser-modal.file-browser-modal--model {
+    width: min(1120px, var(--modal-available-width));
+    max-width: 1120px;
+}
+
 #settings-modal > .modal {
     width: min(960px, var(--modal-available-width));
 }

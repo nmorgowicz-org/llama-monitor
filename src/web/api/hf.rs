@@ -614,11 +614,19 @@ fn api_hf_download_dir(
                 let dir =
                     get_effective_models_dir(&st).unwrap_or_else(|| cfg.default_models_dir.clone());
                 let configured = get_effective_models_dir(&st).is_some();
+                let external_hf_cache = crate::models::external_cache::shared_hub();
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
                         "ok": true,
                         "dir": dir.to_string_lossy(),
-                        "configured": configured
+                        "configured": configured,
+                        "locations": {
+                            "library_root": dir,
+                            "gguf": dir.join("gguf"),
+                            "mlx_native": dir.join("mlx/native"),
+                            "managed_hf_cache": dir.join("cache/huggingface/hub"),
+                            "external_hf_cache": external_hf_cache,
+                        }
                     }),
                 )))
             }
@@ -1232,8 +1240,16 @@ fn api_hf_download(
 
                 let repo_id = body["repo_id"].as_str().unwrap_or("").trim().to_string();
                 let file_path = body["file_path"].as_str().unwrap_or("").trim().to_string();
-                let target_path: Option<String> =
-                    body["target_path"].as_str().map(|s| s.trim().to_string());
+                let target_path: Option<String> = body["target_path"]
+                    .as_str()
+                    .map(|s| s.trim().to_string())
+                    .or_else(|| {
+                        if file_path.to_ascii_lowercase().ends_with(".gguf") {
+                            Some("gguf".to_string())
+                        } else {
+                            Some("transformers".to_string())
+                        }
+                    });
                 let save_as: Option<String> =
                     body["save_as"].as_str().map(|s| s.trim().to_string());
                 let resume: bool = body["resume"].as_bool().unwrap_or(false);

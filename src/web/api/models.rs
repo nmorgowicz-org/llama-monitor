@@ -510,6 +510,55 @@ fn api_delete_model_directory(
         )
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct DeleteManagedCacheRequest {
+    repo_id: String,
+}
+
+fn api_delete_managed_hf_repo(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "library" / "cache")
+        .and(warp::delete())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<DeleteManagedCacheRequest>())
+        .and_then(
+            move |auth: Option<String>, request: DeleteManagedCacheRequest| {
+                let state = state.clone();
+                let config = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &config) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let models_dir = get_effective_models_dir(&state)
+                        .unwrap_or_else(|| config.default_models_dir.clone());
+                    let removed = tokio::task::spawn_blocking(move || {
+                        crate::models::library::delete_managed_hf_repo(
+                            &models_dir,
+                            &request.repo_id,
+                        )
+                    })
+                    .await;
+                    match removed {
+                        Ok(Ok(bytes)) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                            &serde_json::json!({"ok": true, "freed_bytes": bytes}),
+                        ))
+                            as Box<dyn warp::reply::Reply>),
+                        Ok(Err(error)) => Ok(error_reply(
+                            warp::http::StatusCode::BAD_REQUEST,
+                            format!("{error:#}"),
+                        )),
+                        Err(error) => Ok(error_reply(
+                            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                            error,
+                        )),
+                    }
+                }
+            },
+        )
+}
+
 /// Expand a leading `~` so a user can type the path they see in a shell.
 ///
 /// Only the leading component, and only `~` alone: `~other` is left untouched rather than
@@ -1029,7 +1078,8 @@ fn api_models_download_start(
                 };
 
                 let target_dir = get_effective_models_dir(&state)
-                    .unwrap_or_else(|| cfg.default_models_dir.clone());
+                    .unwrap_or_else(|| cfg.default_models_dir.clone())
+                    .join("gguf");
 
                 let hf_token = crate::hf::hf_load_token();
 
@@ -1052,6 +1102,80 @@ fn api_models_download_start(
                             "error": format!("Failed to start download: {}", e)
                         })),
                     )),
+                }
+            }
+        })
+}
+
+fn api_models_download_resume(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "download" / "resume")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let state = state.clone();
+            let config = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+                let raw_path = body["path"].as_str().unwrap_or("");
+                let path = expand_user_path(raw_path);
+                let models_dir = get_effective_models_dir(&state)
+                    .unwrap_or_else(|| config.default_models_dir.clone());
+                let root = match models_dir.canonicalize() {
+                    Ok(root) => root,
+                    Err(error) => {
+                        return Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, error));
+                    }
+                };
+                let canonical = match path.canonicalize() {
+                    Ok(path) if path.starts_with(&root) => path,
+                    _ => {
+                        return Ok(error_reply(
+                            warp::http::StatusCode::BAD_REQUEST,
+                            "Resume path is outside the model library",
+                        ));
+                    }
+                };
+                if !canonical.to_string_lossy().ends_with(".part") {
+                    return Ok(error_reply(
+                        warp::http::StatusCode::BAD_REQUEST,
+                        "Resume path must be a .part file",
+                    ));
+                }
+                let Some(metadata) = crate::model_download::load_resume_metadata(&canonical) else {
+                    return Ok(error_reply(
+                        warp::http::StatusCode::BAD_REQUEST,
+                        "This partial download has no app-owned resume metadata",
+                    ));
+                };
+                let filename = metadata
+                    .save_as
+                    .clone()
+                    .or_else(|| metadata.file_path.rsplit('/').next().map(str::to_owned));
+                let Some(filename) = filename else {
+                    return Ok(error_reply(
+                        warp::http::StatusCode::BAD_REQUEST,
+                        "Resume metadata has no destination filename",
+                    ));
+                };
+                let target_dir = canonical.parent().unwrap_or(&root).to_path_buf();
+                match crate::model_download::start_download(
+                    &metadata.repo_id,
+                    &metadata.file_path,
+                    Some(&filename),
+                    &target_dir,
+                    crate::hf::hf_load_token(),
+                ) {
+                    Ok(download_id) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                        &serde_json::json!({"ok": true, "download_id": download_id}),
+                    ))
+                        as Box<dyn warp::reply::Reply>),
+                    Err(error) => Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, error)),
                 }
             }
         })
@@ -1886,10 +2010,13 @@ fn api_delete_model_file(
                     }
                 };
 
-                if !path_str.to_lowercase().ends_with(".gguf") {
+                let lower_path = path_str.to_ascii_lowercase();
+                let is_gguf = lower_path.ends_with(".gguf");
+                let is_partial = lower_path.ends_with(".part");
+                if !is_gguf && !is_partial {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": "only .gguf files can be deleted"}),
+                            &serde_json::json!({"ok": false, "error": "only .gguf or .part files can be deleted"}),
                         ),
                     ));
                 }
@@ -1939,6 +2066,17 @@ fn api_delete_model_file(
 
                 match std::fs::remove_file(&canon) {
                     Ok(_) => {
+                        if is_partial {
+                            let sidecar = canon.with_extension("part.json");
+                            if let Err(error) = std::fs::remove_file(&sidecar)
+                                && error.kind() != std::io::ErrorKind::NotFound
+                            {
+                                eprintln!(
+                                    "[warn] could not clear resume metadata for {}: {error}",
+                                    sidecar.display()
+                                );
+                            }
+                        }
                         // Drop the file's provenance with the file. Leaving it behind would
                         // let a later, unrelated download that happens to reuse the name
                         // inherit an origin it does not have.
@@ -2325,6 +2463,10 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .boxed();
     r = r
+        .or(api_models_download_resume(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
         .or(api_models_download_cancel(state.clone(), config.clone()))
         .unify()
         .boxed();
@@ -2351,6 +2493,10 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .boxed();
     r = r
         .or(api_delete_model_file(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_delete_managed_hf_repo(state.clone(), config.clone()))
         .unify()
         .boxed();
     r = r
@@ -2436,6 +2582,16 @@ mod phase5_auth_tests {
                 "POST",
                 "/api/models/library/migration/preview",
                 Some(r#"{}"#),
+            ),
+            (
+                "POST",
+                "/api/models/download/resume",
+                Some(r#"{"path":"gguf/model.part"}"#),
+            ),
+            (
+                "DELETE",
+                "/api/models/library/cache",
+                Some(r#"{"repo_id":"org/model"}"#),
             ),
         ] {
             let mut request = warp::test::request().method(method).path(path);

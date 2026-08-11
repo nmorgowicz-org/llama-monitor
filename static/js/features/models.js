@@ -92,6 +92,8 @@ let rapidMlxLocalRequirement = 'Rapid-MLX local execution requires macOS on Appl
 
 let initialized = false;
 let inventoryCache = null;
+let modelLibraryRoot = '';
+let startupInventoryChecked = false;
 
 let communitySourcesState = {
     initialized: false,
@@ -207,6 +209,7 @@ async function loadModels({ refresh = false } = {}) {
             if (dirResp.ok && dirLabel) {
                 const dirInfo = await dirResp.json();
                 if (dirInfo.dir) {
+                    modelLibraryRoot = dirInfo.dir;
                     if (dirInfo.configured) {
                         dirLabel.textContent = dirInfo.dir;
                     } else {
@@ -227,6 +230,7 @@ async function loadModels({ refresh = false } = {}) {
             inventoryCache = await resp.json();
         }
         const models = inventoryCache || [];
+        renderLegacyMigrationNotice(models);
 
         const count = models.length;
         if (tabCount) tabCount.textContent = count ? String(count) : '';
@@ -370,6 +374,9 @@ function applyFilters(models) {
 function applySort(models) {
     const mode = prefs.sort || 'name-asc';
     return [...models].sort((a, b) => {
+        const attention = model => ({ incomplete: 0, converting: 1, invalid: 2 }[model.lifecycle] ?? 3);
+        const attentionDiff = attention(a) - attention(b);
+        if (attentionDiff !== 0) return attentionDiff;
         switch (mode) {
             case 'name-asc':
                 return (a.model_name || a.filename || '').localeCompare(b.model_name || b.filename || '');
@@ -408,6 +415,78 @@ function applySearch(models) {
             .toLowerCase();
         return haystack.includes(q);
     });
+}
+
+function renderLegacyMigrationNotice(models) {
+    const notice = document.getElementById('mm-legacy-migration-notice');
+    if (!notice) return;
+    const legacy = models.filter(model => model.legacy_location);
+    notice.hidden = legacy.length === 0;
+    if (!legacy.length || notice.dataset.wired === '1') return;
+    notice.dataset.wired = '1';
+    const count = notice.querySelector('[data-legacy-count]');
+    if (count) count.textContent = String(legacy.length);
+    notice.querySelector('[data-migrate-legacy]')?.addEventListener('click', migrateLegacyLibrary);
+}
+
+async function migrateLegacyLibrary() {
+    try {
+        const headers = window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' };
+        const preview = await fetch('/api/models/library/migration/preview', {
+            method: 'POST', headers, body: '{}',
+        });
+        const plan = await preview.json().catch(() => ({}));
+        if (!preview.ok) throw new Error(plan.error || 'Could not preview legacy migration');
+        if (!plan.moves?.length) {
+            showToast('The library is already organized.', 'info');
+            return;
+        }
+        const confirmed = await _showConfirm(
+            'Organize legacy model files',
+            `${plan.moves.length} file(s) will move into gguf/ and .staging/downloads/. Existing files are never overwritten. Continue?`,
+        );
+        if (!confirmed) return;
+        const tokenResponse = await fetch('/api/db/admin-token', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        const tokenData = await tokenResponse.json().catch(() => ({}));
+        if (!tokenResponse.ok || !tokenData.token) throw new Error('DB admin authorization is unavailable');
+        const execute = await fetch('/api/models/library/migration/execute', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${tokenData.token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ plan_id: plan.plan_id, confirmation: 'MIGRATE_MODEL_LIBRARY' }),
+        });
+        const result = await execute.json().catch(() => ({}));
+        if (!execute.ok || !result.ok) throw new Error(result.error || 'Legacy migration failed');
+        showToast(`Organized ${plan.moves.length} legacy model file(s)`, 'success');
+        invalidateModelInventory();
+        await loadModels({ refresh: true });
+    } catch (error) {
+        showToast(`Legacy migration failed: ${error.message || error}`, 'error');
+    }
+}
+
+async function notifyIncompleteDownloadsAtStartup() {
+    if (startupInventoryChecked) return;
+    startupInventoryChecked = true;
+    try {
+        const response = await fetch('/api/models', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        if (!response.ok) return;
+        const models = await response.json();
+        const incomplete = models.filter(model => model.lifecycle === 'incomplete' || model.lifecycle === 'converting');
+        if (incomplete.length) {
+            showToast(
+                `${incomplete.length} incomplete model download${incomplete.length === 1 ? '' : 's'} need attention. Open Model Library to resume or remove them.`,
+                'warning',
+            );
+        }
+    } catch {
+        // Startup notification is advisory; opening the Library performs the authoritative scan.
+    }
 }
 
 // Where a model came from, for the card's lineage row.
@@ -802,27 +881,48 @@ function buildModelCard(m) {
         actions.appendChild(explainBtn);
     }
 
+    if (m.resume_download) {
+        const resumeBtn = document.createElement('button');
+        resumeBtn.type = 'button';
+        resumeBtn.className = 'mm-action-btn mm-action-btn--switch';
+        resumeBtn.textContent = 'Resume download';
+        resumeBtn.title = `Resume ${m.resume_download.repo_id}/${m.resume_download.file_path}`;
+        resumeBtn.addEventListener('click', () => resumeModelDownload(m.path));
+        actions.appendChild(resumeBtn);
+    }
+
     // Two delete paths, because a single-file model and a directory-shaped one have
     // different endpoints and different safety arguments. A GGUF goes through the
     // suffix-validated file delete; MLX and Transformers directories go through the
     // library's managed-directory delete, which only accepts an immediate child of a
     // managed root. Anything else — notably HF cache snapshots, whose bytes live in a
-    // shared blob store — gets no button here, and is reclaimed per repo on the Disk tab.
+    // shared blob store — deletes the owning app-managed repo, not an individual snapshot.
     const isGgufFile = inventory.format === 'gguf' && (m.path || '').toLowerCase().endsWith('.gguf');
     const isManagedDirectory = MANAGED_DIRECTORY_FORMATS.has(inventory.format)
         && MANAGED_DIRECTORY_SOURCES.has(inventory.source);
-    if (isGgufFile || isManagedDirectory) {
+    const isManagedCache = !!m.managed_cache_repo;
+    const isPartialFile = inventory.lifecycle === 'incomplete'
+        && (m.path || '').toLowerCase().endsWith('.part');
+    if (isGgufFile || isManagedDirectory || isManagedCache || isPartialFile) {
         const deleteBtn = document.createElement('button');
         deleteBtn.type = 'button';
         deleteBtn.className = 'mm-action-btn mm-action-delete';
-        deleteBtn.title = isGgufFile
-            ? 'Delete this model from library'
-            : 'Delete this model directory from library';
+        deleteBtn.title = isPartialFile
+            ? 'Delete incomplete download'
+            : isManagedCache
+            ? `Delete cached Hugging Face repository ${m.managed_cache_repo}`
+            : isGgufFile
+                ? 'Delete this model from library'
+                : 'Delete this model directory from library';
         deleteBtn.setAttribute('aria-label', deleteBtn.title);
         deleteBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
-        deleteBtn.addEventListener('click', () => (isGgufFile
-            ? deleteModel(m.path, m.filename || name)
-            : deleteModelDirectory(m.path, m.filename || name, m.size_display)));
+        deleteBtn.addEventListener('click', () => (isPartialFile
+            ? deletePartialModel(m.path, m.filename || name)
+            : isManagedCache
+            ? deleteManagedCache(m.managed_cache_repo, name, m.size_display)
+            : isGgufFile
+                ? deleteModel(m.path, m.filename || name)
+                : deleteModelDirectory(m.path, m.filename || name, m.size_display)));
         actions.appendChild(deleteBtn);
     }
 
@@ -1133,6 +1233,49 @@ function buildPresetSummary(presets) {
     return `Saved presets (${presets.length}): ${summary} +${presets.length - 1} more`;
 }
 
+async function resumeModelDownload(path) {
+    try {
+        const resp = await fetch('/api/models/download/resume', {
+            method: 'POST',
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok) throw new Error(data.error || 'Resume failed');
+        showToast('Download resumed', 'success');
+        invalidateModelInventory();
+        await loadModels({ refresh: true });
+    } catch (error) {
+        showToast(`Could not resume download: ${error.message || error}`, 'error');
+    }
+}
+
+async function deleteManagedCache(repoId, name, sizeDisplay) {
+    const confirmed = await _showConfirm(
+        'Delete cached Hugging Face repository',
+        `${repoId}\n${name}${sizeDisplay ? ` · ${sizeDisplay}` : ''}\n\nThis removes the app-managed repository, snapshots, and shared blobs from the library cache. This action cannot be undone.`,
+    );
+    if (!confirmed) return;
+    try {
+        const resp = await fetch('/api/models/library/cache', {
+            method: 'DELETE',
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ repo_id: repoId }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok) throw new Error(data.error || 'Cache deletion failed');
+        showToast(`Deleted ${repoId} from the model library cache`, 'success');
+        invalidateModelInventory();
+        await loadModels({ refresh: true });
+    } catch (error) {
+        showToast(`Cache deletion failed: ${error.message || error}`, 'error');
+    }
+}
+
 async function deleteModel(path, filename) {
     const presets = findPresetsForModel({ path });
     const extra = presets.length
@@ -1164,6 +1307,30 @@ async function deleteModel(path, filename) {
         await loadModels({ refresh: true });
     } catch (err) {
         showToast('Delete failed: ' + err.message, 'error');
+    }
+}
+
+async function deletePartialModel(path, filename) {
+    const confirmed = await _showConfirm(
+        'Delete incomplete download',
+        `"${escapeHtml(filename)}"\nPath: ${escapeHtml(path)}\n\nThis removes the partial file and its resume metadata. This action cannot be undone.`,
+    );
+    if (!confirmed) return;
+    try {
+        const resp = await fetch('/api/models/file', {
+            method: 'DELETE',
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path }),
+        });
+        const data = await resp.json().catch(() => ({ ok: false, error: 'Malformed response' }));
+        if (!resp.ok || !data.ok) throw new Error(data.error || resp.statusText || 'unknown');
+        showToast('Incomplete download deleted', 'success');
+        invalidateModelInventory();
+        await loadModels({ refresh: true });
+    } catch (error) {
+        showToast(`Delete failed: ${error.message || error}`, 'error');
     }
 }
 
@@ -1925,7 +2092,13 @@ async function initImportLab() {
             if (event.key === 'Enter') analyzeImportSource();
         });
         document.getElementById('mm-import-jobs-refresh')?.addEventListener('click', loadImportJobs);
+        document.getElementById('mm-import-library-use')?.addEventListener('click', () => {
+            const select = document.getElementById('mm-import-library-select');
+            const input = document.getElementById('mm-import-source');
+            if (select?.value && input) input.value = select.value;
+        });
     }
+    await populateImportLibraryChoices();
     try {
         importLabAvailability = await importLabJson('/api/models/import-lab/availability', {
             headers: apiHeaders(),
@@ -1941,6 +2114,29 @@ async function initImportLab() {
         showToast(`Import Lab availability failed: ${error.message}`, 'error');
     }
     await loadImportJobs();
+}
+
+async function populateImportLibraryChoices() {
+    if (!inventoryCache) {
+        try {
+            const response = await fetch('/api/models', { headers: window.authHeaders ? window.authHeaders() : {} });
+            if (response.ok) inventoryCache = await response.json();
+        } catch {
+            return;
+        }
+    }
+    const select = document.getElementById('mm-import-library-select');
+    if (!select) return;
+    const dir = modelLibraryRoot;
+    const entries = inventoryCache.filter(model => model.format === 'gguf' && model.lifecycle === 'ready');
+    select.replaceChildren(new Option('Choose a GGUF from your library…', ''));
+    entries.forEach(model => {
+        const absolute = model.path || '';
+        const relative = dir && absolute.startsWith(dir + '/') ? absolute.slice(dir.length + 1) : '';
+        if (relative) {
+            select.appendChild(new Option(`${model.model_name || model.filename} · ${relative}`, relative));
+        }
+    });
 }
 
 async function analyzeImportSource() {
@@ -2485,6 +2681,7 @@ function initCommunitySourcesTab() {
 export function initModels() {
     if (initialized) return;
     initialized = true;
+    void notifyIncompleteDownloadsAtStartup();
 
     // Initialize toolbar structure once (search, sort, view controls)
     ensureLibraryToolbar();

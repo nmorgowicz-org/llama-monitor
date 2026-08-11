@@ -22,7 +22,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures_util::StreamExt;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Notify;
@@ -41,6 +41,24 @@ pub struct DownloadStatus {
     pub message: String,
     /// Absolute filesystem path where the file is being saved.
     pub local_path: String,
+}
+
+/// Persisted beside an interrupted `.part` file so a restart can offer a real
+/// resume action instead of asking the user to reconstruct the Hugging Face
+/// repository and filename.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DownloadResumeMetadata {
+    pub repo_id: String,
+    pub file_path: String,
+    pub save_as: Option<String>,
+}
+
+pub fn resume_metadata_path(part_path: &Path) -> std::path::PathBuf {
+    part_path.with_extension("part.json")
+}
+
+pub fn load_resume_metadata(part_path: &Path) -> Option<DownloadResumeMetadata> {
+    serde_json::from_reader(std::fs::File::open(resume_metadata_path(part_path)).ok()?).ok()
 }
 
 /// Specific reasons why `start_download` refused to begin.
@@ -217,6 +235,21 @@ pub fn start_download(
     if let Err(e) = std::fs::create_dir_all(target_dir) {
         return Err(DownloadStartError::Generic(format!(
             "Failed to create model directory: {e}"
+        )));
+    }
+
+    let part_path = local_path.with_extension("part");
+    let resume_metadata = DownloadResumeMetadata {
+        repo_id: repo_id_owned.clone(),
+        file_path: file_path_owned.clone(),
+        save_as: save_as.map(str::to_owned),
+    };
+    if let Err(error) = std::fs::write(
+        resume_metadata_path(&part_path),
+        serde_json::to_vec_pretty(&resume_metadata).unwrap_or_default(),
+    ) {
+        return Err(DownloadStartError::Generic(format!(
+            "Failed to record resumable download metadata: {error}"
         )));
     }
 
@@ -597,6 +630,8 @@ async fn run_download(
         eprintln!("[warn] could not record provenance  file={file_path}  error={e}");
     }
 
+    let _ = std::fs::remove_file(resume_metadata_path(&local_path.with_extension("part")));
+
     if is_tty {
         let elapsed = stream_start.elapsed().as_secs_f64();
         let transferred = written.saturating_sub(resume_from);
@@ -683,6 +718,7 @@ fn set_failed(task: &Arc<Mutex<DownloadTask>>, msg: String) {
             path.display()
         );
         let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(resume_metadata_path(&path.with_extension("part")));
     }
 }
 
@@ -873,4 +909,37 @@ pub fn cancel_download(download_id: &str) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resume_metadata_round_trips_beside_partial_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("model.gguf.part");
+        std::fs::write(&part, b"partial").unwrap();
+        let metadata = DownloadResumeMetadata {
+            repo_id: "org/model".into(),
+            file_path: "model.gguf".into(),
+            save_as: Some("model.gguf".into()),
+        };
+        std::fs::write(
+            resume_metadata_path(&part),
+            serde_json::to_vec(&metadata).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(load_resume_metadata(&part).unwrap().repo_id, "org/model");
+        assert_eq!(load_resume_metadata(&part).unwrap().file_path, "model.gguf");
+    }
+
+    #[test]
+    fn missing_resume_metadata_is_degraded_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("legacy.gguf.part");
+        std::fs::write(&part, b"partial").unwrap();
+        assert!(load_resume_metadata(&part).is_none());
+    }
 }

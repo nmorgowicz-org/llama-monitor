@@ -379,6 +379,15 @@ fn main() -> Result<()> {
     let chat_db_path = app_config.config_dir.join("chat.db");
     let chat_storage = Arc::new(ChatStorage::open(&chat_db_path).context("opening chat.db")?);
 
+    let model_library_root = app_config
+        .models_dir
+        .clone()
+        .unwrap_or_else(|| app_config.default_models_dir.clone());
+    crate::models::library::ensure_model_tree(
+        &model_library_root,
+        cfg!(target_os = "macos") && cfg!(target_arch = "aarch64"),
+    );
+
     // Migrate from legacy chat-tabs.json (best-effort)
     let legacy = app_config.config_dir.join("chat-tabs.json");
     if let Err(e) = chat_storage.migrate_from_legacy(&legacy) {

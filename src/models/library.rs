@@ -19,6 +19,37 @@ const MAX_INVENTORY_ENTRIES: usize = 10_000;
 const MAX_PROVENANCE_BYTES: u64 = 64 * 1024;
 pub const HF_SOURCE_METADATA_NAME: &str = ".llama-monitor-source.json";
 
+/// Create the canonical model-library skeleton without touching existing files.
+///
+/// This is intentionally best-effort: a read-only or user-owned models directory should
+/// not prevent the application from starting, but each failure is visible in the log.
+pub fn ensure_model_tree(models_dir: &Path, include_mlx: bool) {
+    let mut directories = vec![
+        models_dir.join("gguf"),
+        models_dir.join("transformers"),
+        models_dir.join("cache/huggingface/hub"),
+        models_dir.join("cache/huggingface/xet"),
+        models_dir.join(".staging/downloads"),
+    ];
+    if include_mlx {
+        directories.extend([
+            models_dir.join("mlx/native"),
+            models_dir.join("mlx/converted"),
+            models_dir.join("rapid-mlx/imports"),
+            models_dir.join("rapid-mlx/mtp-sidecars"),
+            models_dir.join("rapid-mlx/requantized"),
+        ]);
+    }
+    for directory in directories {
+        if let Err(error) = fs::create_dir_all(&directory) {
+            eprintln!(
+                "[warn] could not create model-library directory {}: {error}",
+                directory.display()
+            );
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum InventoryFormat {
@@ -90,6 +121,10 @@ pub struct ModelInventoryEntry {
     pub supported_backends: Vec<InferenceBackend>,
     pub companion_kind: Option<CompanionKind>,
     pub legacy_location: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub managed_cache_repo: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resume_download: Option<crate::model_download::DownloadResumeMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_source: Option<RapidMlxModelSource>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -332,6 +367,8 @@ fn from_gguf(
         supported_backends: vec![InferenceBackend::LlamaCpp],
         companion_kind,
         legacy_location: legacy,
+        managed_cache_repo: None,
+        resume_download: None,
         model_source: Some(RapidMlxModelSource::GgufFile {
             path: model.path.clone(),
         }),
@@ -467,7 +504,16 @@ fn add_hf_snapshots(
             let valid =
                 crate::inference::rapid_mlx::model_resolver::validate_model_directory(&path, root)
                     .is_ok();
-            let model_source = read_source_metadata(&path);
+            let repo_id = hf_repo_id_from_cache_dir(&path);
+            let revision = snapshot.file_name().to_string_lossy().into_owned();
+            let model_source = read_source_metadata(&path).or_else(|| {
+                repo_id
+                    .clone()
+                    .map(|repo_id| RapidMlxModelSource::HuggingFaceRepo {
+                        repo_id,
+                        revision: revision.clone(),
+                    })
+            });
             let format = match model_source.as_ref() {
                 Some(RapidMlxModelSource::HuggingFaceRepo { .. }) => InventoryFormat::Mlx,
                 Some(RapidMlxModelSource::AuthoritativeSafetensors { .. }) => {
@@ -478,7 +524,7 @@ fn add_hf_snapshots(
             entries.push(directory_entry(
                 &path,
                 format,
-                if model_source.is_some() {
+                if repo_id.is_some() || model_source.is_some() {
                     InventorySource::HuggingFace
                 } else {
                     InventorySource::Unknown
@@ -500,6 +546,13 @@ fn add_hf_snapshots(
                 None,
                 root,
             )?);
+            if let Some(entry) = entries.last_mut() {
+                entry.managed_cache_repo = repo_id;
+                entry.model_name = entry
+                    .managed_cache_repo
+                    .clone()
+                    .or_else(|| Some(revision.clone()));
+            }
         }
     }
     Ok(())
@@ -621,6 +674,8 @@ fn directory_entry(
         },
         companion_kind: None,
         legacy_location: legacy,
+        managed_cache_repo: None,
+        resume_download: None,
         model_source,
         provenance,
         download_provenance,
@@ -659,6 +714,8 @@ fn file_entry(
         supported_backends: Vec::new(),
         companion_kind: None,
         legacy_location: legacy,
+        managed_cache_repo: None,
+        resume_download: crate::model_download::load_resume_metadata(path),
         model_source: None,
         provenance: None,
         // `file_entry` builds the card for a `.part` -- an interrupted download. The sidecar
@@ -667,12 +724,103 @@ fn file_entry(
     })
 }
 
+fn hf_repo_id_from_cache_dir(path: &Path) -> Option<String> {
+    let repo = path.parent()?.parent()?.file_name()?.to_str()?;
+    let encoded = repo.strip_prefix("models--")?;
+    let (owner, name) = encoded.split_once("--")?;
+    if owner.is_empty() || name.is_empty() {
+        return None;
+    }
+    Some(format!("{owner}/{name}"))
+}
+
+pub fn delete_managed_hf_repo(models_dir: &Path, repo_id: &str) -> Result<u64> {
+    let (owner, name) = repo_id
+        .split_once('/')
+        .ok_or_else(|| anyhow!("Invalid Hugging Face repository id"))?;
+    if owner.is_empty()
+        || name.is_empty()
+        || !repo_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'-' | b'_' | b'.'))
+    {
+        bail!("Invalid Hugging Face repository id");
+    }
+    let root = canonical_library_root(models_dir)?;
+    let hub = root.join("cache/huggingface/hub");
+    let repo_path = hub.join(format!("models--{owner}--{name}"));
+    let metadata = fs::symlink_metadata(&repo_path)
+        .with_context(|| format!("Managed Hugging Face repository not found: {repo_id}"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        bail!("Managed Hugging Face repository is not a regular directory");
+    }
+    ensure_existing_inside(&root, &repo_path)?;
+    let bytes = bounded_directory_size(&repo_path, &root, 100_000)?.0;
+    fs::remove_dir_all(&repo_path)?;
+    let lock_path = hub.join(".locks").join(format!("models--{owner}--{name}"));
+    if lock_path.exists() {
+        if fs::symlink_metadata(&lock_path)?.file_type().is_symlink() {
+            bail!("Refusing to remove symlinked Hugging Face lock directory");
+        }
+        fs::remove_dir_all(lock_path)?;
+    }
+    Ok(bytes)
+}
+
 fn read_source_metadata(path: &Path) -> Option<RapidMlxModelSource> {
     let metadata = path.join(HF_SOURCE_METADATA_NAME);
     if metadata.metadata().ok()?.len() > MAX_PROVENANCE_BYTES {
         return None;
     }
     serde_json::from_reader(fs::File::open(metadata).ok()?).ok()
+}
+
+#[cfg(test)]
+mod library_regression_tests {
+    use super::*;
+
+    #[test]
+    fn model_tree_creation_is_idempotent_and_platform_scoped() {
+        let dir = tempfile::tempdir().unwrap();
+        ensure_model_tree(dir.path(), false);
+        assert!(dir.path().join("gguf").is_dir());
+        assert!(dir.path().join("transformers").is_dir());
+        assert!(!dir.path().join("mlx/native").exists());
+
+        ensure_model_tree(dir.path(), true);
+        assert!(dir.path().join("mlx/native").is_dir());
+        assert!(dir.path().join("rapid-mlx/imports").is_dir());
+        ensure_model_tree(dir.path(), true);
+    }
+
+    #[test]
+    fn managed_cache_repo_id_is_read_from_snapshot_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        let snapshot = dir
+            .path()
+            .join("cache/huggingface/hub/models--mlx-community--Qwen3-4bit/snapshots/rev0");
+        fs::create_dir_all(&snapshot).unwrap();
+        assert_eq!(
+            hf_repo_id_from_cache_dir(&snapshot).as_deref(),
+            Some("mlx-community/Qwen3-4bit")
+        );
+    }
+
+    #[test]
+    fn deleting_managed_cache_repo_removes_only_that_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let hub = dir.path().join("cache/huggingface/hub");
+        let doomed = hub.join("models--org--doomed/blobs");
+        let keeper = hub.join("models--org--keeper/blobs");
+        fs::create_dir_all(&doomed).unwrap();
+        fs::create_dir_all(&keeper).unwrap();
+        fs::write(doomed.join("blob"), b"doomed").unwrap();
+        fs::write(keeper.join("blob"), b"keeper").unwrap();
+
+        delete_managed_hf_repo(dir.path(), "org/doomed").unwrap();
+        assert!(!hub.join("models--org--doomed").exists());
+        assert!(hub.join("models--org--keeper").exists());
+    }
 }
 
 fn bounded_directory_size(
@@ -1094,6 +1242,22 @@ fn collect_migration_moves(
             source: entry.path(),
             destination,
         });
+        if include_partials && lower.ends_with(".part") {
+            let sidecar = entry.path().with_extension("part.json");
+            if sidecar.is_file() {
+                let sidecar_destination = models_root
+                    .join(".staging/downloads")
+                    .join(sidecar.file_name().unwrap_or_default());
+                if sidecar_destination.exists() {
+                    bail!("Migration collision: {}", sidecar_destination.display());
+                }
+                validate_new_destination(models_root, &sidecar_destination)?;
+                moves.push(MigrationMove {
+                    source: sidecar,
+                    destination: sidecar_destination,
+                });
+            }
+        }
     }
     Ok(())
 }

@@ -5,7 +5,7 @@ import {
     DEFAULT_VIEWPORT, RUNNING_PORT, setArtifactCategory, setArtifactRuntime,
 } from './harness/paths.mjs';
 import { seedConfig, findAvailablePort, spawnLlamaMonitor, cleanupServer, cleanupTempHome } from './harness/server.mjs';
-import { seedRapidMlxCapturePreset, seedNestedMlxFixture, seedModelsDirFixture } from './harness/fixtures.mjs';
+import { seedRapidMlxCapturePreset, seedNestedMlxFixture, seedCanonicalMlxFixture, seedModelsDirFixture } from './harness/fixtures.mjs';
 import { launchBrowser } from './harness/browser.mjs';
 import { cleanupFrames } from './harness/shot.mjs';
 import { beginCaptureReceipt, finishCaptureReceipt } from './harness/receipt.mjs';
@@ -23,6 +23,7 @@ import scenarioModels from './scenarios/models/models.mjs';
 import scenarioModelsV2 from './scenarios/models/models-v2.mjs';
 import scenarioModelDiscovery from './scenarios/models/model-discovery.mjs';
 import scenarioFilebrowser from './scenarios/models/filebrowser.mjs';
+import scenarioModelBrowser from './scenarios/models/model-browser.mjs';
 import scenarioPresetEditor from './scenarios/presets/preset-editor.mjs';
 import scenarioRapidPreset from './scenarios/presets/rapid-preset.mjs';
 import scenarioEvidenceDrawer from './scenarios/presets/evidence-drawer.mjs';
@@ -124,6 +125,7 @@ Scenarios:
     settings         Settings modal, preferences, persona, models, shortcuts
     tls              TLS modes and ACME (Certificates tab, each TLS mode, custom certs, ACME config)
     filebrowser      File browser modal (Browse buttons in Config modal, modal open)
+    model-browser    Intent-aware model picker from the Spawn Wizard (Rapid-MLX and llama.cpp)
     panels           Chat config panels (behavior, model, style, debug)
     dashboard        Server tab, GPU section
     dashboard-rapid-mlx  Deterministic Rapid-MLX telemetry cards (dark and light)
@@ -208,6 +210,16 @@ export const SCENARIOS = {
     'appearance-palette': { run: scenarioAppearancePalette, category: 'config', runtime: 'neutral' },
     'tls': { run: scenarioTls, category: 'config', runtime: 'neutral' },
     'filebrowser': { run: scenarioFilebrowser, category: 'models', runtime: 'neutral' },
+    'model-browser': {
+        run: scenarioModelBrowser,
+        setup: () => {
+            const extraArgs = seedModelsDirFixture();
+            seedCanonicalMlxFixture();
+            return { extraArgs };
+        },
+        category: 'models',
+        runtime: 'neutral',
+    },
     'panels': { run: scenarioPanels, setup: () => ({ extraArgs: seedModelsDirFixture() }), category: 'core', runtime: 'neutral' },
     'models': { run: scenarioModels, setup: () => ({ extraArgs: seedModelsDirFixture() }), category: 'models', runtime: 'neutral' },
     'dashboard': { run: scenarioDashboard, source: 'remote', category: 'core', runtime: 'neutral' },

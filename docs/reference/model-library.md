@@ -27,6 +27,18 @@ collisions and symlink escapes, and rewrites preset, session, draft, mmproj, and
 path-keyed tag references. Files with other extensions, including chat-template
 `.jinja` files, are not moved.
 
+New GGUF downloads go to `gguf/`. Downloads that stop during a transient network
+failure are retained as `<filename>.part` beside a small `<filename>.part.json` resume
+record; the Library card offers Resume when that record is present. A legacy partial
+without resume metadata remains visible at the top of the list with an orange warning
+and can be deleted from the card.
+
+At startup, Llama Monitor idempotently creates the canonical GGUF, Transformers, HF
+cache, staging, and download directories. On Apple Silicon it also creates the native
+MLX, converted-MLX, and Rapid-MLX experimental directories. This creates no files from
+legacy models and never moves or overwrites an existing user path; the migration action
+remains explicit.
+
 Migration is never automatic. Preview the exact plan with an API token, then execute
 that same `plan_id` with the database-admin token and the explicit confirmation value.
 
@@ -57,6 +69,13 @@ Recovered and re-quantized caches appear as first-class MLX cards with their sou
 recipe, and `Experimental` badges. They deliberately have no supported backend and no
 launch action. Visibility is not a promotion: only a future architecture gate can make
 one launchable.
+
+The Disk tab separately audits the user-wide Hugging Face cache
+(`~/.cache/huggingface/hub`, or the platform-equivalent home cache). Importing a selected
+repository moves it into the managed library; deleting it removes it from the external
+cache. The Library does not silently delete external files. App-managed cache snapshots
+are represented as one repository and can be deleted from the Library card, including
+their snapshots and shared blobs.
 
 ## Experimental GGUF Import Lab
 
