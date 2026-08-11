@@ -19,7 +19,8 @@
 | 5 — path/config/resource default-root switch | Complete | Fresh canonical defaults, selected-root consumer routing, helper/docs updates, Windows early logging, and persisted-path policy receipt verified. |
 | 6 — model-library relocation path integration | Complete | Receipt-backed keep/move selection, resumable verified copy, persistence rewrites, and source-retention policy passed; native Windows qualification remains a Phase 12 marker. |
 | 7 — package, crate, binary, CLI, and backend identity | Complete | Canonical/legacy entrypoints, parity tests, release build, JS gates, and Windows GNU cross-check passed; native Windows execution remains a Phase 12 marker. |
-| 8+ — frontend, release, repository, and final qualification | Not started | Execute only after each preceding gate closes. |
+| 8 — frontend identity, migration UX, accessibility, and theme parity | In progress | Identity registry, Token Ingot surfaces, and migration UX are implemented; three reproducible pre-existing UI state/request failures remain before the full browser gate can close. |
+| 9+ — runtime, release, repository, and final qualification | Not started | Execute only after each preceding gate closes. |
 
 ### Phase closure blockers
 
@@ -36,6 +37,7 @@ acceptance gates, not implementation uncertainty.
 | 5 | Closed 2026-08-11: fresh canonical default, selected-root routing, helper/docs updates, Windows early logging, and persisted-path policy pass. Model relocation is isolated to Phase 6. |
 | 6 | Closed 2026-08-11 for source-level macOS/Linux and cross-target contract: model-root preview/keep-or-copy API, receipt-backed selection, hash/free-space/collision/symlink protections, resumable copy, persistence rewrites, Migration settings controls, and focused gates pass. Native Windows model-root qualification is an explicit Phase 12 return marker. |
 | 7 | Closed 2026-08-11: canonical package and binary, thin legacy alias, shared runner, CLI parity receipt, full Rust/JS/release gates, and Windows GNU target check pass. Native Windows launch and installed-binary discovery remain an explicit Phase 12 return marker. |
+| 8 | In progress 2026-08-11: frontend identity registry, Token Ingot browser/PWA surfaces, migration toast/controls, and auth-cookie compatibility are implemented. Full UI closure is blocked by three reproducible model inventory/KV use-case request-state failures; see the Phase 8 evidence receipt. |
 
 ## 1. Purpose and execution contract
 
@@ -1061,37 +1063,37 @@ provide non-destructive browser/auth compatibility and migration controls.
 
 **Tasks**
 
-- [ ] Replace browser title, manifest name/short name, favicon/touch/PWA icons,
+- [x] Replace browser title, manifest name/short name, favicon/touch/PWA icons,
   auth shell, navigation mark/title, welcome/setup mark/copy, compact title and
   heading, restart dialog, settings/help placeholders, recovery commands,
   update copy, remote-agent copy, toasts, dialogs, and notifications.
-- [ ] Replace duplicated inline marks with the shared production asset or safe
+- [x] Replace duplicated inline marks with the shared production asset or safe
   deterministic inline SVG; decorative marks are `aria-hidden`.
-- [ ] Add a small frontend identity module for dynamic product/CLI/repository
+- [x] Add a small frontend identity module for dynamic product/CLI/repository
   copy. Static HTML remains covered by the literal scan.
-- [ ] Preserve `llama.cpp`, `llama-server`, llama backend controls, and all
+- [x] Preserve `llama.cpp`, `llama-server`, llama backend controls, and all
   LibreHardwareMonitor/`LHM` terminology.
-- [ ] Implement the authenticated legacy-mode migration card, preview,
+- [x] Implement the authenticated legacy-mode migration card, preview,
   confirmation, queued-restart, progress/recovery, conflict, rollback, and
   cleanup UI.
-- [ ] When managed legacy model trees are detected, show a non-blocking toast
+- [x] When managed legacy model trees are detected, show a non-blocking toast
   linking to the migration card (using the established model-migration toast
   pattern). The toast must explain that models remain where they are until the
   user explicitly previews and executes relocation; dismissing it must not alter
   the effective model root.
-- [ ] Centralize and document existing `llama-monitor-*` and
+- [x] Centralize and document existing `llama-monitor-*` and
   `llama_monitor_*` browser keys as frozen 2.x compatibility identifiers.
   Add them to the literal-policy allowlist and test that the rebrand preserves
   every preference.
-- [ ] If a future phase renames browser keys, it must use a pre-bootstrap helper
+- [x] If a future phase renames browser keys, it must use a pre-bootstrap helper
   loaded before `bootstrap.js` and compact initialization; that migration is
   explicitly out of scope for 2.0 unless Nick overrides this decision.
-- [ ] Rename the cookie to `local_llm_foundry_session`; backend accepts both,
+- [x] Rename the cookie to `local_llm_foundry_session`; backend accepts both,
   login sets new, logout expires both. JavaScript never touches HttpOnly
   cookies.
-- [ ] Keep `sw.js` passthrough unless offline support is separately scoped;
+- [x] Keep `sw.js` passthrough unless offline support is separately scoped;
   do not invent Cache Storage migration.
-- [ ] Add light-theme styles, narrow behavior, focus/ARIA, forced-colors smoke,
+- [x] Add light-theme styles, narrow behavior, focus/ARIA, forced-colors smoke,
   and reduced-motion overrides for every new animation/transform.
 - [ ] Update/add focused Playwright tests and capture scenarios; do not capture
   final evidence until Phase 13.

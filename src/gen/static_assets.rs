@@ -52,6 +52,7 @@ pub const COMPAT_GLOBALS_JS: &str = include_str!("../../static/js/compat/globals
 pub const CONFIG_DOMPURIFY_INIT_JS: &str = include_str!("../../static/js/config/dompurify-init.js");
 pub const CORE_APP_STATE_JS: &str = include_str!("../../static/js/core/app-state.js");
 pub const CORE_FORMAT_JS: &str = include_str!("../../static/js/core/format.js");
+pub const CORE_IDENTITY_JS: &str = include_str!("../../static/js/core/identity.js");
 pub const CORE_PLATFORM_INFO_JS: &str = include_str!("../../static/js/core/platform-info.js");
 pub const CORE_TOOLTIP_JS: &str = include_str!("../../static/js/core/tooltip.js");
 pub const FEATURES_ANIMATE_JS: &str = include_str!("../../static/js/features/animate.js");

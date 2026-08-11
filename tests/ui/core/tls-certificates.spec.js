@@ -76,7 +76,7 @@ test.describe('TLS / Certificates settings', () => {
     // Domain input
     const fqdnInput = page.locator('#acme-fqdn');
     await expect(fqdnInput).toBeVisible();
-    await expect(fqdnInput).toHaveAttribute('placeholder', /llama-monitor\.example\.com/i);
+    await expect(fqdnInput).toHaveAttribute('placeholder', /foundry\.example\.com/i);
 
     // Environment controls - verify they exist in the ACME panel
     const stagingRadio = page.locator('#acme-env-staging');

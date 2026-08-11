@@ -5,6 +5,7 @@
 import './compat/globals.js'; // Set window.escapeHtml, window.formatMetricNumber
 
 import { chat } from './core/app-state.js';
+import { applyProductIdentity } from './core/identity.js';
 import { initDashboardRender } from './features/dashboard-render.js';
 import { initWebSocket } from './features/dashboard-ws.js';
 import { initPresets } from './features/presets.js';
@@ -55,6 +56,7 @@ import Router from './features/router.js';
 
 // Verify module loading works — if this fails, the page is broken.
 console.log('[bootstrap] Module entrypoint loaded');
+applyProductIdentity();
 
 // Helper for modules: returns headers object with Authorization if token is available.
 window.authHeaders = function(extra = {}) {
