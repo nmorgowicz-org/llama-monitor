@@ -1,0 +1,7 @@
+surface	current/legacy identifier	canonical 2.0 identifier	consumer	bridge policy	owner_phase
+cargo-package	llama-monitor	local-llm-foundry	Cargo/build/release-please	single package rename at coordinated cutover	7,11
+primary-binary	llama-monitor[.exe]	local-llm-foundry[.exe]	updater/launcher/users	canonical plus legacy launcher through 2.x	7,8,11
+archive-assets	llama-monitor-*	local-llm-foundry-*	release workflows/checksums	publish both names in 2.0.x; canonical only 2.1.0	11
+updater-parser	legacy artifact names	canonical artifact names	src/agent.rs/self-update	accept both names through 2.x; canonical preferred	8,11
+repository-url	nmorgowicz-org/llama-monitor	nmorgowicz-org/local-llm-foundry	README/docs/workflows	update after remote rename; preserve redirect	11,14
+pwa-manifest	Llama Monitor / llama-monitor	Local LLM Foundry / local-llm-foundry	browser install/update	canonical identity; old API/storage keys stable	1,7

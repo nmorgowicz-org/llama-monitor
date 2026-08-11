@@ -1,0 +1,73 @@
+asset	kind	current_role	classification	owner_phase	policy
+assets/brand/exports/linux/hicolor/128x128/apps/local-llm-foundry.png	png	functional or legacy UI mark	unrelated-functional-mark-or-legacy-mark	1,7	review during frontend identity pass; preserve functional icons
+assets/brand/exports/linux/hicolor/16x16/apps/local-llm-foundry.png	png	functional or legacy UI mark	unrelated-functional-mark-or-legacy-mark	1,7	review during frontend identity pass; preserve functional icons
+assets/brand/exports/linux/hicolor/256x256/apps/local-llm-foundry.png	png	functional or legacy UI mark	unrelated-functional-mark-or-legacy-mark	1,7	review during frontend identity pass; preserve functional icons
+assets/brand/exports/linux/hicolor/32x32/apps/local-llm-foundry.png	png	functional or legacy UI mark	unrelated-functional-mark-or-legacy-mark	1,7	review during frontend identity pass; preserve functional icons
+assets/brand/exports/linux/hicolor/512x512/apps/local-llm-foundry.png	png	functional or legacy UI mark	unrelated-functional-mark-or-legacy-mark	1,7	review during frontend identity pass; preserve functional icons
+assets/brand/exports/linux/hicolor/64x64/apps/local-llm-foundry.png	png	functional or legacy UI mark	unrelated-functional-mark-or-legacy-mark	1,7	review during frontend identity pass; preserve functional icons
+assets/brand/exports/social/token-ingot-1200x630.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/token-ingot.ico	ico	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/linux/token-ingot-1024.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/linux/token-ingot-128.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/linux/token-ingot-16.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/linux/token-ingot-180.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/linux/token-ingot-192.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/linux/token-ingot-20.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/linux/token-ingot-22.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/linux/token-ingot-24.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/linux/token-ingot-256.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/linux/token-ingot-32.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/linux/token-ingot-512.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/linux/token-ingot-64.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/macos/token-ingot-1024.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/macos/token-ingot-128.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/macos/token-ingot-16.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/macos/token-ingot-180.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/macos/token-ingot-192.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/macos/token-ingot-20.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/macos/token-ingot-22.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/macos/token-ingot-24.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/macos/token-ingot-256.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/macos/token-ingot-32.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/macos/token-ingot-512.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/macos/token-ingot-64.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/windows/token-ingot-1024.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/windows/token-ingot-128.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/windows/token-ingot-16.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/windows/token-ingot-180.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/windows/token-ingot-192.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/windows/token-ingot-20.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/windows/token-ingot-22.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/windows/token-ingot-24.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/windows/token-ingot-256.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/windows/token-ingot-32.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/windows/token-ingot-512.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/exports/tray/windows/token-ingot-64.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/token-ingot-dark.svg	svg	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/token-ingot-light.svg	svg	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/token-ingot-macos-template.svg	svg	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/token-ingot-mono.svg	svg	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/token-ingot-one-color-black.svg	svg	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/token-ingot-one-color-white.svg	svg	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+assets/brand/token-ingot.svg	svg	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+static/brand/token-ingot-1024.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+static/brand/token-ingot-128.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+static/brand/token-ingot-16.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+static/brand/token-ingot-180.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+static/brand/token-ingot-192.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+static/brand/token-ingot-20.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+static/brand/token-ingot-22.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+static/brand/token-ingot-24.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+static/brand/token-ingot-256.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+static/brand/token-ingot-32.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+static/brand/token-ingot-512.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+static/brand/token-ingot-64.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+static/brand/token-ingot-maskable-192.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+static/brand/token-ingot-maskable-512.png	png	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+static/brand/token-ingot.ico	ico	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+static/icon.svg	svg	selected brand mark	approved-token-ingot	1	deterministic SVG; derivative proofs required
+docs/brand/concepts/01-forge-aperture.png	png	direction/reference artwork	concept-reference	1	retain as historical/reference; do not ship as master
+docs/brand/concepts/02-token-ingot.png	png	direction/reference artwork	approved-token-ingot	1	deterministic SVG; derivative proofs required
+docs/brand/concepts/03-local-core.png	png	direction/reference artwork	concept-reference	1	retain as historical/reference; do not ship as master
+docs/brand/concepts/04-llf-monogram.png	png	direction/reference artwork	concept-reference	1	retain as historical/reference; do not ship as master
+docs/brand/concepts/token-ingot-validation-sheet.png	png	direction/reference artwork	approved-token-ingot	1	deterministic SVG; derivative proofs required

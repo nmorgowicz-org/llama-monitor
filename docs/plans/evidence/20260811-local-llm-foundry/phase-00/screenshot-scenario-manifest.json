@@ -1,0 +1,529 @@
+{
+  "schema_version": 1,
+  "capture": {
+    "timestamp_utc": "2026-08-11T18:45:36Z",
+    "source": "tests/ui/capture/index.mjs",
+    "default_viewport": {
+      "width": 1440,
+      "height": 900
+    }
+  },
+  "scenarios": [
+    {
+      "scenario": "welcome",
+      "group": "core",
+      "source": "tests/ui/capture/scenarios/core/welcome.mjs",
+      "symbol": "scenarioWelcome",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "identity-and-navigation"
+    },
+    {
+      "scenario": "free-cache",
+      "group": "core",
+      "source": "tests/ui/capture/scenarios/core/free-cache.mjs",
+      "symbol": "scenarioFreeCache",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "application-surface"
+    },
+    {
+      "scenario": "chat",
+      "group": "core",
+      "source": "tests/ui/capture/scenarios/core/chat.mjs",
+      "symbol": "scenarioChat",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "application-surface"
+    },
+    {
+      "scenario": "sidebar",
+      "group": "core",
+      "source": "tests/ui/capture/scenarios/core/sidebar.mjs",
+      "symbol": "scenarioSidebar",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "identity-and-navigation"
+    },
+    {
+      "scenario": "guided-gen",
+      "group": "core",
+      "source": "tests/ui/capture/scenarios/core/guided-gen.mjs",
+      "symbol": "scenarioGuidedGen",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "application-surface"
+    },
+    {
+      "scenario": "navbar",
+      "group": "core",
+      "source": "tests/ui/capture/scenarios/core/navbar.mjs",
+      "symbol": "scenarioNavbar",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "identity-and-navigation"
+    },
+    {
+      "scenario": "smoke",
+      "group": "core",
+      "source": "tests/ui/capture/scenarios/core/smoke.mjs",
+      "symbol": "scenarioSmoke",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "identity-and-navigation"
+    },
+    {
+      "scenario": "panels",
+      "group": "core",
+      "source": "tests/ui/capture/scenarios/core/panels.mjs",
+      "symbol": "scenarioPanels",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "application-surface"
+    },
+    {
+      "scenario": "dashboard",
+      "group": "core",
+      "source": "tests/ui/capture/scenarios/core/dashboard.mjs",
+      "symbol": "scenarioDashboard",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "dashboard-and-runtime"
+    },
+    {
+      "scenario": "models",
+      "group": "models",
+      "source": "tests/ui/capture/scenarios/models/models.mjs",
+      "symbol": "scenarioModels",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "model-library"
+    },
+    {
+      "scenario": "models-v2",
+      "group": "models",
+      "source": "tests/ui/capture/scenarios/models/models-v2.mjs",
+      "symbol": "scenarioModelsV2",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "model-library"
+    },
+    {
+      "scenario": "model-discovery",
+      "group": "models",
+      "source": "tests/ui/capture/scenarios/models/model-discovery.mjs",
+      "symbol": "scenarioModelDiscovery",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "model-library"
+    },
+    {
+      "scenario": "filebrowser",
+      "group": "models",
+      "source": "tests/ui/capture/scenarios/models/filebrowser.mjs",
+      "symbol": "scenarioFilebrowser",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "model-library"
+    },
+    {
+      "scenario": "model-browser",
+      "group": "models",
+      "source": "tests/ui/capture/scenarios/models/model-browser.mjs",
+      "symbol": "scenarioModelBrowser",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "model-library"
+    },
+    {
+      "scenario": "preset-editor",
+      "group": "presets",
+      "source": "tests/ui/capture/scenarios/presets/preset-editor.mjs",
+      "symbol": "scenarioPresetEditor",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "presets"
+    },
+    {
+      "scenario": "rapid-preset",
+      "group": "presets",
+      "source": "tests/ui/capture/scenarios/presets/rapid-preset.mjs",
+      "symbol": "scenarioRapidPreset",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "presets"
+    },
+    {
+      "scenario": "evidence-drawer",
+      "group": "presets",
+      "source": "tests/ui/capture/scenarios/presets/evidence-drawer.mjs",
+      "symbol": "scenarioEvidenceDrawer",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "presets"
+    },
+    {
+      "scenario": "community-sources",
+      "group": "presets",
+      "source": "tests/ui/capture/scenarios/presets/community-sources.mjs",
+      "symbol": "scenarioCommunitySources",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "presets"
+    },
+    {
+      "scenario": "discussions",
+      "group": "presets",
+      "source": "tests/ui/capture/scenarios/presets/discussions.mjs",
+      "symbol": "scenarioDiscussions",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "presets"
+    },
+    {
+      "scenario": "spawn-wizard",
+      "group": "wizard-llamacpp",
+      "source": "tests/ui/capture/scenarios/wizard-llamacpp/spawn-wizard.mjs",
+      "symbol": "scenarioSpawnWizard",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "spawn-wizard"
+    },
+    {
+      "scenario": "spawn-wizard-pro-baseline",
+      "group": "wizard-llamacpp",
+      "source": "tests/ui/capture/scenarios/wizard-llamacpp/spawn-wizard-pro-baseline.mjs",
+      "symbol": "scenarioSpawnWizardProBaseline",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "spawn-wizard"
+    },
+    {
+      "scenario": "spawn-wizard-launch-full-config",
+      "group": "wizard-llamacpp",
+      "source": "tests/ui/capture/scenarios/wizard-llamacpp/spawn-wizard-launch-full-config.mjs",
+      "symbol": "scenarioSpawnWizardLaunchFullConfig",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "spawn-wizard"
+    },
+    {
+      "scenario": "spawn-wizard-rapid-guided-baseline",
+      "group": "wizard-rapidmlx",
+      "source": "tests/ui/capture/scenarios/wizard-rapidmlx/spawn-wizard-rapid-guided-baseline.mjs",
+      "symbol": "scenarioSpawnWizardRapidGuidedBaseline",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "spawn-wizard"
+    },
+    {
+      "scenario": "spawn-wizard-rapid-pro-baseline",
+      "group": "wizard-rapidmlx",
+      "source": "tests/ui/capture/scenarios/wizard-rapidmlx/spawn-wizard-rapid-pro-baseline.mjs",
+      "symbol": "scenarioSpawnWizardRapidProBaseline",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "spawn-wizard"
+    },
+    {
+      "scenario": "spawn-wizard-launch-full-config",
+      "group": "wizard-rapidmlx",
+      "source": "tests/ui/capture/scenarios/wizard-rapidmlx/spawn-wizard-launch-full-config.mjs",
+      "symbol": "scenarioSpawnWizardRapidLaunchFullConfig",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "spawn-wizard"
+    },
+    {
+      "scenario": "spawn-wizard-gif",
+      "group": "wizard-llamacpp",
+      "source": "tests/ui/capture/scenarios/wizard-llamacpp/spawn-wizard-gif.mjs",
+      "symbol": "scenarioSpawnWizardGif",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "spawn-wizard"
+    },
+    {
+      "scenario": "spawn-wizard-hf-download",
+      "group": "wizard-llamacpp",
+      "source": "tests/ui/capture/scenarios/wizard-llamacpp/spawn-wizard-hf-download.mjs",
+      "symbol": "scenarioSpawnWizardHfDownload",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "spawn-wizard"
+    },
+    {
+      "scenario": "spawn-wizard-tier-matrix",
+      "group": "wizard-llamacpp",
+      "source": "tests/ui/capture/scenarios/wizard-llamacpp/spawn-wizard-tier-matrix.mjs",
+      "symbol": "scenarioSpawnWizardTierMatrix",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "spawn-wizard"
+    },
+    {
+      "scenario": "spawn-wizard-mmproj-selection",
+      "group": "wizard-llamacpp",
+      "source": "tests/ui/capture/scenarios/wizard-llamacpp/spawn-wizard-mmproj-selection.mjs",
+      "symbol": "scenarioSpawnWizardMmprojSelection",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "spawn-wizard"
+    },
+    {
+      "scenario": "spawn-wizard-guided-drawer",
+      "group": "wizard-llamacpp",
+      "source": "tests/ui/capture/scenarios/wizard-llamacpp/spawn-wizard-guided-drawer.mjs",
+      "symbol": "scenarioSpawnWizardGuidedDrawer",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "spawn-wizard"
+    },
+    {
+      "scenario": "spawn-wizard-rapid-mlx-gif",
+      "group": "wizard-rapidmlx",
+      "source": "tests/ui/capture/scenarios/wizard-rapidmlx/spawn-wizard-rapid-mlx-gif.mjs",
+      "symbol": "scenarioSpawnWizardRapidMlxGif",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "spawn-wizard"
+    },
+    {
+      "scenario": "rapid-mlx-runtime",
+      "group": "features",
+      "source": "tests/ui/capture/scenarios/features/rapid-mlx-runtime.mjs",
+      "symbol": "scenarioRapidMlxRuntime",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "dashboard-and-runtime"
+    },
+    {
+      "scenario": "rapid-mlx-live",
+      "group": "validation",
+      "source": "tests/ui/capture/scenarios/validation/rapid-mlx-live.mjs",
+      "symbol": "scenarioRapidMlxLive",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "dashboard-and-runtime"
+    },
+    {
+      "scenario": "dashboard-rapid-mlx",
+      "group": "features",
+      "source": "tests/ui/capture/scenarios/features/dashboard-rapid-mlx.mjs",
+      "symbol": "scenarioDashboardRapidMlx",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "dashboard-and-runtime"
+    },
+    {
+      "scenario": "settings",
+      "group": "config",
+      "source": "tests/ui/capture/scenarios/config/settings.mjs",
+      "symbol": "scenarioSettings",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "application-surface"
+    },
+    {
+      "scenario": "appearance-palette",
+      "group": "config",
+      "source": "tests/ui/capture/scenarios/config/appearance-palette.mjs",
+      "symbol": "scenarioAppearancePalette",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "application-surface"
+    },
+    {
+      "scenario": "tls",
+      "group": "config",
+      "source": "tests/ui/capture/scenarios/config/tls.mjs",
+      "symbol": "scenarioTls",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "application-surface"
+    },
+    {
+      "scenario": "tune-panel",
+      "group": "features",
+      "source": "tests/ui/capture/scenarios/features/tune-panel.mjs",
+      "symbol": "scenarioTunePanel",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "dashboard-and-runtime"
+    },
+    {
+      "scenario": "benchmark-results",
+      "group": "features",
+      "source": "tests/ui/capture/scenarios/features/benchmark-results.mjs",
+      "symbol": "scenarioBenchmarkResults",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "dashboard-and-runtime"
+    },
+    {
+      "scenario": "llama-updater",
+      "group": "features",
+      "source": "tests/ui/capture/scenarios/features/llama-updater.mjs",
+      "symbol": "scenarioLlamaUpdater",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "application-surface"
+    },
+    {
+      "scenario": "chat-history-qa",
+      "group": "features",
+      "source": "tests/ui/capture/scenarios/features/chat-history-qa.mjs",
+      "symbol": "scenarioChatHistoryQA",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "application-surface"
+    },
+    {
+      "scenario": "sparkline",
+      "group": "validation",
+      "source": "tests/ui/capture/scenarios/validation/sparkline.mjs",
+      "symbol": "scenarioSparkline",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "application-surface"
+    },
+    {
+      "scenario": "gifs",
+      "group": "validation",
+      "source": "tests/ui/capture/scenarios/validation/gifs.mjs",
+      "symbol": "scenarioGifs",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "dark-and-light-where-scenario-defines",
+      "target_surface": "application-surface"
+    }
+  ]
+}

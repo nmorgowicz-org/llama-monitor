@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "capture": {
+    "timestamp_utc": "2026-08-11T18:45:36Z",
+    "baseline_checkout": "50c5fcc68f15c1bea940d73ecf05156459bddb76",
+    "source": "Phase 0 discovery; no secrets read"
+  },
+  "mappings": [
+    {
+      "surface": "product",
+      "legacy": "Llama Monitor",
+      "canonical": "Local LLM Foundry",
+      "classification": "public-brand",
+      "owner_phase": "1,7,14"
+    },
+    {
+      "surface": "slug",
+      "legacy": "llama-monitor",
+      "canonical": "local-llm-foundry",
+      "classification": "public-brand",
+      "owner_phase": "1,7,11"
+    },
+    {
+      "surface": "rust-library",
+      "legacy": "llama_monitor",
+      "canonical": "llama_monitor",
+      "classification": "compatibility-identifier",
+      "owner_phase": "2,8",
+      "policy": "retain internal crate namespace through 2.x"
+    },
+    {
+      "surface": "unix-root",
+      "legacy": "~/.config/llama-monitor",
+      "canonical": "~/.config/local-llm-foundry",
+      "classification": "public-brand",
+      "owner_phase": "4,5"
+    },
+    {
+      "surface": "windows-root",
+      "legacy": "%APPDATA%\\llama-monitor",
+      "canonical": "%APPDATA%\\local-llm-foundry",
+      "classification": "public-brand",
+      "owner_phase": "4,9,12"
+    },
+    {
+      "surface": "runtime-technology",
+      "legacy": "llama.cpp / llama-server",
+      "canonical": "unchanged",
+      "classification": "legitimate-technology",
+      "owner_phase": "preserve"
+    }
+  ],
+  "compatibility": {
+    "browser_storage": "stable-through-2.x",
+    "api_routes": "stable-through-2.x",
+    "legacy_artifacts": "dual-name-bridge-through-2.0.x",
+    "canonical_only": "2.1.0"
+  }
+}
