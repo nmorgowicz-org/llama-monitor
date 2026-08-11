@@ -1441,7 +1441,7 @@ export async function hfShowDownloadPanel(panelEl, fname) {
     const headers = getAuthHeaders();
     const res = await fetch('/api/hf/download-dir', { headers });
     const data = res.ok ? await res.json() : null;
-    const dir = data?.dir || '~/.config/llama-monitor/models';
+    const dir = data?.dir || '~/.config/local-llm-foundry/models';
     const configured = data?.configured ?? false;
     const destPath = dir.replace(/\/$/, '') + '/' + (fname || '').split('/').pop();
 

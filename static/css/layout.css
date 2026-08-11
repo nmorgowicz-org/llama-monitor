@@ -856,6 +856,17 @@
   transition: box-shadow 140ms ease, transform 140ms ease, opacity 140ms ease;
 }
 
+.nav-logo img {
+  display: block;
+  width: 32px;
+  height: 32px;
+  border-radius: inherit;
+}
+
+.nav-logo svg {
+  display: none !important;
+}
+
 body:not(.setup-active) .nav-logo:hover {
   transform: scale(1.08);
   box-shadow:

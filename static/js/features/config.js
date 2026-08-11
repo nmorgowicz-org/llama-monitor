@@ -92,7 +92,7 @@ function saveConfig() {
 function useDefaultServerBinary() {
     const input = document.getElementById('set-server-path');
     if (input) input.value = '';
-    showToast('Using llama-monitor default binary location', 'info');
+    showToast('Using Foundry default binary location', 'info');
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

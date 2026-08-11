@@ -1158,6 +1158,17 @@
   filter: drop-shadow(0 0 20px var(--acc-30));
 }
 
+.setup-logo img {
+  display: block;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+
+.setup-logo svg {
+  display: none !important;
+}
+
 @keyframes logo-breathe {
   0%, 100% { transform: scale(1); filter: drop-shadow(0 0 20px var(--acc-30)); }
   50% { transform: scale(1.05); filter: drop-shadow(0 0 32px var(--acc-50)); }
@@ -1698,6 +1709,7 @@ body.setup-active .sidebar-nav {
     gap: var(--gap-sm);
   }
 
+  .setup-logo img,
   .setup-logo svg {
     width: 64px;
     height: 64px;
@@ -2218,6 +2230,11 @@ body.setup-active .sidebar-nav {
   filter: drop-shadow(0 0 18px var(--acc-40));
   flex-shrink: 0;
   animation: logo-breathe 4s ease-in-out infinite;
+}
+
+.setup-logo img {
+  width: 32px;
+  height: 32px;
 }
 
 .setup-brand-text {
