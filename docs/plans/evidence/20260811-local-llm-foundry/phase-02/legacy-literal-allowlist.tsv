@@ -1,8 +1,8 @@
 # Reviewed Phase 2 legacy literal allowlist; generated from current source and reviewed by owning policy.
 file	line	token	classification	policy	owner_phase	matched_text
 .github/codeql/codeql-config.yml	12	llama-monitor	tooling-or-infrastructure	update in release/tooling phase	11	# ~/.config/llama-monitor/, not from runtime user input.
-docs/reference/api.md	1773	llama-monitor	documentation-reference	rewrite current docs in owning docs phase	14	Creates a manual backup in `~/.config/llama-monitor/backups/chat_<timestamp>.db`.
-docs/reference/api.md	2816	llama-monitor	documentation-reference	rewrite current docs in owning docs phase	14	{ "dir": "/Users/nick/.config/llama-monitor/models" }
+docs/reference/api.md	1819	llama-monitor	documentation-reference	rewrite current docs in owning docs phase	14	Creates a manual backup in `~/.config/llama-monitor/backups/chat_<timestamp>.db`.
+docs/reference/api.md	2862	llama-monitor	documentation-reference	rewrite current docs in owning docs phase	14	{ "dir": "/Users/nick/.config/llama-monitor/models" }
 docs/reference/chat.md	657	llama-monitor	documentation-reference	rewrite current docs in owning docs phase	14	- **Primary store** — `~/.config/llama-monitor/chat.db`
 docs/reference/chat.md	659	llama-monitor	documentation-reference	rewrite current docs in owning docs phase	14	- **Legacy migration** — If `~/.config/llama-monitor/chat-tabs.json` exists at startup, the app imports it into `chat.db` and renames the old file to `chat-tabs.json.bak`
 docs/reference/cli-flags.md	139	llama-monitor	documentation-reference	rewrite current docs in owning docs phase	14	llama-monitor --presets-file ~/.config/llama-monitor/presets-custom.json

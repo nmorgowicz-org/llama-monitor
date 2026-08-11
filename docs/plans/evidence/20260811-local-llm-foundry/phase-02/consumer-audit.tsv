@@ -71,8 +71,8 @@ src/models/import_lab.rs	499	anyhow!("worker stderr: traceback at /Users/example
 src/models/library.rs	437	bounded_json(&path.join("llama-monitor-conversion.json"))	runtime-compatibility-identifier: accept through 2.x; canonicalize new values	reviewed compatibility or remaining consumer	2,3,8
 src/paths.rs	41	pub fn default_active_root() -> PathBuf {	runtime-compatibility-identifier: accept through 2.x; canonicalize new values	central AppPaths authority	2,3,8
 src/paths.rs	80	dirs::config_dir()	runtime-compatibility-identifier: accept through 2.x; canonicalize new values	reviewed compatibility or remaining consumer	2,3,8
-src/paths.rs	173	let appdata = dirs::config_dir()	runtime-compatibility-identifier: accept through 2.x; canonicalize new values	reviewed compatibility or remaining consumer	2,3,8
-src/paths.rs	213	paths.certs_dir(),	runtime-compatibility-identifier: accept through 2.x; canonicalize new values	central AppPaths authority	2,3,8
+src/paths.rs	200	let appdata = dirs::config_dir()	runtime-compatibility-identifier: accept through 2.x; canonicalize new values	reviewed compatibility or remaining consumer	2,3,8
+src/paths.rs	240	paths.certs_dir(),	runtime-compatibility-identifier: accept through 2.x; canonicalize new values	central AppPaths authority	2,3,8
 src/repo_context.rs	109	let exe = dir.join("llama-monitor");	runtime-compatibility-identifier: accept through 2.x; canonicalize new values	reviewed compatibility or remaining consumer	2,3,8
 src/repo_context.rs	142	let exe = bin.join("llama-monitor");	runtime-compatibility-identifier: accept through 2.x; canonicalize new values	reviewed compatibility or remaining consumer	2,3,8
 src/web/api/lhm.rs	162	let local_app_data = match std::env::var("LOCALAPPDATA") {	runtime-compatibility-identifier: accept through 2.x; canonicalize new values	reviewed compatibility or remaining consumer	2,3,8
