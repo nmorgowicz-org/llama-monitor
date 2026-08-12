@@ -8,7 +8,7 @@
     "validate-release-contract": "node scripts/validate-release-contract.mjs --self-test"
   },
   "devDependencies": {
-    "eslint": "10.8.0",
+    "eslint": "10.8.1",
     "eslint-plugin-no-unsanitized": "4.1.5",
     "globals": "17.9.0",
     "puppeteer": "25.5.0"
