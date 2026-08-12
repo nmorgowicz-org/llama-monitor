@@ -2,8 +2,7 @@
 
 - Date: 2026-08-12
 - Branch: `feat/rapid-mlx-integration`
-- Base commit under test: `f918e69f41575d4935b51c08380063f2a1bee084`, plus the
-  uncommitted Windows portability changes in this checkout.
+- Base commit under test: `f8dce76` (`fix(binary): stabilize native Windows validation`).
 - Host: Windows 10 Enterprise, x86_64, build 26200
 - Rust: stable `1.97.1`, native target `x86_64-pc-windows-msvc`
 - Node: `v24.11.1`; npm `11.6.2`
@@ -13,25 +12,26 @@
 - Native `cargo build --release` with the full default tray/WebView features.
 - Native `cargo clippy -- -D warnings`.
 - `cargo fmt -- --check`.
+- `cargo check --target x86_64-pc-windows-gnu`.
 - `npm run validate-js`.
 - `npm run lint` after `npm ci` installed the locked dependencies.
 - `npm run validate-rebrand`.
 - `npm run validate-release-contract`.
-- Windows model-adoption tests: 10 passed.
-- Full native suite after Portmaster directory trust: all tests passed, 5 ignored.
-- Executable smoke test: `--version`, `--help`, disposable headless startup, token/database/key/certificate/log creation.
+- Full native `cargo test` suite passed (5 ignored).
+- Executable smoke test: `--version`, `--help`, and disposable headless startup were previously validated.
 
 ## Final status
 
-The complete native Windows suite is green. Portmaster must trust the repository
-directory so Cargo-generated loopback test binaries can communicate with their
-local fixtures.
+The native Rust/JavaScript validation suite is green. Native Playwright UI
+validation is still blocked by Portmaster: Chromium receives
+`ERR_NETWORK_ACCESS_DENIED` when it navigates to the locally served app, even
+though the release server starts successfully on loopback. The Windows user
+must allow the Playwright Chromium executable (or the repository's local
+loopback traffic) in Portmaster before rerunning the UI suite.
 
 ## Environment blockers
 
-- GNU cross-target check could not build the vendored OpenSSL dependency because
-  the Windows Perl installations lack the required OpenSSL Perl module set.
-  Native MSVC build is now independent of that dependency through WinCNG.
+- The GNU cross-target check now passes with the current dependency graph.
 - Release preflight could not start WSL2 because Virtual Machine Platform is not
   enabled. Re-run from Git Bash/WSL after enabling that Windows feature.
 

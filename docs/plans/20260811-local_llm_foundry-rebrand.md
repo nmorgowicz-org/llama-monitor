@@ -59,6 +59,19 @@ The three remaining flakes are guided-generation startup/toast timing and are
 not the two CI failures above. A fresh GitHub `ready-to-test` run is still
 required before Phase 11 or the release candidate is marked green.
 
+### Native Windows qualification update (2026-08-12)
+
+Windows commit `f8dce76` is clean and now passes Rust 1.97.1 native MSVC
+clippy, the full Rust suite (5 intentional ignores), release build, GNU
+cross-target check and clippy, `cargo fmt -- --check`, JavaScript validation,
+lint, rebrand validation, and release-contract validation. The release server
+also starts successfully on Windows. The native Playwright suite is not yet a
+pass: Chromium is currently denied access to the local server by Portmaster
+(`ERR_NETWORK_ACCESS_DENIED`). Allow the pinned Playwright Chromium executable
+or repository loopback traffic in Portmaster, then rerun the full suite from
+the Windows handoff before closing Phases 12–14. The receipt is tracked in
+`docs/plans/evidence/20260811-local-llm-foundry/phase-12/windows/`.
+
 ### Phase closure blockers
 
 These are the specific reasons an earlier phase remains open; they are

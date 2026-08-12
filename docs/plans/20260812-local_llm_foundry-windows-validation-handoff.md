@@ -1,12 +1,16 @@
 # Local LLM Foundry 2.0 — Native Windows Validation Handoff
 
-Status: native Windows validation completed 2026-08-12; local native gates are green
+Status: native Windows Rust/JS validation completed 2026-08-12; native UI gate is blocked by Portmaster loopback policy
 
 The Windows checkout now has the portability and test-fixture fixes required for
-the native MSVC build. The code and evidence are ready to carry back to macOS;
-they still need to be committed and pushed before switching machines. The
-remaining release follow-ups are a fresh CI run plus the environment-only GNU
-cross-target and WSL2 checks described below.
+the native MSVC build. Commit `f8dce76` is clean and validated with Rust 1.97.1:
+native clippy, the full Rust suite, release build, GNU cross-target check and
+clippy, JavaScript validation, lint, rebrand validation, and release-contract
+validation all pass. Native Playwright starts the release server but Chromium
+is denied loopback access by Portmaster (`ERR_NETWORK_ACCESS_DENIED`); allow
+the Playwright Chromium executable or repository loopback traffic, then rerun
+the UI suite before closing the Windows gate. WSL2 release preflight remains a
+separate optional environment marker.
 
 This document is the operational handoff for a fresh Codex session running on
 the Windows development machine. The authoritative implementation and release
@@ -19,7 +23,7 @@ return markers needed to close Phases 11–14.
 
 - Repository: `nmorgowicz-org/local-llm-foundry`
 - Local checkout branch: `feat/rapid-mlx-integration`
-- Current validated commit: checkout the pushed branch and record its exact SHA with `git log -1`; it includes the UI qualification fixes described below.
+- Current validated commit: `f8dce76`; verify with `git log -1` before testing.
 - Pull request: #314
 - Product: Local LLM Foundry 2.0
 - Canonical Windows application home: `%APPDATA%\\local-llm-foundry\\`
@@ -55,9 +59,9 @@ native Windows results.
 Install or verify:
 
 - Git for Windows and a PowerShell 7 session.
-- Rust stable, Cargo, and the `x86_64-pc-windows-gnu` target required by the
-  release workflow. If the native toolchain is MSVC, retain the GNU target for
-  parity with CI and document which toolchain produced each binary.
+- Rust stable 1.97.1, Cargo, and the `x86_64-pc-windows-gnu` target required by
+  the release workflow. The native binary was built with MSVC; the GNU target
+  is retained for cross-target parity.
 - Node.js/npm and the repository UI dependencies.
 - A Chromium installation usable by Playwright.
 - WebView2 Runtime for tray/popover validation.
@@ -227,7 +231,8 @@ Native Windows work can close its markers only when all of these are true:
 - Native executable, tray/WebView2, sensor bridge, updater, remote-agent, and
   package checks have raw receipts.
 - The mandatory Rust/JS checks and the complete release-built UI suite are
-  green on the current commit.
+  green on the current commit. The UI suite remains open until Portmaster
+  allows Chromium loopback traffic and the suite completes.
 - A fresh CI run after the fix is green; the transient failure from run
   `31627911658` is not merely hidden by retries.
 - Phase 12 evidence is complete and the plan status table is updated before
