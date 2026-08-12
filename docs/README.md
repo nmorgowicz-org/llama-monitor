@@ -1,6 +1,17 @@
-# Llama Monitor Documentation
+# Local LLM Foundry Documentation
 
-Documentation index for Llama Monitor — a local LLM inference and GPU monitoring tool.
+Documentation index for Local LLM Foundry — local LLM inference, GPU
+monitoring, chat, and managed runtime tooling. Historical evidence keeps its
+original Llama Monitor names intentionally.
+
+## Upgrade and brand
+
+- [Upgrade from 1.x to 2.0](reference/upgrade-2-0.md)
+- [Brand usage](reference/branding.md)
+
+The reference guides below describe Foundry's local LLM inference and GPU
+monitoring surfaces. Technical backend names and historical compatibility paths
+are called out where they are part of the contract.
 
 ## Reference Guides
 

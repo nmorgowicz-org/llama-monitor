@@ -1,8 +1,12 @@
-# Quick Start
+# Local LLM Foundry Quick Start
 
-Get your first local AI model up and running with Llama Monitor.
+This guide uses the Local LLM Foundry 2.0 identity. The `llama-monitor` binary
+and legacy root remain valid compatibility aliases through 2.x; see the
+[upgrade guide](upgrade-2-0.md).
 
-## 1. Launch Llama Monitor
+Get your first local AI model up and running with Local LLM Foundry.
+
+## 1. Launch Local LLM Foundry
 
 Open Llama Monitor. By default it listens at:
 

@@ -1,4 +1,8 @@
-# TLS / ACME / mTLS Architecture
+# Local LLM Foundry TLS / ACME / mTLS Architecture
+
+Foundry 2.0 retains existing TLS/mTLS trust material. The stable legacy CA
+subject `llama-monitor CA` is intentionally preserved so upgraded agents do
+not lose trust; only the application-facing identity is canonicalized.
 
 This document describes how TLS, ACME (Let’s Encrypt), and mTLS work in llama-monitor.
 It is intended for:

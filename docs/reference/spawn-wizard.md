@@ -1,4 +1,8 @@
-# Spawn Wizard
+# Local LLM Foundry Spawn Wizard
+
+Foundry is the host product identity. Backend technology names (`llama.cpp`,
+`llama-server`, GGUF, MLX, and Rapid-MLX) remain unchanged in wizard choices,
+serialized fields, and launch commands.
 
 > **Same wizard, two docs, different audiences.** "Spawn Wizard" and "Setup Wizard" are two
 > names for one feature. This doc is the **frontend module architecture**: which `.js` file owns

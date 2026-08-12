@@ -1,6 +1,9 @@
-# Binary Lifecycle — llama.cpp Runtime Management
+# Local LLM Foundry Binary Lifecycle — llama.cpp Runtime Management
 
-This document describes how llama-monitor discovers, installs, updates, and version-tracks
+The canonical executable is `local-llm-foundry` (`.exe` on Windows). The
+`llama-monitor` executable remains an in-place compatibility alias through 2.x.
+
+This document describes how Foundry discovers, installs, updates, and version-tracks
 the `llama-server` binary. It is the reference implementation for backend runtime management.
 The Rapid-MLX integration plan (`docs/plans/20260611-rapid_mlx_integration.md`) explicitly
 names this system as the quality baseline that all future backends must match.

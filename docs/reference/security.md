@@ -1,4 +1,8 @@
-# Security Reference
+# Local LLM Foundry Security Reference
+
+The 2.0 identity changes product-facing names only. API-token, DB-admin-token,
+cookie, encryption, and certificate compatibility identifiers remain stable;
+legacy `llama-monitor` paths are still protected and are never silently deleted.
 
 This document covers dashboard-side authentication, token handling, local recovery, and where
 security-related configuration is stored on disk.

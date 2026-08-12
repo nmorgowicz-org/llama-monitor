@@ -1,8 +1,10 @@
-# Security Policy
+# Local LLM Foundry Security Policy
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in llama-monitor, please report it responsibly.
+If you discover a security vulnerability in Local LLM Foundry, please report it
+responsibly. Historical references to `llama-monitor` identify the compatible
+1.x product and internal paths; they do not change the reporting policy.
 
 ## How to Report
 

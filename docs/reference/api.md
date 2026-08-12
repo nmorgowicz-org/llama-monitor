@@ -1,4 +1,8 @@
-# REST API Reference
+# Local LLM Foundry REST API Reference
+
+The API surface is compatibility-stable for 2.0. Existing routes, auth
+headers, unbranded serialized fields, and browser storage keys remain valid;
+the product rebrand does not require API-client changes.
 
 Llama Monitor serves its REST API on the same port as the web UI, typically `http://localhost:7778`.
 

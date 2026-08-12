@@ -1,4 +1,8 @@
-# Rapid-MLX Runtime Management
+# Local LLM Foundry Rapid-MLX Runtime Management
+
+Rapid-MLX is a backend runtime managed by Foundry; it is not renamed. Runtime
+state follows the canonical root for new installs while legacy roots remain
+discoverable through the 2.x migration window.
 
 > **Status: Shipped.** Phase 7 completed. Rapid-MLX is now a first-class inference
 > backend with a managed runtime, backend-neutral spawn wizard, live telemetry cards,

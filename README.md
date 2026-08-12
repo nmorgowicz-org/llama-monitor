@@ -1,4 +1,12 @@
-# Llama Monitor
+# Local LLM Foundry
+
+Local LLM Foundry is the 2.0 home for local AI inference: one dashboard for
+models, live GPU/system telemetry, chat, a hardware-aware setup wizard, and
+managed llama.cpp and Rapid-MLX runtimes on macOS, Linux, and Windows.
+
+This is a compatibility-preserving rebrand of Llama Monitor. The `llama-monitor`
+executable, legacy roots, API routes, browser storage, and release aliases
+remain supported through 2.x. See the [2.0 upgrade guide](docs/reference/upgrade-2-0.md).
 
 One dashboard for local AI models on macOS, Linux, and Windows. Performance metrics, GPU and system telemetry, active sessions, chat, and a hardware-aware setup wizard.
 
@@ -7,7 +15,7 @@ One dashboard for local AI models on macOS, Linux, and Windows. Performance metr
 Run Llama Monitor and open it in your browser:
 
 ```bash
-./llama-monitor
+./local-llm-foundry
 # Open http://localhost:7778
 ```
 
@@ -128,11 +136,11 @@ An integrated setup wizard for discovering, downloading, configuring, and launch
 
 ## Installation
 
-Pre-built binaries are available on the [latest release](../../releases/latest). To build from source:
+Pre-built binaries are available on the [latest release](https://github.com/nmorgowicz-org/local-llm-foundry/releases/latest). To build from source:
 
 ```bash
-git clone https://github.com/nmorgowicz-org/llama-monitor.git
-cd llama-monitor
+git clone https://github.com/nmorgowicz-org/local-llm-foundry.git
+cd local-llm-foundry
 cargo build --release
 ```
 

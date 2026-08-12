@@ -40,6 +40,7 @@ acceptance gates, not implementation uncertainty.
 | 7 | Closed 2026-08-11: canonical package and binary, thin legacy alias, shared runner, CLI parity receipt, full Rust/JS/release gates, and Windows GNU target check pass. Native Windows launch and installed-binary discovery remain an explicit Phase 12 return marker. |
 | 8 | Closed 2026-08-11: frontend identity registry, Token Ingot browser/PWA surfaces, migration toast/controls, auth-cookie compatibility, startup inventory/platform synchronization, and full release-built Playwright suite passed with 270 tests and 5 intentional skips. |
 | 9 | Complete 2026-08-11: runtime identity centralization, deterministic canonical-first assets, checksum URL retention, exact process/task compatibility, legacy install-path preservation, CA continuity, entropy hardening, Token Ingot tray integration, and current-exe update paths pass source-level gates. Native Windows task/tray/mixed-version proofs remain explicit return markers. |
+| 10 | Complete 2026-08-12: current docs/templates, upgrade guide, brand usage policy, CLI/API/runtime compatibility notes, historical allowlist, and 42-file relative-link validation pass. Fresh screenshot promotion remains Phase 13. |
 
 ## 1. Purpose and execution contract
 
@@ -1228,7 +1229,7 @@ Stop on lost remote connectivity, certificate reenrollment, checksum bypass,
 duplicate SYSTEM tasks, ambiguous process targeting, or native tray failure.
 Rollback re-enables the verified old task/path and leaves compatibility readers.
 
-### Phase 10 — Documentation, API, CLI, migration, and historical policy
+### Phase 10 — Documentation, API, CLI, migration, and historical policy — **Complete**
 
 **Objective**
 
@@ -1241,27 +1242,28 @@ while keeping historical evidence truthful.
 
 **Tasks**
 
-- [ ] Rewrite README product introduction, features, install, run, update,
+- [x] Rewrite README product introduction, features, install, run, update,
   remote agent, screenshots, repository links, and migration notice.
-- [ ] Update `docs/README.md`, quick start, CLI flags, config/filesystem,
+- [x] Update `docs/README.md`, quick start, CLI flags, config/filesystem,
   security, TLS, model library, HF browser, spawn/setup wizard, llama.cpp and
   Rapid-MLX runtime, binary lifecycle, remote agent/SSH, Windows, dashboard,
   chat, API/auth routing, external clients, contribution/issue guidance, and
   UI design patterns.
-- [ ] Add a dedicated 1.x→2.0 upgrade guide with all root states, model choices,
+- [x] Add a dedicated 1.x→2.0 upgrade guide with all root states, model choices,
   compatibility identifiers, receipts, rollback, cleanup, troubleshooting,
   and headless commands.
-- [ ] Document legacy names accepted through 2.x and removal no earlier than
+- [x] Document legacy names accepted through 2.x and removal no earlier than
   3.0.
-- [ ] Correct stale updater checksum and Windows migration claims.
-- [ ] Document that browser storage keys and the internal Rust crate remain
+- [x] Correct stale updater checksum and Windows migration claims.
+- [x] Document that browser storage keys and the internal Rust crate remain
   stable compatibility identifiers.
-- [ ] Document Token Ingot usage, prohibited modifications, palette, clear
+- [x] Document Token Ingot usage, prohibited modifications, palette, clear
   space, small-size variants, and asset-source workflow.
-- [ ] Update issue forms and current templates.
-- [ ] Classify historical plans, changelog links, benchmark receipts, release
+- [x] Update issue forms and current templates.
+- [x] Classify historical plans, changelog links, benchmark receipts, release
   notes, calibration fixtures, and third-party names; do not bulk rewrite them.
-- [ ] Update screenshot references only after Phase 13 promotes fresh images.
+- [x] Update screenshot references only after Phase 13 promotes fresh images;
+  fresh promotion remains a Phase 13 return marker.
 
 **Owned files**
 
@@ -1275,6 +1277,14 @@ while keeping historical evidence truthful.
 - Commands and paths copied from current `--help` and runtime behavior.
 - Historical allowlist reviewed line by line.
 - Unused screenshot checker after promotion.
+
+**Receipt**
+
+Current docs were checked with a 42-file relative-link validator and the
+canonical `local-llm-foundry --help` command. Historical plans, changelog,
+benchmark receipts, calibration fixtures, and screenshots were not bulk
+rewritten. Legacy names remain supported through 2.x; earliest planned removal
+is 3.0.0.
 
 **Pass gate**
 

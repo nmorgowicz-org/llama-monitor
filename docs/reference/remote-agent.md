@@ -1,4 +1,9 @@
-# Remote Agent
+# Local LLM Foundry Remote Agent
+
+Foundry 2.0 keeps the `llama-monitor` agent command, legacy token paths, and
+existing protocol fields compatible through 2.x. New installs use the canonical
+root and executable; detection preserves an existing custom or legacy install
+path until the user explicitly migrates it.
 
 The remote agent adds host-level telemetry to remote llama.cpp endpoints. Without it, Llama Monitor can still attach to a remote server and read performance metrics, but GPU, CPU, RAM, and host-health data remain unavailable.
 

@@ -1,6 +1,12 @@
-# Windows Support
+# Local LLM Foundry Windows Support
 
-This is the canonical reference for how llama-monitor behaves on Windows. It supersedes scattered comments in prior plans (now deleted). For sensor-bridge implementation detail see `docs/reference/windows-sensor-bridge-implementation.md`.
+The 2.0 bridge publishes canonical and legacy archive aliases for the same
+target build. Native scheduled-task, tray/WebView2, and mixed-version checks
+remain final Windows-machine qualification markers.
+
+This is the canonical reference for how Local LLM Foundry behaves on Windows.
+It supersedes scattered comments in prior plans. For sensor-bridge
+implementation detail see `windows-sensor-bridge-implementation.md`.
 
 ---
 

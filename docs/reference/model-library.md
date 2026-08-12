@@ -1,4 +1,4 @@
-# Model library
+# Local LLM Foundry Model Library
 
 Llama Monitor keeps every app-managed model under the configured `models_dir`. The
 default is `~/.config/local-llm-foundry/models/`. Legacy-active installs continue

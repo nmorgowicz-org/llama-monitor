@@ -1,6 +1,7 @@
 # CLI Flags Reference
 
-Use `llama-monitor --help` to see the current flag list from the binary.
+Use `local-llm-foundry --help` to see the current flag list from the binary.
+The legacy `llama-monitor` alias accepts the same flags through 2.x.
 
 ## Core dashboard flags
 
