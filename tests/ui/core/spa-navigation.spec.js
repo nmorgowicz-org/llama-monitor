@@ -60,6 +60,35 @@ test.describe('SPA navigation & history', () => {
       })
     );
 
+    // Keep the deep-link assertion independent of the test server's persistent
+    // chat database. The route under test is the browser URL reconciliation,
+    // so provide one authenticated tab and its empty message history directly.
+    const tab = {
+      id: 'spa-navigation-tab',
+      name: 'SPA navigation test',
+      system_prompt: '',
+      explicit_level: 0,
+      auto_compact: true,
+      auto_compact_summarize: false,
+      compact_mode: 'summarize',
+      compact_threshold: 0.8,
+      model_params: {},
+      context_notes: [],
+      sidebar_width: 320,
+      tab_order: 0,
+      pinned: false,
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+      created_at: Date.now(),
+      updated_at: Date.now(),
+    };
+    await page.route('**/api/chat/tabs*', async route => {
+      const url = new URL(route.request().url());
+      if (route.request().method() !== 'GET') return route.continue();
+      const body = url.pathname.endsWith('/messages') ? [] : url.pathname === '/api/chat/tabs' ? [tab] : tab;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    });
+
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
 
@@ -70,11 +99,11 @@ test.describe('SPA navigation & history', () => {
     });
 
     // A default chat tab always exists, so an active tab id is available.
-    const tabId = await page.evaluate(async () => {
+    await expect.poll(() => page.evaluate(async () => {
       const { chat } = await import('/js/core/app-state.js');
       return chat.activeTabId || null;
-    });
-    expect(tabId).toBeTruthy();
+    })).toBe('spa-navigation-tab');
+    const tabId = 'spa-navigation-tab';
 
     const encodedId = encodeURIComponent(tabId);
     await page.goto('/chat/' + encodedId);

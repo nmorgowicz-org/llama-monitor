@@ -24,17 +24,17 @@
 | `npm run lint` | passed |
 | `cargo build --release` | passed; generated static routes/assets include identity module |
 | `node tests/ui/capture/index.mjs --scenario welcome` | passed with elevated local process access; Token Ingot and migration toast visually verified |
-| Isolated Playwright UI suite | 265 passed, 5 skipped, 1 flaky, 4 failed on first run |
-| Targeted rerun after inventory-cache fix | 10 passed; 2 intermittent model-card interaction failures |
+| Isolated Playwright UI suite (initial) | 265 passed, 5 skipped, 1 flaky, 4 failed; all failures were diagnosed and repaired |
+| Targeted repaired specs | Import-lab 4/4; model inventory + KV use-case 9/9; preset save 1/1; Rapid-MLX template 1/1; SPA deep-link 1/1 |
+| Final isolated Playwright UI suite | 270 passed, 5 intentional skips, 0 failures, 0 flaky |
 
-The inventory-cache fix removes the duplicate startup/library request failures.
-The remaining intermittent model-card failures are not identity failures and
-must be resolved before the Phase 8 pass gate is closed. The stale TLS
-placeholder expectation was corrected from `llama-monitor.example.com` to
-`foundry.example.com`.
+The inventory-cache/platform-state fix removes duplicate startup/library
+requests and preserves provisional Rapid-MLX cards. Wizard and SPA tests now
+wait on their actual initialization contracts and use deterministic fixtures.
+The stale TLS placeholder expectation was corrected from
+`llama-monitor.example.com` to `foundry.example.com`.
 
-## Open gate
+## Closure
 
-- [ ] Resolve and rerun the remaining model-card interaction failures.
-- [ ] Rerun the full isolated Playwright suite with zero failures before marking
-  Phase 8 complete.
+Phase 8 is closed. The final release-built browser suite passed with 270 tests,
+5 intentional skips, and no failures or flaky retries.

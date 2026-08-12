@@ -19,7 +19,7 @@
 | 5 — path/config/resource default-root switch | Complete | Fresh canonical defaults, selected-root consumer routing, helper/docs updates, Windows early logging, and persisted-path policy receipt verified. |
 | 6 — model-library relocation path integration | Complete | Receipt-backed keep/move selection, resumable verified copy, persistence rewrites, and source-retention policy passed; native Windows qualification remains a Phase 12 marker. |
 | 7 — package, crate, binary, CLI, and backend identity | Complete | Canonical/legacy entrypoints, parity tests, release build, JS gates, and Windows GNU cross-check passed; native Windows execution remains a Phase 12 marker. |
-| 8 — frontend identity, migration UX, accessibility, and theme parity | In progress | Identity registry, Token Ingot surfaces, migration UX, and startup inventory-cache synchronization are implemented; intermittent model-card interaction failures remain before the full browser gate can close. |
+| 8 — frontend identity, migration UX, accessibility, and theme parity | Complete | Identity registry, Token Ingot surfaces, migration UX, startup inventory/platform synchronization, deterministic wizard synchronization, and the complete release-built browser suite passed. |
 | 9+ — runtime, release, repository, and final qualification | Not started | Execute only after each preceding gate closes. |
 
 ### Phase closure blockers
@@ -37,7 +37,7 @@ acceptance gates, not implementation uncertainty.
 | 5 | Closed 2026-08-11: fresh canonical default, selected-root routing, helper/docs updates, Windows early logging, and persisted-path policy pass. Model relocation is isolated to Phase 6. |
 | 6 | Closed 2026-08-11 for source-level macOS/Linux and cross-target contract: model-root preview/keep-or-copy API, receipt-backed selection, hash/free-space/collision/symlink protections, resumable copy, persistence rewrites, Migration settings controls, and focused gates pass. Native Windows model-root qualification is an explicit Phase 12 return marker. |
 | 7 | Closed 2026-08-11: canonical package and binary, thin legacy alias, shared runner, CLI parity receipt, full Rust/JS/release gates, and Windows GNU target check pass. Native Windows launch and installed-binary discovery remain an explicit Phase 12 return marker. |
-| 8 | In progress 2026-08-11: frontend identity registry, Token Ingot browser/PWA surfaces, migration toast/controls, auth-cookie compatibility, and startup inventory-cache synchronization are implemented. Full UI closure is blocked by intermittent model-card interaction failures; see the Phase 8 evidence receipt. |
+| 8 | Closed 2026-08-11: frontend identity registry, Token Ingot browser/PWA surfaces, migration toast/controls, auth-cookie compatibility, startup inventory/platform synchronization, and full release-built Playwright suite passed with 270 tests and 5 intentional skips. |
 
 ## 1. Purpose and execution contract
 
@@ -1095,7 +1095,7 @@ provide non-destructive browser/auth compatibility and migration controls.
   do not invent Cache Storage migration.
 - [x] Add light-theme styles, narrow behavior, focus/ARIA, forced-colors smoke,
   and reduced-motion overrides for every new animation/transform.
-- [ ] Update/add focused Playwright tests and capture scenarios; do not capture
+- [x] Update/add focused Playwright tests and capture scenarios; do not capture
   final evidence until Phase 13.
 
 **Owned files**

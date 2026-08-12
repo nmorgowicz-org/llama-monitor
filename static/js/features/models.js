@@ -486,6 +486,14 @@ async function notifyIncompleteDownloadsAtStartup() {
     if (startupInventoryChecked) return;
     startupInventoryChecked = true;
     try {
+        // Seed the same platform capability state used by the Library renderer
+        // before caching the startup inventory. Otherwise the first Library
+        // open reuses the snapshot without knowing Rapid-MLX is available and
+        // incorrectly downgrades provisional MLX entries to unsupported.
+        const platform = await getPlatformInfo();
+        rapidMlxLocalAvailable = platform.rapid_mlx_local_available === true;
+        rapidMlxLocalRequirement = platform.rapid_mlx_local_requirement
+            || rapidMlxLocalRequirement;
         const response = await fetch('/api/models', {
             headers: window.authHeaders ? window.authHeaders() : {},
         });

@@ -169,6 +169,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
 
     test('@in-memory-test Rapid-MLX template restores typed source and reopening clears stale engine state', async ({ page }) => {
         await page.goto('/');
+        await page.waitForSelector('html.modules-ready');
         const state = await page.evaluate(async () => {
             const { openSpawnWizard, closeSpawnWizard, buildSpawnPayload, wizardState } = await import('/js/features/spawn-wizard.js');
             openSpawnWizard({

@@ -278,10 +278,19 @@ test.describe('preset flow', () => {
     await page.evaluate(async () => {
       const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
       openSpawnWizard({ localPath: '/models/wizard.gguf' });
+    });
+    await expect.poll(() => page.evaluate(() => Boolean(
+      window.wizardState
+      && document.getElementById('spawn-preset-name-input')
+      && document.getElementById('spawn-save-preset-btn'),
+    ))).toBe(true);
+    await page.evaluate(() => {
       const name = document.getElementById('spawn-preset-name-input');
       name.value = 'Wizard preset';
       name.dispatchEvent(new Event('input', { bubbles: true }));
-      document.getElementById('spawn-save-preset-btn').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      document.getElementById('spawn-save-preset-btn').dispatchEvent(
+        new MouseEvent('click', { bubbles: true, cancelable: true }),
+      );
     });
     await expect.poll(() => state.postCount).toBe(1);
     await expect(page.locator('#spawn-save-preset-btn')).toHaveText('Save as Preset');

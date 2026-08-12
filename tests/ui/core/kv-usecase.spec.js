@@ -15,7 +15,9 @@ test.describe('use-case drives KV dtype', () => {
         v: document.getElementById('spawn-cache-type-v')?.value,
       });
 
-      pick('roleplay');
+      // The user-facing card is “General chat / roleplay”; `general` is the
+      // stable workload key used by the wizard and VRAM estimator.
+      pick('general');
       const afterRoleplay = kv();
 
       pick('agentic');
@@ -25,7 +27,7 @@ test.describe('use-case drives KV dtype', () => {
       const kSel = document.getElementById('spawn-cache-type-k');
       kSel.value = 'f16';
       kSel.dispatchEvent(new Event('change', { bubbles: true }));
-      pick('roleplay');
+      pick('general');
       const afterUserChoice = kv();
 
       return { afterRoleplay, afterAgentic, afterUserChoice };
