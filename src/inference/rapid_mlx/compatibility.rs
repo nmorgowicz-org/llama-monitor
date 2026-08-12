@@ -18,6 +18,7 @@ pub const LATEST_QUALIFIED_VERSION_TEXT: &str = "0.10.17";
 pub const QUALIFIED_ROLLBACK_VERSION_TEXT: &str = "0.10.9";
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_PROBE_OUTPUT_BYTES: usize = 256 * 1024;
+const EXECUTABLE_BUSY_RETRY_WINDOW: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompatibilityState {
@@ -262,9 +263,23 @@ async fn run_probe(
         .kill_on_drop(true)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    let mut child = command
-        .spawn()
-        .with_context(|| format!("Failed to execute {} {} probe", binary.display(), name))?;
+    let started = tokio::time::Instant::now();
+    let mut child = loop {
+        match command.spawn() {
+            Ok(child) => break child,
+            Err(error)
+                if executable_is_temporarily_busy(&error)
+                    && started.elapsed() < EXECUTABLE_BUSY_RETRY_WINDOW =>
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("Failed to execute {} {} probe", binary.display(), name)
+                });
+            }
+        }
+    };
     let stdout = child
         .stdout
         .take()
@@ -294,6 +309,22 @@ async fn run_probe(
                 binary.display()
             )
         })?
+}
+
+fn executable_is_temporarily_busy(error: &std::io::Error) -> bool {
+    // Linux reports ETXTBSY when a freshly-created executable is briefly still
+    // open for writing. This can happen on overlay filesystems used by CI and
+    // during an atomic runtime replacement. It is safe to retry the spawn; all
+    // other errors remain fail-closed and are returned immediately.
+    #[cfg(unix)]
+    {
+        error.raw_os_error() == Some(26) // ETXTBSY
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = error;
+        false
+    }
 }
 
 async fn read_bounded<R>(reader: R, max_output_bytes: usize) -> Result<Vec<u8>>

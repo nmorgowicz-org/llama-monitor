@@ -1337,11 +1337,13 @@ current-doc edits; never rewrite receipts to make a gate pass.
 
 **Current execution position (2026-08-12):** source-controlled implementation
 and authorized GitHub cutover gates are complete; release launch gates remain
-open. The latest completed CI run (`31615465442`) passed all non-UI jobs but
-failed two timing-sensitive UI tests. Both are now corrected in the working
-tree and verified with focused release-built repeats plus a complete
-release-built UI run; a fresh remote run is still required before this phase
-can close. The release
+open. The latest completed CI run (`31627911658`) passed CodeQL, lint, and
+Windows clippy but failed the Rust `check` job before UI qualification: one
+Rapid-MLX compatibility probe hit a transient Linux `ETXTBSY` (“Text file
+busy”) spawn error. The probe now has a bounded retry for that specific error;
+the exact test and full Rust suite pass locally. The earlier UI fixes remain
+verified by focused release-built repeats and a complete release-built UI run;
+a fresh remote run is still required before this phase can close. The release
 workflow now publishes the four canonical and four legacy 2.0.x bridge assets,
 checksums them fail-closed, preserves archive layouts, and validates the source
 identity contract. See `evidence/20260811-local-llm-foundry/phase-11/README.md`.

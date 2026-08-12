@@ -29,25 +29,20 @@ not reset or discard unrelated user changes. Read `AGENTS.md`,
 
 ## Current CI state that must not be misreported as green
 
-The latest completed PR run is `31615465442`. Windows-target clippy, Windows
-GNU release smoke, Linux/macOS release smoke, lint, and CodeQL passed. Its UI
-job failed with 268 passed, 5 skipped, and 2 failed:
+The latest completed PR run is `31627911658`. CodeQL, lint, and Windows-target
+clippy passed, but the Rust `check` job failed before UI qualification. One
+Rapid-MLX compatibility probe hit a transient Linux `ETXTBSY` (“Text file
+busy”) spawn error:
 
-1. `core/rapid-preset-visibility.spec.js:99` — Rapid-MLX control reachability
-   timed out while repeatedly navigating sections/opening details.
-2. `core/kv-usecase.spec.js:7` — the test selected a use-case before async
-   bootstrap had bound its card listeners, leaving the default `q8_0` value.
+1. `inference::rapid_mlx::compatibility::tests::live_probe_qualifies_healthy_external_profiles_without_global_warning`
+   — temporary fixture executable returned `ETXTBSY` at spawn.
 
-The downloaded report is on the development Mac at
-`/tmp/local-llm-foundry-ci-31615465442/playwright-report/`. If it is needed on
-Windows, copy it as an investigation artifact; it is not source evidence.
-The source fix adds an explicit `modules-ready` barrier to the affected tests
-and visits each Rapid editor section once instead of repeating animated nav
-clicks for every control. Focused release-built repeats passed 15/15 (five
-repetitions of both affected specs), and the complete release-built suite passed
-270 tests with 5 skipped. These are local receipts, not a substitute for a
-fresh GitHub run. Do not remove or restore `ready-to-test` based only on native
-Windows results.
+The source fix adds a bounded retry for `ETXTBSY`; the exact test passed five
+times locally, and the full Rust suite passed 1,238 tests. The earlier UI fix
+also passed 15/15 focused release-built repeats and a complete release-built
+suite (270 passed, 5 skipped). These are local receipts, not a substitute for
+a fresh GitHub run. Do not remove or restore `ready-to-test` based only on
+native Windows results.
 
 ## Windows prerequisites
 
@@ -227,8 +222,8 @@ Native Windows work can close its markers only when all of these are true:
   package checks have raw receipts.
 - The mandatory Rust/JS checks and the complete release-built UI suite are
   green on the current commit.
-- A fresh CI run after the fix is green; the two failures from run
-  `31615465442` are not merely hidden by retries.
+- A fresh CI run after the fix is green; the transient failure from run
+  `31627911658` is not merely hidden by retries.
 - Phase 12 evidence is complete and the plan status table is updated before
   Phase 13 screenshot capture or public 2.0 release work begins.
 
