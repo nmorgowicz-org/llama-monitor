@@ -2100,10 +2100,20 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  min-height: 42px;
+  box-sizing: border-box;
   flex-shrink: 0;
   padding: 8px 20px;
   background: rgba(0, 0, 0, 0.1);
   border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+/* Keep the strip's footprint stable while an estimate is unavailable. A model
+   path can trigger an async estimate while the user is clicking a control;
+   hiding it with display:none would move the entire editor under the pointer. */
+.preset-vram-strip.is-empty {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .preset-vram-strip .preset-vram-display {

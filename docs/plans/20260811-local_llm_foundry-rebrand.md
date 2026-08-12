@@ -7,7 +7,7 @@
 - Target release: 2.0.0
 - Source snapshot: 2026-08-11
 
-## Execution status (verified 2026-08-11)
+## Execution status (verified 2026-08-12)
 
 | Phase | Status | Evidence / remaining gate |
 |---|---|---|
@@ -19,11 +19,45 @@
 | 5 — path/config/resource default-root switch | Complete | Fresh canonical defaults, selected-root consumer routing, helper/docs updates, Windows early logging, and persisted-path policy receipt verified. |
 | 6 — model-library relocation path integration | Complete | Receipt-backed keep/move selection, resumable verified copy, persistence rewrites, and source-retention policy passed; native Windows qualification remains a Phase 12 marker. |
 | 7 — package, crate, binary, CLI, and backend identity | Complete | Canonical/legacy entrypoints, parity tests, release build, JS gates, and Windows GNU cross-check passed; native Windows execution remains a Phase 12 marker. |
-| 8 — frontend identity, migration UX, accessibility, and theme parity | Complete | Identity registry, Token Ingot surfaces, migration UX, startup inventory/platform synchronization, deterministic wizard synchronization, and the complete release-built browser suite passed. |
+| 8 — frontend identity, migration UX, accessibility, and theme parity | Complete with CI regression follow-up | Source-level gates and focused/full local release-built browser validation pass; the two CI timing races from `31603543480` are fixed locally and await a fresh remote run. |
 | 9 — runtime, agent, updater, tray, and platform identities | Complete | Runtime compatibility, updater, remote-path/task migration, CA continuity, entropy hardening, and Token Ingot tray integration are validated; native Windows proofs remain explicit return markers. |
 | 10 — documentation, API, CLI, migration, and historical policy | Complete | Current docs/templates, upgrade guide, brand usage policy, compatibility notes, historical allowlist, and 42-file relative-link validation pass. Fresh screenshot promotion remains Phase 13. |
-| 11 — CI, release-please, packaging, dual assets, and repository rename | In progress | Source and GitHub cutover gates pass: repository renamed, old URL redirects, git continuity verified, and PR #314 carries `feat!:` with a compact 20-entry override. The pending 1.8.2 release-please PR will be superseded by the merged feature delta; generated 2.0.0 release and real artifact/update probes remain explicit return markers. |
-| 12–14 — cross-platform, security, final qualification, and launch | Not started | Execute only after Phase 11 external cutover gates close. |
+| 11 — CI, release-please, packaging, dual assets, and repository rename | In progress | Source and GitHub cutover gates pass: repository renamed, old URL redirects, git continuity verified, and PR #314 carries `feat!:` with a compact 20-entry override. Windows-target clippy/build and release-smoke jobs pass. The two UI races from CI run `31603543480` are fixed locally; a fresh remote run, generated 2.0.0 release, and real artifact/update probes remain open. |
+| 12–14 — cross-platform, security, final qualification, and launch | Not started; Windows handoff prepared | Native Windows work is intentionally deferred to the Windows machine. Use `docs/plans/20260812-local_llm_foundry-windows-validation-handoff.md`; do not close these phases from macOS cross-compilation alone. |
+
+### Current CI qualification incident and local resolution (2026-08-12)
+
+PR #314 run `31603543480` completed with **268 passed, 5 skipped, 2 failed** in
+the UI job. All other CI jobs in that run passed, including Windows-target
+clippy, Windows GNU release smoke, Linux/macOS release smoke, lint, and CodeQL.
+
+The downloaded Playwright report is retained at
+`/tmp/local-llm-foundry-ci-31603543480/playwright-report/` and contains traces,
+screenshots, and error contexts for each retry. The two failing tests are:
+
+1. `core/app-shell.spec.js:176` — the Gemma recommendation click completed but
+   `#modal-chat-template-file` remained empty on all retries.
+2. `core/rapid-preset-visibility.spec.js:99` — the control-reachability loop
+   timed out while repeatedly navigating sections/opening Rapid-MLX details.
+
+Local diagnosis found that the Gemma failure was a real layout race: the async
+VRAM estimate changed the strip from `display:none` to visible while the click
+was in flight, moving the button under the pointer. The strip now reserves a
+stable footprint and toggles visibility/accessibility state without reflow.
+Rapid-MLX reachability now uses the same stable layout under repeated section
+and details navigation.
+
+Verified after the fix with the release build:
+
+- Gemma recommendation: 20/20 focused repetitions.
+- Rapid-MLX control reachability: 10/10 focused repetitions.
+- Full Playwright suite: 267 passed, 5 skipped, and 3 flaky-but-passed-on-retry;
+  no hard failures.
+- Fresh `preset-editor` screenshot harness completed and was visually inspected.
+
+The three remaining flakes are guided-generation startup/toast timing and are
+not the two CI failures above. A fresh GitHub `ready-to-test` run is still
+required before Phase 11 or the release candidate is marked green.
 
 ### Phase closure blockers
 
@@ -40,7 +74,7 @@ acceptance gates, not implementation uncertainty.
 | 5 | Closed 2026-08-11: fresh canonical default, selected-root routing, helper/docs updates, Windows early logging, and persisted-path policy pass. Model relocation is isolated to Phase 6. |
 | 6 | Closed 2026-08-11 for source-level macOS/Linux and cross-target contract: model-root preview/keep-or-copy API, receipt-backed selection, hash/free-space/collision/symlink protections, resumable copy, persistence rewrites, Migration settings controls, and focused gates pass. Native Windows model-root qualification is an explicit Phase 12 return marker. |
 | 7 | Closed 2026-08-11: canonical package and binary, thin legacy alias, shared runner, CLI parity receipt, full Rust/JS/release gates, and Windows GNU target check pass. Native Windows launch and installed-binary discovery remain an explicit Phase 12 return marker. |
-| 8 | Closed 2026-08-11: frontend identity registry, Token Ingot browser/PWA surfaces, migration toast/controls, auth-cookie compatibility, startup inventory/platform synchronization, and full release-built Playwright suite passed with 270 tests and 5 intentional skips. |
+| 8 | Source-level closure remains valid, but external CI closure is blocked: local release-built Playwright passed with 270 tests and 5 intentional skips, while CI run `31603543480` failed the Gemma recommendation test and Rapid-MLX control-reachability test after 268 passes. |
 | 9 | Complete 2026-08-11: runtime identity centralization, deterministic canonical-first assets, checksum URL retention, exact process/task compatibility, legacy install-path preservation, CA continuity, entropy hardening, Token Ingot tray integration, and current-exe update paths pass source-level gates. Native Windows task/tray/mixed-version proofs remain explicit return markers. |
 | 10 | Complete 2026-08-12: current docs/templates, upgrade guide, brand usage policy, CLI/API/runtime compatibility notes, historical allowlist, and 42-file relative-link validation pass. Fresh screenshot promotion remains Phase 13. |
 
@@ -1303,10 +1337,13 @@ current-doc edits; never rewrite receipts to make a gate pass.
 
 **Current execution position (2026-08-12):** source-controlled implementation
 and authorized GitHub cutover gates are complete; release launch gates remain
-open. The release
+open. The latest CI run (`31603543480`) passed all non-UI jobs but failed two UI
+tests, so this phase cannot close yet. The release
 workflow now publishes the four canonical and four legacy 2.0.x bridge assets,
 checksums them fail-closed, preserves archive layouts, and validates the source
 identity contract. See `evidence/20260811-local-llm-foundry/phase-11/README.md`.
+The downloaded Playwright report is retained at
+`/tmp/local-llm-foundry-ci-31603543480/playwright-report/`.
 
 Completed in this phase: release-please package identity, canonical CI paths and
 cache keys, release path filters, dual-asset packaging, exact checksum coverage,
@@ -1317,7 +1354,9 @@ git URLs resolve to the same `main` HEAD. PR #314 uses the proven major-release
 title `feat!: launch Local LLM Foundry 2.0 with backend-neutral Rapid-MLX` and a
 compact 20-entry override block. The pending 1.8.2 release-please PR will be
 superseded by this merged feature delta. Remaining before Phase 11 closure:
-generated 2.0.0 release artifacts, real updater probes, and runner validation.
+resolve and rerun the CI UI failures, generate 2.0.0 release artifacts,
+complete real updater probes, and validate the self-hosted runner after the
+repository rename.
 
 **Objective**
 

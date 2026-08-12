@@ -1,9 +1,33 @@
 # Phase 11 — CI, release, packaging, and repository cutover
 
-Status: **repository cutover and PR identity complete; release artifact gates remain open** (2026-08-12).
+Status: **repository cutover and PR identity complete; release artifact and UI qualification gates remain open** (2026-08-12).
 
 This receipt covers the source-controlled portion and authorized GitHub repository
 cutover. It does not claim that a 2.0.0 release has been published.
+
+## Latest CI qualification and local repair
+
+PR #314 CI run `31603543480` passed all non-UI jobs, including Windows-target
+clippy, Windows GNU release smoke, Linux/macOS release smoke, lint, and CodeQL.
+The UI job completed with 268 passed, 5 skipped, and 2 failed tests:
+
+- `core/app-shell.spec.js:176` — Gemma recommendation did not persist the
+  installed template path in CI retries.
+- `core/rapid-preset-visibility.spec.js:99` — Rapid-MLX control reachability
+  timed out during repeated section navigation/details expansion.
+
+Full Playwright artifacts are retained at
+`/tmp/local-llm-foundry-ci-31603543480/playwright-report/`.
+
+Local release-built diagnosis and repair are complete. The Gemma failure was a
+layout race caused by the async VRAM strip appearing under the in-flight click;
+the strip now keeps a stable footprint. The Rapid-MLX reachability timeout no
+longer reproduces with the stable editor layout. Focused repetitions passed
+Gemma 20/20 and Rapid reachability 10/10. The full local suite completed with
+267 passed, 5 skipped, and 3 flaky-but-passed-on-retry, with no hard failures.
+The remaining flakes are guided-generation startup/toast timing and do not
+close remote CI or native Windows gates. A fresh GitHub run is required before
+this receipt becomes release sign-off.
 
 ## Completed source gates
 
@@ -40,6 +64,10 @@ npm run validate-rebrand              PASS
 npm run validate-release-contract     PASS
 cargo build --release                 PASS
 git diff --check                      PASS
+Focused Gemma Playwright repetitions  PASS — 20/20
+Focused Rapid reachability repetitions PASS — 10/10
+Full release-built Playwright suite  PASS — 267 passed, 5 skipped, 3 flaky retries
+Preset-editor screenshot harness      PASS — fresh artifacts inspected
 ```
 
 ## Explicit return markers

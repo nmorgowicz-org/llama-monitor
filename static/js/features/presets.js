@@ -983,11 +983,16 @@ export function updatePresetVram() {
     const box = document.getElementById('preset-vram-display');
     const strip = document.getElementById('preset-vram-strip');
     if (!box) return;
+    const setStripVisible = (visible) => {
+        if (!strip) return;
+        strip.classList.toggle('is-empty', !visible);
+        strip.setAttribute('aria-hidden', String(!visible));
+    };
     updatePresetMlockWarning();
     updatePresetMmapHint();
     const modelVal = document.getElementById('modal-model-path')?.value.trim() || '';
-    if (!modelVal) { if (strip) strip.style.display = 'none'; return; }
-    if (strip) strip.style.display = '';
+    if (!modelVal) { setStripVisible(false); return; }
+    setStripVisible(true);
     box.innerHTML = '<div class="preset-vram-loading">Estimating VRAM…</div>';
     clearTimeout(_presetVramTimer);
     _presetVramTimer = setTimeout(async () => {
@@ -1036,13 +1041,13 @@ export function updatePresetVram() {
                 : { 'Content-Type': 'application/json' };
             const r = await fetch('/api/vram-estimate', { method: 'POST', headers, body: JSON.stringify(body) });
             if (seq !== _presetVramSeq) return;
-            const hideStrip = () => { if (strip) strip.style.display = 'none'; };
+            const hideStrip = () => setStripVisible(false);
             if (!r.ok) { hideStrip(); return; }
             const data = await r.json();
             if (data.error) { hideStrip(); return; }
             _renderPresetVram(box, data);
             updatePresetMlockWarning(data);
-        } catch { if (seq === _presetVramSeq && strip) strip.style.display = 'none'; }
+        } catch { if (seq === _presetVramSeq) setStripVisible(false); }
     }, 350);
 }
 
