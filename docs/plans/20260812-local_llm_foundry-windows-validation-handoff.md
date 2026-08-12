@@ -1,6 +1,12 @@
 # Local LLM Foundry 2.0 — Native Windows Validation Handoff
 
-Status: prepared 2026-08-12; native execution is not yet complete
+Status: native Windows validation completed 2026-08-12; local native gates are green
+
+The Windows checkout now has the portability and test-fixture fixes required for
+the native MSVC build. The code and evidence are ready to carry back to macOS;
+they still need to be committed and pushed before switching machines. The
+remaining release follow-ups are a fresh CI run plus the environment-only GNU
+cross-target and WSL2 checks described below.
 
 This document is the operational handoff for a fresh Codex session running on
 the Windows development machine. The authoritative implementation and release

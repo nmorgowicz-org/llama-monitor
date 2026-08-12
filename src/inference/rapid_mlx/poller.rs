@@ -339,7 +339,11 @@ mod tests {
 
     #[tokio::test]
     async fn one_poller_reuses_client_across_all_authenticated_telemetry_calls() {
-        let mut server = mockito::Server::new_async().await;
+        let mut server = mockito::Server::new_with_opts_async(mockito::ServerOpts {
+            host: "127.0.0.1",
+            ..Default::default()
+        })
+        .await;
         let health = server
             .mock("GET", "/health")
             .match_header("authorization", "Bearer secret")

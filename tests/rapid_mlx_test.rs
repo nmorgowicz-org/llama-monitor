@@ -105,14 +105,13 @@ fn test_rapid_mlx_discovery_source_classification() {
 
 #[tokio::test]
 async fn test_rapid_mlx_await_ready_success() {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    drop(listener);
 
     let route = warp::path!("health" / "ready")
         .map(|| warp::reply::with_status("OK", warp::http::StatusCode::OK));
 
-    tokio::spawn(warp::serve(route).run(([127, 0, 0, 1], port)));
+    tokio::spawn(warp::serve(route).incoming(listener).run());
 
     let runtime = RuntimeMetadata {
         executable_path: PathBuf::from("/bin/ls"),
@@ -141,9 +140,8 @@ async fn test_rapid_mlx_await_ready_success() {
 
 #[tokio::test]
 async fn test_rapid_mlx_await_ready_failure() {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    drop(listener);
 
     let route = warp::path!("health" / "ready")
         .map(|| warp::reply::with_status("Not Ready", warp::http::StatusCode::NOT_FOUND));
@@ -177,9 +175,8 @@ async fn test_rapid_mlx_await_ready_failure() {
 
 #[tokio::test]
 async fn test_rapid_mlx_status_uses_api_key() {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    drop(listener);
 
     let status = warp::path!("v1" / "status")
         .and(warp::header::optional::<String>("authorization"))
@@ -203,8 +200,7 @@ async fn test_rapid_mlx_status_uses_api_key() {
         });
     let cache = warp::path!("v1" / "cache" / "stats")
         .map(|| warp::reply::json(&serde_json::json!({"enabled": false})));
-    tokio::spawn(warp::serve(status.or(cache)).run(([127, 0, 0, 1], port)));
-    tokio::time::sleep(Duration::from_millis(25)).await;
+    tokio::spawn(warp::serve(status.or(cache)).incoming(listener).run());
 
     let snapshot = RapidMlxPoller::new("127.0.0.1", port, Some("status-secret"))
         .poll()

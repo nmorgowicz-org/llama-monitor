@@ -1,10 +1,14 @@
 use llama_monitor::inference::rapid_mlx::poller::RapidMlxPoller;
-use mockito::Server;
+use mockito::{Server, ServerOpts};
 use serde_json::json;
 
 #[tokio::test]
 async fn test_rapid_mlx_poller_unit_conversion() {
-    let mut server = Server::new_async().await;
+    let mut server = Server::new_with_opts_async(ServerOpts {
+        host: "127.0.0.1",
+        ..Default::default()
+    })
+    .await;
     let url = server.url().parse::<url::Url>().expect("Invalid URL");
     let host = url.host_str().expect("No host").to_string();
     let port = url.port().expect("No port");
@@ -39,7 +43,11 @@ async fn test_rapid_mlx_poller_unit_conversion() {
 
 #[tokio::test]
 async fn test_rapid_mlx_poller_zero_vs_none() {
-    let mut server = Server::new_async().await;
+    let mut server = Server::new_with_opts_async(ServerOpts {
+        host: "127.0.0.1",
+        ..Default::default()
+    })
+    .await;
     let url = server.url().parse::<url::Url>().expect("Invalid URL");
     let host = url.host_str().expect("No host").to_string();
     let port = url.port().expect("No port");
@@ -69,7 +77,11 @@ async fn test_rapid_mlx_poller_zero_vs_none() {
 
 #[tokio::test]
 async fn test_cache_error_status_degrades_to_absent() {
-    let mut server = Server::new_async().await;
+    let mut server = Server::new_with_opts_async(ServerOpts {
+        host: "127.0.0.1",
+        ..Default::default()
+    })
+    .await;
     let url = server.url().parse::<url::Url>().expect("Invalid URL");
     let host = url.host_str().expect("No host").to_string();
     let port = url.port().expect("No port");
@@ -96,7 +108,11 @@ async fn test_cache_error_status_degrades_to_absent() {
 
 #[tokio::test]
 async fn fixture_status_is_tolerant_authenticated_and_maps_recognized_cache() {
-    let mut server = Server::new_async().await;
+    let mut server = Server::new_with_opts_async(ServerOpts {
+        host: "127.0.0.1",
+        ..Default::default()
+    })
+    .await;
     let _health = server
         .mock("GET", "/health")
         .match_header("authorization", "Bearer test-secret")
@@ -133,7 +149,11 @@ async fn fixture_status_is_tolerant_authenticated_and_maps_recognized_cache() {
 
 #[tokio::test]
 async fn vision_cache_is_recognized_without_status_cache() {
-    let mut server = Server::new_async().await;
+    let mut server = Server::new_with_opts_async(ServerOpts {
+        host: "127.0.0.1",
+        ..Default::default()
+    })
+    .await;
     let _status = server
         .mock("GET", "/v1/status")
         .with_status(200)
@@ -169,7 +189,11 @@ async fn vision_cache_is_recognized_without_status_cache() {
 
 #[tokio::test]
 async fn invalid_cache_and_opaque_request_fields_are_not_forwarded() {
-    let mut server = Server::new_async().await;
+    let mut server = Server::new_with_opts_async(ServerOpts {
+        host: "127.0.0.1",
+        ..Default::default()
+    })
+    .await;
     let _status = server
         .mock("GET", "/v1/status")
         .with_status(200)
@@ -214,7 +238,11 @@ async fn malformed_or_invalid_required_status_is_rejected() {
         r#"{"status":"idle","generation_tps":-1.0}"#,
         r#"{"status":[]}"#,
     ] {
-        let mut server = Server::new_async().await;
+        let mut server = Server::new_with_opts_async(ServerOpts {
+            host: "127.0.0.1",
+            ..Default::default()
+        })
+        .await;
         let _status = server
             .mock("GET", "/v1/status")
             .with_status(200)
@@ -232,7 +260,11 @@ async fn malformed_or_invalid_required_status_is_rejected() {
 
 #[tokio::test]
 async fn missing_or_unknown_status_is_reachable_schema_drift() {
-    let mut server = Server::new_async().await;
+    let mut server = Server::new_with_opts_async(ServerOpts {
+        host: "127.0.0.1",
+        ..Default::default()
+    })
+    .await;
     let _health = server.mock("GET", "/health").with_status(200).create();
     let _status = server
         .mock("GET", "/v1/status")

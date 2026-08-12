@@ -943,6 +943,11 @@ fn validate_mlx_config_reference(reference: &str) -> Result<(), String> {
     let path = Path::new(reference);
     if reference.is_empty()
         || reference.len() > 512
+        // `Path::is_absolute` treats a leading slash differently on Windows
+        // than on Unix. References are HF-relative paths on every platform,
+        // so reject both slash forms explicitly before consulting components.
+        || reference.starts_with('/')
+        || reference.starts_with('\\')
         || path.is_absolute()
         || path
             .components()

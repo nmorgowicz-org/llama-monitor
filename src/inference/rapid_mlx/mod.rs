@@ -1863,7 +1863,11 @@ fn parse_hf_repo_revision(model_id: &str) -> Option<(String, String)> {
 }
 
 fn is_local_path(model_id: &str) -> bool {
-    std::path::Path::new(model_id).is_absolute()
+    let path = std::path::Path::new(model_id);
+    path.is_absolute()
+        || model_id.starts_with('/')
+        || model_id.starts_with('\\')
+        || model_id.as_bytes().get(1).is_some_and(|byte| *byte == b':')
 }
 
 fn is_hf_repo_id(model_id: &str) -> bool {

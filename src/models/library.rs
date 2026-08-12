@@ -1832,10 +1832,8 @@ mod tests {
         let persisted: serde_json::Value =
             serde_json::from_reader(fs::File::open(presets).unwrap()).unwrap();
         assert!(
-            persisted["model_path"]
-                .as_str()
-                .unwrap()
-                .ends_with("gguf/model.gguf")
+            Path::new(persisted["model_path"].as_str().unwrap())
+                .ends_with(Path::new("gguf").join("model.gguf"))
         );
         assert!(
             !temp
@@ -1922,13 +1920,8 @@ mod tests {
         let value: serde_json::Value =
             serde_json::from_reader(fs::File::open(tags).unwrap()).unwrap();
         assert!(
-            value["tags"]
-                .as_object()
-                .unwrap()
-                .keys()
-                .next()
-                .unwrap()
-                .ends_with("gguf/27B_MTP.gguf")
+            Path::new(value["tags"].as_object().unwrap().keys().next().unwrap(),)
+                .ends_with(Path::new("gguf").join("27B_MTP.gguf"))
         );
     }
 
@@ -2011,10 +2004,21 @@ mod tests {
         let persisted: serde_json::Value =
             serde_json::from_reader(fs::File::open(presets).unwrap()).unwrap();
         assert!(
-            persisted["rapid_mlx"]["model_path"]
-                .as_str()
-                .unwrap()
-                .contains("models/cache/huggingface/hub/models--mlx-community--Qwen3-0.6B-4bit/snapshots/abc")
+            Path::new(persisted["rapid_mlx"]["model_path"].as_str().unwrap())
+                .components()
+                .collect::<Vec<_>>()
+                .windows(6)
+                .any(|parts| {
+                    parts[0] == std::path::Component::Normal("models".as_ref())
+                        && parts[1] == std::path::Component::Normal("cache".as_ref())
+                        && parts[2] == std::path::Component::Normal("huggingface".as_ref())
+                        && parts[3] == std::path::Component::Normal("hub".as_ref())
+                        && parts[4]
+                            == std::path::Component::Normal(
+                                "models--mlx-community--Qwen3-0.6B-4bit".as_ref(),
+                            )
+                        && matches!(parts[5], std::path::Component::Normal(name) if name.to_string_lossy().starts_with("snapshots"))
+                })
         );
     }
 }

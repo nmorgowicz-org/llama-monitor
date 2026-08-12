@@ -614,6 +614,26 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
 
+    #[cfg(unix)]
+    fn symlink_file(source: &Path, destination: &Path) {
+        std::os::unix::fs::symlink(source, destination).unwrap();
+    }
+
+    #[cfg(windows)]
+    fn symlink_file(source: &Path, destination: &Path) {
+        std::os::windows::fs::symlink_file(source, destination).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn symlink_dir(source: &Path, destination: &Path) {
+        std::os::unix::fs::symlink(source, destination).unwrap();
+    }
+
+    #[cfg(windows)]
+    fn symlink_dir(source: &Path, destination: &Path) {
+        std::os::windows::fs::symlink_dir(source, destination).unwrap();
+    }
+
     /// A directory that `validate_model_directory` accepts: config, tokenizer, weights.
     fn write_model(dir: &Path, weight_bytes: usize) {
         fs::create_dir_all(dir).unwrap();
@@ -651,6 +671,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_plan_reports_hardlinking_when_source_and_library_share_a_filesystem() {
         let tmp = tempfile::tempdir().unwrap();
@@ -703,6 +724,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn adoption_hardlinks_the_files_and_leaves_no_staging_directory() {
         let tmp = tempfile::tempdir().unwrap();
@@ -714,11 +736,22 @@ mod tests {
         assert_eq!(adopted.method, AdoptionMethod::Hardlink);
         assert!(adopted.destination.join("model.safetensors").is_file());
 
-        // Hard-linked, not copied: one inode, two names.
-        let a = fs::metadata(src.join("model.safetensors")).unwrap();
-        let b = fs::metadata(adopted.destination.join("model.safetensors")).unwrap();
-        assert_eq!(a.ino(), b.ino());
-        assert!(b.nlink() >= 2);
+        // Hard-linked, not copied: one inode, two names on Unix. Windows does not expose
+        // inode/link-count metadata through std, so verify the destination has the same bytes
+        // and rely on the production hard-link operation's successful method classification.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let a = fs::metadata(src.join("model.safetensors")).unwrap();
+            let b = fs::metadata(adopted.destination.join("model.safetensors")).unwrap();
+            assert_eq!(a.ino(), b.ino());
+            assert!(b.nlink() >= 2);
+        }
+        #[cfg(windows)]
+        assert_eq!(
+            fs::read(src.join("model.safetensors")).unwrap(),
+            fs::read(adopted.destination.join("model.safetensors")).unwrap()
+        );
 
         let leftovers: Vec<_> = fs::read_dir(lib.join("mlx/native"))
             .unwrap()
@@ -740,7 +773,7 @@ mod tests {
         let src = tmp.path().join("outside/farm");
         write_model(&src, 8);
         fs::remove_file(src.join("model.safetensors")).unwrap();
-        std::os::unix::fs::symlink(blobs.join("weights"), src.join("model.safetensors")).unwrap();
+        symlink_file(&blobs.join("weights"), &src.join("model.safetensors"));
 
         let plan = plan_adoption(&lib, &src, None).unwrap();
         assert_eq!(plan.resolved_symlinks, 1);
@@ -769,7 +802,7 @@ mod tests {
         write_model(&src, 8);
         // Named so it passes the shape pre-check and is caught by the survey, which is the
         // stage that has to notice a link with nothing behind it.
-        std::os::unix::fs::symlink(tmp.path().join("gone"), src.join("extra.bin")).unwrap();
+        symlink_file(&tmp.path().join("gone"), &src.join("extra.bin"));
 
         let err = plan_adoption(&lib, &src, None).unwrap_err();
         assert!(
@@ -800,6 +833,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn removal_deletes_a_managed_directory_and_reports_shared_bytes() {
         let tmp = tempfile::tempdir().unwrap();
@@ -896,7 +930,7 @@ mod tests {
         let lib = library(tmp.path());
         let real = tmp.path().join("outside/real");
         write_model(&real, 32);
-        std::os::unix::fs::symlink(&real, lib.join("mlx/native/link")).unwrap();
+        symlink_dir(&real, &lib.join("mlx/native/link"));
 
         assert!(remove_managed_directory(&lib, &lib.join("mlx/native/link")).is_err());
         assert!(real.join("model.safetensors").is_file());

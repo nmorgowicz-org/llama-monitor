@@ -1,0 +1,41 @@
+timestamp=2026-08-12T16:39:07.4746344-04:00
+commit=f918e69f41575d4935b51c08380063f2a1bee084
+branch=feat/rapid-mlx-integration
+computer:
+
+WindowsProductName    WindowsVersion OsBuildNumber OsArchitecture
+------------------    -------------- ------------- --------------
+Windows 10 Enterprise 2009           26200         64-bit        
+
+
+
+git:
+git version 2.52.0.windows.1
+rustc:
+rustc 1.94.1 (e408947bf 2026-03-25)
+binary: rustc
+commit-hash: e408947bfd200af42db322daf0fadfe7e26d3bd1
+commit-date: 2026-03-25
+host: x86_64-pc-windows-msvc
+release: 1.94.1
+LLVM version: 21.1.8
+cargo:
+cargo 1.94.1 (29ea6fb6a 2026-03-24)
+rustup targets:
+x86_64-pc-windows-msvc
+node:
+v24.11.1
+npm:
+11.6.2
+playwright:
+Version 1.62.1
+llama-server:
+
+nvidia-smi:
+C:\WINDOWS\system32\nvidia-smi.exe
+rocm-smi:
+
+winget:
+C:\Users\nick\AppData\Local\Microsoft\WindowsApps\winget.exe
+webview2 registry:
+

@@ -560,12 +560,16 @@ mod tests {
             fs::write(&blob, vec![0u8; *size]).unwrap();
             #[cfg(unix)]
             std::os::unix::fs::symlink(&blob, snapshot.join(name)).unwrap();
+            #[cfg(windows)]
+            std::os::windows::fs::symlink_file(&blob, snapshot.join(name)).unwrap();
         }
         if let Some(body) = config {
             let blob = blobs.join("config-blob");
             fs::write(&blob, body).unwrap();
             #[cfg(unix)]
             std::os::unix::fs::symlink(&blob, snapshot.join("config.json")).unwrap();
+            #[cfg(windows)]
+            std::os::windows::fs::symlink_file(&blob, snapshot.join("config.json")).unwrap();
         }
     }
 
