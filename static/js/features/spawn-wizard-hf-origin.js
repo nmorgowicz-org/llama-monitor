@@ -4,6 +4,19 @@ import { wizardState, getAuthHeaders } from './spawn-wizard.js';
 import { _refreshHwTagsRow, resetTagsRowOrigin } from './spawn-wizard-hf-tags.js';
 import { renderHardwareModelHeader, _fetchAndShowQuantOptions } from './spawn-wizard-hardware-model.js';
 
+const HUGGINGFACE_ORIGIN = 'https://huggingface.co';
+const HF_REPO_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}\/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/;
+
+function encodeRepoId(repoId) {
+  if (!HF_REPO_ID_RE.test(repoId || '')) return '';
+  return repoId.split('/').map((part) => encodeURIComponent(part)).join('/');
+}
+
+function safeHuggingFaceUrl(repoId) {
+  const fallback = `${HUGGINGFACE_ORIGIN}/${encodeRepoId(repoId)}`;
+  return fallback;
+}
+
 export let _originResolverPromise = null; // in-flight origin resolver to prevent double-fire
 export let _hfOriginWidgetData = null;    // last resolve-origin response, cached for widget reuse
 
@@ -124,7 +137,7 @@ function _renderHfOriginWidget(el, state, data = {}) {
   }
 
   if (state === 'confirmed') {
-    const { repoId, cardUrl } = data;
+    const { repoId } = data;
     const slashIdx = (repoId || '').indexOf('/');
     const repo = document.createElement('span');
     repo.className = 'hf-origin-repo';
@@ -143,7 +156,7 @@ function _renderHfOriginWidget(el, state, data = {}) {
 
     const link = document.createElement('a');
     link.className = 'hf-origin-card-link';
-    link.href = cardUrl || `https://huggingface.co/${repoId}`;
+    link.href = safeHuggingFaceUrl(repoId);
     link.target = '_blank';
     link.rel = 'noopener';
     link.textContent = '↗ Card';
@@ -263,7 +276,7 @@ function _renderHfOriginWidget(el, state, data = {}) {
     if (/^[^/\s]+\/[^/\s]+$/.test(q)) {
       resultsDiv.innerHTML = '';
       await _confirmHfOrigin(q, '', '', wizardState.model.path);
-      _renderHfOriginWidget(el, 'confirmed', { repoId: q, cardUrl: `https://huggingface.co/${q}` });
+      _renderHfOriginWidget(el, 'confirmed', { repoId: q, cardUrl: safeHuggingFaceUrl(q) });
       return;
     }
     resultsDiv.innerHTML = '';
@@ -322,10 +335,10 @@ function _renderHfOriginWidget(el, state, data = {}) {
 }
 
 // Persist HF origin to wizardState + tags, then refresh downstream UI.
-export async function _confirmHfOrigin(repoId, family, cardUrl, path) {
+export async function _confirmHfOrigin(repoId, family, _cardUrl, path) {
   wizardState.model.originRepo = repoId;
   wizardState.model.family = family || '';
-  wizardState.model.cardUrl = cardUrl || `https://huggingface.co/${repoId}`;
+  wizardState.model.cardUrl = safeHuggingFaceUrl(repoId);
   await _attachOriginTags(path, repoId, family);
   resetTagsRowOrigin();
   _refreshHwTagsRow();

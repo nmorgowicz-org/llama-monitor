@@ -2,6 +2,15 @@
 // Exported for use by models.js HF search panel.
 import { dom } from './spawn-wizard.js';
 
+const HF_REPO_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}\/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/;
+
+function safeHuggingFaceRepoUrl(repoId) {
+  const encodedRepo = HF_REPO_ID_RE.test(repoId || '')
+    ? repoId.split('/').map((part) => encodeURIComponent(part)).join('/')
+    : '';
+  return new URL(encodedRepo, 'https://huggingface.co/').href;
+}
+
 export async function openCardPanel(repoId) {
   if (!dom.cardPanel) return;
 
@@ -11,7 +20,7 @@ export async function openCardPanel(repoId) {
   dom.cardPanel.setAttribute('aria-hidden', 'false');
   if (dom.cardPanelTitle) dom.cardPanelTitle.textContent = repoId;
   if (dom.cardPanelHfLink) {
-    dom.cardPanelHfLink.href = `https://huggingface.co/${repoId}`;
+    dom.cardPanelHfLink.href = safeHuggingFaceRepoUrl(repoId);
     dom.cardPanelHfLink.textContent = '';
     const svg = dom.cardPanelHfLink.querySelector('svg') || document.createElementNS('http://www.w3.org/2000/svg','svg');
     dom.cardPanelHfLink.appendChild(svg);
