@@ -21,7 +21,9 @@
 | 7 — package, crate, binary, CLI, and backend identity | Complete | Canonical/legacy entrypoints, parity tests, release build, JS gates, and Windows GNU cross-check passed; native Windows execution remains a Phase 12 marker. |
 | 8 — frontend identity, migration UX, accessibility, and theme parity | Complete | Identity registry, Token Ingot surfaces, migration UX, startup inventory/platform synchronization, deterministic wizard synchronization, and the complete release-built browser suite passed. |
 | 9 — runtime, agent, updater, tray, and platform identities | Complete | Runtime compatibility, updater, remote-path/task migration, CA continuity, entropy hardening, and Token Ingot tray integration are validated; native Windows proofs remain explicit return markers. |
-| 10+ — documentation, release, repository, and final qualification | Not started | Execute only after each preceding gate closes. |
+| 10 — documentation, API, CLI, migration, and historical policy | Complete | Current docs/templates, upgrade guide, brand usage policy, compatibility notes, historical allowlist, and 42-file relative-link validation pass. Fresh screenshot promotion remains Phase 13. |
+| 11 — CI, release-please, packaging, dual assets, and repository rename | In progress | Source-controlled packaging bridge, exact-asset checksum validator, CI path filters, canonical release identity, and workflow/source gates pass. External repository rename, generated 2.0.0 release-please PR, and real artifact/update probes remain explicit return markers. |
+| 12–14 — cross-platform, security, final qualification, and launch | Not started | Execute only after Phase 11 external cutover gates close. |
 
 ### Phase closure blockers
 
@@ -1298,6 +1300,20 @@ Stop if documentation claims behavior not yet proven. Roll back only inaccurate
 current-doc edits; never rewrite receipts to make a gate pass.
 
 ### Phase 11 — CI, release-please, packaging, dual assets, and repository rename
+
+**Current execution position (2026-08-12):** source-controlled implementation
+gates are complete; external launch-owner gates remain open. The release
+workflow now publishes the four canonical and four legacy 2.0.x bridge assets,
+checksums them fail-closed, preserves archive layouts, and validates the source
+identity contract. See `evidence/20260811-local-llm-foundry/phase-11/README.md`.
+
+Completed in this phase: release-please package identity, canonical CI paths and
+cache keys, release path filters, dual-asset packaging, exact checksum coverage,
+2.1 canonical-only policy encoding, archive contract validators, and frozen
+bridge fixtures. Remaining before Phase 11 closure: generated release-please PR
+exactly at 2.0.0, real artifact/update probes, authorized repository rename, and
+post-rename continuity checks. These are deliberately not claimed from local
+source validation.
 
 **Objective**
 

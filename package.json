@@ -3,7 +3,9 @@
   "scripts": {
     "lint": "eslint static/js/",
     "validate-js": "node scripts/validate-js.mjs",
-    "validate-wizard-groups": "node scripts/validate-wizard-groups.mjs"
+    "validate-wizard-groups": "node scripts/validate-wizard-groups.mjs",
+    "validate-rebrand": "node scripts/validate-rebrand-contract.mjs",
+    "validate-release-contract": "node scripts/validate-release-contract.mjs --self-test"
   },
   "devDependencies": {
     "eslint": "10.8.0",
