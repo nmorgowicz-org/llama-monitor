@@ -68,7 +68,15 @@ test.describe('Rapid-MLX preset editor control reachability', () => {
     await page.selectOption('#modal-rapid-kv-cache-dtype', 'int4');
     await page.selectOption('#modal-rapid-cache-memory-mib', '16384');
     await page.selectOption('#modal-rapid-prefill-step-size', '1024');
-    await expect.poll(() => estimateBodies.length).toBeGreaterThan(1);
+    // The editor intentionally debounces VRAM requests, so three consecutive
+    // select changes may collapse into one request. Assert the request that
+    // eventually wins the debounce window rather than requiring an intermediate
+    // request for every control change.
+    await expect.poll(() => estimateBodies.at(-1)).toMatchObject({
+      kv_cache_dtype: 'int4',
+      retained_cache_mib: 16384,
+      prefill_step_size: 1024,
+    });
     const latestEstimate = estimateBodies.at(-1);
     expect(latestEstimate.kv_cache_dtype).toBe('int4');
     expect(latestEstimate.retained_cache_mib).toBe(16384);

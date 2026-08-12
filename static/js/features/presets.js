@@ -30,6 +30,7 @@ import {
 
 let newPresetSeed = null;
 let _presetRapidMlxPrefillExplicit = false;
+let _presetEditorNavInitialized = false;
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -286,6 +287,21 @@ async function installRecommendedChatTemplateForPreset() {
     } finally {
         if (button) button.disabled = false;
     }
+}
+
+function bindRecommendedChatTemplateButton() {
+    const modal = document.getElementById('preset-modal');
+    if (!modal || modal.dataset.recommendedTemplateBound === 'true') return;
+    // Delegate from the stable modal shell. The form contents can be refreshed
+    // while model metadata is loading, so binding the transient button node can
+    // lose the handler between modal open and the user's click.
+    modal.addEventListener('click', event => {
+        const button = event.target.closest?.('#preset-recommended-chat-template-btn');
+        if (!button || button.disabled) return;
+        event.preventDefault();
+        void installRecommendedChatTemplateForPreset();
+    });
+    modal.dataset.recommendedTemplateBound = 'true';
 }
 
 function clearFieldErrors() {
@@ -1254,6 +1270,15 @@ export function openPresetModal(mode, section, seedPreset = null) {
     const subtitle = document.getElementById('preset-editor-subtitle');
     const formatPill = document.getElementById('preset-editor-format');
     const form = document.getElementById('preset-form');
+    // Tests and other modal managers may close overlays by setting inert and
+    // aria-hidden directly. Always restore the modal's interactive state when
+    // opening it again; otherwise the overlay can paint while swallowing every
+    // click and select action inside it.
+    modal.removeAttribute('aria-hidden');
+    modal.inert = false;
+    modal.classList.remove('closing');
+    initPresetEditorNav();
+    bindRecommendedChatTemplateButton();
     form.reset();
     updatePresetChatTemplateStatusLine();
     if (formatPill) formatPill.hidden = true;
@@ -2823,23 +2848,27 @@ export async function resetPresets() {
 // ── Preset Editor Nav ─────────────────────────────────────────────────────────
 
 function initPresetEditorNav() {
-    const navItems = document.querySelectorAll('.preset-nav-item');
-    const sections = document.querySelectorAll('.preset-editor-section');
+    const modal = document.getElementById('preset-modal');
+    if (!modal || _presetEditorNavInitialized) return;
 
-    navItems.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const target = btn.dataset.section;
-            // Deactivate all
-            navItems.forEach(b => b.classList.remove('active'));
-            sections.forEach(s => s.classList.remove('active'));
-            // Activate clicked
-            btn.classList.add('active');
-            const activeSection = document.querySelector('.preset-editor-section[data-section="' + target + '"]');
-            if (activeSection) activeSection.classList.add('active');
-            const modalBody = document.querySelector('#preset-modal .modal-body');
-            if (modalBody) modalBody.scrollTop = 0;
+    // Delegate from the stable modal shell. The editor moves nav items between
+    // groups for Rapid-MLX, so one-time listeners on the original NodeList are
+    // fragile and can miss a click after a reconfiguration.
+    modal.addEventListener('click', event => {
+        const btn = event.target.closest?.('.preset-nav-item');
+        if (!btn || !modal.contains(btn)) return;
+        const target = btn.dataset.section;
+        modal.querySelectorAll('.preset-nav-item').forEach(item => {
+            const active = item === btn;
+            item.classList.toggle('active', active);
+            item.setAttribute('aria-pressed', active ? 'true' : 'false');
         });
+        modal.querySelectorAll('.preset-editor-section').forEach(panel => {
+            panel.classList.toggle('active', panel.dataset.section === target);
+        });
+        modal.querySelector('.modal-body')?.scrollTo({ top: 0, behavior: 'instant' });
     });
+    _presetEditorNavInitialized = true;
 }
 
 // ── Model-family generation defaults ─────────────────────────────────────────
@@ -3359,10 +3388,7 @@ export function initPresets() {
     document.getElementById('modal-rapid-cache-mode')?.addEventListener('change', (e) => {
         _toggleRapidCacheFields(e.target.value);
     });
-    document.getElementById('preset-recommended-chat-template-btn')?.addEventListener(
-        'click',
-        installRecommendedChatTemplateForPreset,
-    );
+    bindRecommendedChatTemplateButton();
     document.getElementById('preset-clear-chat-template-btn')?.addEventListener('click', async () => {
         setVal('modal-chat-template-file', '');
         await updatePresetChatTemplateStatusLine();
