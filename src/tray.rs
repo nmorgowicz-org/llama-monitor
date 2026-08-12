@@ -39,7 +39,7 @@ fn try_install_webview2() {
             Ok(s) if s.success() => {
                 eprintln!(
                     "[tray] winget install Microsoft.EdgeWebView2Runtime succeeded. \
-                     Please restart llama-monitor to enable the tray popover."
+                     Please restart Local LLM Foundry to enable the tray popover."
                 );
             }
             Ok(s) => {
@@ -104,38 +104,35 @@ type TrayMetrics = (
 );
 
 fn create_tray_icon() -> Icon {
-    let size = 22u32;
-    let mut rgba = vec![0u8; (size * size * 4) as usize];
+    let png_bytes = crate::web::static_assets::TOKEN_INGOT_22_PNG;
+    let decoded = (|| {
+        let decoder = png::Decoder::new(std::io::Cursor::new(png_bytes));
+        let mut reader = decoder.read_info().ok()?;
+        let mut buffer = vec![0; reader.output_buffer_size()?];
+        let output = reader.next_frame(&mut buffer).ok()?;
+        let bytes = &buffer[..output.buffer_size()];
+        let rgba = match output.color_type {
+            png::ColorType::Rgba => bytes.to_vec(),
+            png::ColorType::Rgb => bytes
+                .chunks_exact(3)
+                .flat_map(|pixel| [pixel[0], pixel[1], pixel[2], 255])
+                .collect(),
+            png::ColorType::GrayscaleAlpha => bytes
+                .chunks_exact(2)
+                .flat_map(|pixel| [pixel[0], pixel[0], pixel[0], pixel[1]])
+                .collect(),
+            png::ColorType::Grayscale => bytes
+                .iter()
+                .flat_map(|pixel| [*pixel, *pixel, *pixel, 255])
+                .collect(),
+            _ => return None,
+        };
+        Some((rgba, output.width, output.height))
+    })();
 
-    let mut set = |x: u32, y: u32| {
-        if x < size && y < size {
-            let idx = ((y * size + x) * 4) as usize;
-            rgba[idx + 3] = 255;
-        }
-    };
-
-    for x in 2..=19 {
-        set(x, 3);
-        set(x, 4);
-        set(x, 13);
-    }
-    for y in 3..=13 {
-        set(2, y);
-        set(3, y);
-        set(18, y);
-        set(19, y);
-    }
-    for y in 14..=16 {
-        set(10, y);
-        set(11, y);
-    }
-    for x in 7..=14 {
-        set(x, 17);
-        set(x, 18);
-    }
-
-    Icon::from_rgba(rgba, size, size)
-        .unwrap_or_else(|_| Icon::from_rgba(vec![0, 0, 0, 255], 1, 1).unwrap())
+    decoded
+        .and_then(|(rgba, width, height)| Icon::from_rgba(rgba, width, height).ok())
+        .unwrap_or_else(|| Icon::from_rgba(vec![0, 0, 0, 255], 1, 1).unwrap())
 }
 
 pub fn run_tray(state: AppState, port: u16, app_root: PathBuf) -> anyhow::Result<()> {
@@ -293,7 +290,7 @@ impl ApplicationHandler for TrayApp {
             let menu = tray_icon::menu::Menu::new();
             let open_item = tray_icon::menu::MenuItem::new("Open Dashboard", true, None);
             let open_logs_item = tray_icon::menu::MenuItem::new("Open Logs Folder", true, None);
-            let quit_item = tray_icon::menu::MenuItem::new("Quit Llama Monitor", true, None);
+            let quit_item = tray_icon::menu::MenuItem::new("Quit Local LLM Foundry", true, None);
             let _ = menu.append(&open_item);
             let _ = menu.append(&open_logs_item);
             let _ = menu.append(&tray_icon::menu::PredefinedMenuItem::separator());
@@ -303,7 +300,7 @@ impl ApplicationHandler for TrayApp {
             self.menu_quit_id = Some(quit_item.id().clone());
 
             let builder = TrayIconBuilder::new()
-                .with_tooltip("Llama Monitor")
+                .with_tooltip(crate::identity::PRODUCT_NAME)
                 .with_menu(Box::new(menu))
                 // Keep left-click for the popover toggle; menu is right-click only.
                 .with_menu_on_left_click(false)
@@ -532,7 +529,7 @@ impl TrayApp {
                     if likely_missing_runtime {
                         eprintln!(
                             "[tray] Tray popover unavailable: WebView2 runtime not found. \
-                             Attempting automatic install — restart llama-monitor afterward. \
+                             Attempting automatic install — restart Local LLM Foundry afterward. \
                              Manual download: \
                              https://developer.microsoft.com/microsoft-edge/webview2/"
                         );

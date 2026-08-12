@@ -2480,6 +2480,7 @@ dependencies = [
  "mockito",
  "once_cell",
  "percent-encoding",
+ "png",
  "rand 0.10.2",
  "rand_core 0.10.1",
  "rcgen",

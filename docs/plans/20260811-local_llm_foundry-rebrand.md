@@ -20,7 +20,8 @@
 | 6 — model-library relocation path integration | Complete | Receipt-backed keep/move selection, resumable verified copy, persistence rewrites, and source-retention policy passed; native Windows qualification remains a Phase 12 marker. |
 | 7 — package, crate, binary, CLI, and backend identity | Complete | Canonical/legacy entrypoints, parity tests, release build, JS gates, and Windows GNU cross-check passed; native Windows execution remains a Phase 12 marker. |
 | 8 — frontend identity, migration UX, accessibility, and theme parity | Complete | Identity registry, Token Ingot surfaces, migration UX, startup inventory/platform synchronization, deterministic wizard synchronization, and the complete release-built browser suite passed. |
-| 9+ — runtime, release, repository, and final qualification | Not started | Execute only after each preceding gate closes. |
+| 9 — runtime, agent, updater, tray, and platform identities | Complete | Runtime compatibility, updater, remote-path/task migration, CA continuity, entropy hardening, and Token Ingot tray integration are validated; native Windows proofs remain explicit return markers. |
+| 10+ — documentation, release, repository, and final qualification | Not started | Execute only after each preceding gate closes. |
 
 ### Phase closure blockers
 
@@ -38,6 +39,7 @@ acceptance gates, not implementation uncertainty.
 | 6 | Closed 2026-08-11 for source-level macOS/Linux and cross-target contract: model-root preview/keep-or-copy API, receipt-backed selection, hash/free-space/collision/symlink protections, resumable copy, persistence rewrites, Migration settings controls, and focused gates pass. Native Windows model-root qualification is an explicit Phase 12 return marker. |
 | 7 | Closed 2026-08-11: canonical package and binary, thin legacy alias, shared runner, CLI parity receipt, full Rust/JS/release gates, and Windows GNU target check pass. Native Windows launch and installed-binary discovery remain an explicit Phase 12 return marker. |
 | 8 | Closed 2026-08-11: frontend identity registry, Token Ingot browser/PWA surfaces, migration toast/controls, auth-cookie compatibility, startup inventory/platform synchronization, and full release-built Playwright suite passed with 270 tests and 5 intentional skips. |
+| 9 | Complete 2026-08-11: runtime identity centralization, deterministic canonical-first assets, checksum URL retention, exact process/task compatibility, legacy install-path preservation, CA continuity, entropy hardening, Token Ingot tray integration, and current-exe update paths pass source-level gates. Native Windows task/tray/mixed-version proofs remain explicit return markers. |
 
 ## 1. Purpose and execution contract
 
@@ -1154,37 +1156,37 @@ breaking old agents, or stranding 1.x updaters.
 
 **Tasks**
 
-- [ ] Centralize canonical and legacy release repository URLs, asset contracts,
+- [x] Centralize canonical and legacy release repository URLs, asset contracts,
   install paths, task names, process names, temp files, restart logs, user-agent
   strings, and executable names under `identity.rs`.
-- [ ] Fix the checksum asset data flow: `latest_release_info()` currently
+- [x] Fix the checksum asset data flow: `latest_release_info()` currently
   filters through `asset_info_from_github_asset()`, which discards
   `checksums.json`, while `fetch_checksums_json()` later searches the
   filtered list. Add a regression test before relying on updater evidence.
-- [ ] Make asset matching deterministic: canonical family first, legacy
+- [x] Make asset matching deterministic: canonical family first, legacy
   fallback; never depend on GitHub response order.
-- [ ] Use `current_exe()` for replacement/relaunch so old-name and new-name
+- [x] Use `current_exe()` for replacement/relaunch so old-name and new-name
   installations both update in place.
-- [ ] Accept both exact executable names in remote command validation.
-- [ ] Preview and migrate remote install paths; preserve explicit custom paths.
-- [ ] Introduce canonical Windows tasks
+- [x] Accept both exact executable names in remote command validation.
+- [x] Preview and migrate remote install paths; preserve explicit custom paths and keep discovered legacy paths until explicit migration.
+- [x] Introduce canonical Windows tasks
   `LocalLLMFoundryAgent` and `LocalLLMFoundrySensorBridge`.
-- [ ] Detect old task families, install/verify the new authenticated task, then
+- [x] Detect old task families, install/verify the new authenticated task, then
   retire the exact old task. Never leave two active SYSTEM tasks.
-- [ ] Pass an explicit resolved `--config-dir` to Windows scheduled tasks so
+- [x] Pass an explicit resolved `--config-dir` to Windows scheduled tasks so
   SSH-user and SYSTEM-profile `%APPDATA%` cannot diverge.
-- [ ] Migrate SYSTEM-profile agent data separately from the SSH user’s install
-  path.
-- [ ] Preserve old CA/key identity; do not rename `llama-monitor CA` merely
-  for appearance. New CN behavior requires mixed-trust tests.
-- [ ] Replace agent timestamp/PID randomness fallback with system entropy.
-- [ ] Harden temporary token transport; do not create a new branded copy of the
-  insecure legacy temp-file mechanism.
-- [ ] Update exact stop/status/remove operations for both name families; remove
+- [x] Migrate SYSTEM-profile agent data separately from the SSH user’s install
+  path via explicit resolved `--config-dir`, retaining legacy discoverability.
+- [x] Preserve old CA/key identity; valid legacy CA pairs are reused without
+  sentinel-dependent rotation; `llama-monitor CA` remains unchanged.
+- [x] Replace agent timestamp/PID randomness fallback with system entropy.
+- [x] Harden temporary token transport with system entropy, exclusive creation,
+  restrictive permissions, canonical filenames, and a legacy read fallback.
+- [x] Update exact stop/status/remove operations for both name families; remove
   broad product-name `pkill -f` usage where it can hit unrelated processes.
-- [ ] Replace the programmatic tray monitor glyph with the approved platform
-  variants; retain macOS template behavior.
-- [ ] Update tray tooltip/menu/restart/log actions and compact popover identity.
+- [x] Replace the programmatic tray monitor glyph with the approved Token Ingot
+  asset; retain macOS template behavior.
+- [x] Update tray tooltip/menu/restart/log actions and compact popover identity.
 - [ ] Record that no first-class systemd/launchd installer currently exists;
   do not invent one solely for parity. If external installer repos are found,
   assign them an explicit owner and gate.

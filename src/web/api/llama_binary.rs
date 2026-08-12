@@ -143,7 +143,7 @@ fn api_llama_binary_latest(
                 // Fetch from GitHub
                 let client = match reqwest::Client::builder()
                     .timeout(std::time::Duration::from_secs(20))
-                    .user_agent("llama-monitor")
+                    .user_agent(crate::identity::RELEASE_USER_AGENT)
                     .build()
                 {
                     Ok(c) => c,
@@ -256,7 +256,7 @@ fn api_llama_binary_releases(
 
                 let client = match reqwest::Client::builder()
                     .timeout(std::time::Duration::from_secs(20))
-                    .user_agent("llama-monitor")
+                    .user_agent(crate::identity::RELEASE_USER_AGENT)
                     .build()
                 {
                     Ok(c) => c,
@@ -341,7 +341,7 @@ fn api_llama_binary_release(
 
                 let client = match reqwest::Client::builder()
                     .timeout(std::time::Duration::from_secs(20))
-                    .user_agent("llama-monitor")
+                    .user_agent(crate::identity::RELEASE_USER_AGENT)
                     .build()
                 {
                     Ok(c) => c,
@@ -615,7 +615,7 @@ fn api_llama_binary_update(
 
                 let client = match reqwest::Client::builder()
                     .timeout(std::time::Duration::from_secs(300))
-                    .user_agent("llama-monitor")
+                    .user_agent(crate::identity::RELEASE_USER_AGENT)
                     .build()
                 {
                     Ok(c) => c,

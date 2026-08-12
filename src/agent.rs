@@ -209,8 +209,7 @@ const AGENT_MASTER_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
 const AGENT_IDLE_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 const REMOTE_AGENT_AUTOSTART_TIMEOUT: Duration = Duration::from_secs(15);
 const REMOTE_AGENT_AUTOSTART_SUPPRESS_DURATION: Duration = Duration::from_secs(120);
-const GITHUB_LATEST_RELEASE_URL: &str =
-    "https://api.github.com/repos/nmorgowicz-org/local-llm-foundry/releases/latest";
+const GITHUB_LATEST_RELEASE_URL: &str = crate::identity::RELEASE_API_URL;
 
 fn unix_timestamp_seconds() -> u64 {
     std::time::SystemTime::now()
@@ -315,6 +314,8 @@ pub struct LatestReleaseInfo {
     #[serde(default)]
     pub published_at: Option<String>,
     pub assets: Vec<ReleaseAssetInfo>,
+    #[serde(default)]
+    pub checksums_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -397,23 +398,15 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
             });
 
             existing.unwrap_or_else(|| {
-                // Generate a random token from system entropy
-                let bytes = std::fs::read("/dev/urandom")
-                    .ok()
-                    .map(|b| {
-                        b.iter()
-                            .take(16)
-                            .fold(0u128, |acc, &x| (acc << 8) | x as u128)
-                    })
-                    .unwrap_or_else(|| {
-                        // Fallback: use timestamp + process ID
-                        let ts = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_nanos();
-                        let pid = std::process::id() as u128;
-                        ts ^ pid
-                    });
+                // Generate a token exclusively from the operating system CSPRNG.
+                // Never fall back to timestamps or process IDs for credentials.
+                use rand::TryRng;
+                use rand::rngs::SysRng;
+                let mut entropy = [0u8; 16];
+                SysRng
+                    .try_fill_bytes(&mut entropy)
+                    .expect("system entropy unavailable; refusing to create agent token");
+                let bytes = u128::from_be_bytes(entropy);
                 let new_token = format!("{bytes:x}");
                 // Persist it
                 let _ = std::fs::create_dir_all(&config_dir);
@@ -1044,6 +1037,11 @@ pub async fn latest_release_info() -> Result<LatestReleaseInfo> {
         .json::<GithubRelease>()
         .await?;
 
+    let checksums_url = release
+        .assets
+        .iter()
+        .find(|asset| asset.name == "checksums.json")
+        .map(|asset| asset.browser_download_url.clone());
     let release_info = LatestReleaseInfo {
         tag_name: release.tag_name,
         name: release.name,
@@ -1055,6 +1053,7 @@ pub async fn latest_release_info() -> Result<LatestReleaseInfo> {
             .into_iter()
             .filter_map(asset_info_from_github_asset)
             .collect(),
+        checksums_url,
     };
 
     LATEST_RELEASE_CACHE.with(|cache| {
@@ -1103,12 +1102,24 @@ pub async fn detect_remote_agent(req: RemoteAgentDetectRequest) -> RemoteAgentDe
     let remote_os = detect_remote_os_with(&connection).await;
     let os = remote_os.as_str().to_string();
     let arch = detect_remote_arch_with(&connection, remote_os).await;
-    let install_path = install_path_for_os(remote_os).map(ToOwned::to_owned);
-    let installed = if let Some(path) = install_path.as_deref() {
-        remote_file_exists_with(&connection, remote_os, path).await
-    } else {
-        false
+    let canonical_install_path = install_path_for_os(remote_os).map(ToOwned::to_owned);
+    let legacy_install_path = legacy_install_path_for_os(remote_os).map(ToOwned::to_owned);
+    let canonical_installed = match canonical_install_path.as_deref() {
+        Some(path) => remote_file_exists_with(&connection, remote_os, path).await,
+        None => false,
     };
+    let legacy_installed = match legacy_install_path.as_deref() {
+        Some(path) => remote_file_exists_with(&connection, remote_os, path).await,
+        None => false,
+    };
+    let install_path = if canonical_installed {
+        canonical_install_path
+    } else if legacy_installed {
+        legacy_install_path
+    } else {
+        canonical_install_path
+    };
+    let installed = canonical_installed || legacy_installed;
     let managed_task =
         install::managed_task_status(&connection, remote_os, install_path.as_deref())
             .await
@@ -1701,19 +1712,25 @@ fn default_start_command_for_os(os: RemoteOs, install_path: &str) -> String {
                 .map(|(dir, _)| dir)
                 .unwrap_or("");
             let bridge_path = format!("{}\\sensor_bridge.exe", bridge_dir).replace('\'', "''");
+            let config_dir = bridge_dir
+                .rsplit_once('\\')
+                .map(|(dir, _)| dir)
+                .unwrap_or(bridge_dir)
+                .replace('\'', "''");
             format!(
                 "powershell.exe -NoProfile -NonInteractive -Command \"$ErrorActionPreference='Stop'; \
-Unregister-ScheduledTask -TaskName '{WINDOWS_AGENT_LEGACY_TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue; \
-Unregister-ScheduledTask -TaskName '{WINDOWS_AGENT_TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue; \
-Unregister-ScheduledTask -TaskName '{WINDOWS_SENSOR_BRIDGE_TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue; \
-Register-ScheduledTask -TaskName '{WINDOWS_AGENT_TASK_NAME}' -Trigger (New-ScheduledTaskTrigger -AtStartup) -Action (New-ScheduledTaskAction -Execute '{agent_path}' -Argument '--agent --agent-host 0.0.0.0 --agent-port {REMOTE_AGENT_DEFAULT_PORT}') -Settings (New-ScheduledTaskSettingsSet) -User 'SYSTEM' -RunLevel Highest -Force; \
-Register-ScheduledTask -TaskName '{WINDOWS_SENSOR_BRIDGE_TASK_NAME}' -Trigger (New-ScheduledTaskTrigger -AtStartup) -Action (New-ScheduledTaskAction -Execute '{bridge_path}' -Argument '--server') -Settings (New-ScheduledTaskSettingsSet) -User 'SYSTEM' -RunLevel Highest -Force; \
-Start-ScheduledTask -TaskName '{WINDOWS_AGENT_TASK_NAME}'; \
-Start-ScheduledTask -TaskName '{WINDOWS_SENSOR_BRIDGE_TASK_NAME}'\""
+            Unregister-ScheduledTask -TaskName '{WINDOWS_AGENT_LEGACY_TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue; \
+            Unregister-ScheduledTask -TaskName '{WINDOWS_AGENT_TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue; \
+            Unregister-ScheduledTask -TaskName '{WINDOWS_SENSOR_BRIDGE_TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue; \
+            Register-ScheduledTask -TaskName '{WINDOWS_AGENT_TASK_NAME}' -Trigger (New-ScheduledTaskTrigger -AtStartup) -Action (New-ScheduledTaskAction -Execute '{agent_path}' -Argument '--agent --config-dir \\\"{config_dir}\\\" --agent-host 0.0.0.0 --agent-port {REMOTE_AGENT_DEFAULT_PORT}') -Settings (New-ScheduledTaskSettingsSet) -User 'SYSTEM' -RunLevel Highest -Force; \
+            Register-ScheduledTask -TaskName '{WINDOWS_SENSOR_BRIDGE_TASK_NAME}' -Trigger (New-ScheduledTaskTrigger -AtStartup) -Action (New-ScheduledTaskAction -Execute '{bridge_path}' -Argument '--server') -Settings (New-ScheduledTaskSettingsSet) -User 'SYSTEM' -RunLevel Highest -Force; \
+            Start-ScheduledTask -TaskName '{WINDOWS_AGENT_TASK_NAME}'; \
+            Start-ScheduledTask -TaskName '{WINDOWS_SENSOR_BRIDGE_TASK_NAME}'\""
             )
         }
         RemoteOs::Unix | RemoteOs::Macos => format!(
-            "nohup {quoted_path} --agent --agent-host 0.0.0.0 --agent-port {REMOTE_AGENT_DEFAULT_PORT} > ~/.config/llama-monitor/agent.log 2>&1 &"
+            "nohup {quoted_path} --agent --agent-host 0.0.0.0 --agent-port {REMOTE_AGENT_DEFAULT_PORT} > ~/.config/local-llm-foundry/{log} 2>&1 &",
+            log = crate::identity::AGENT_LOG_RELATIVE_PATH
         ),
         RemoteOs::Unknown => format!(
             "{quoted_path} --agent --agent-host 0.0.0.0 --agent-port {REMOTE_AGENT_DEFAULT_PORT}"
@@ -1738,9 +1755,10 @@ pub(crate) async fn default_start_command_for_os_with(
     default_start_command_for_os(os, &resolved_path)
 }
 
-const WINDOWS_AGENT_TASK_NAME: &str = "LocalLLMFoundryAgent";
-const WINDOWS_AGENT_LEGACY_TASK_NAME: &str = "llama-monitor-agent";
-const WINDOWS_SENSOR_BRIDGE_TASK_NAME: &str = "LlamaMonitorSensorBridge";
+const WINDOWS_AGENT_TASK_NAME: &str = crate::identity::CANONICAL_AGENT_TASK_NAME;
+const WINDOWS_AGENT_LEGACY_TASK_NAME: &str = crate::identity::LEGACY_AGENT_TASK_NAME;
+const WINDOWS_SENSOR_BRIDGE_TASK_NAME: &str = crate::identity::CANONICAL_SENSOR_TASK_NAME;
+const WINDOWS_SENSOR_BRIDGE_LEGACY_TASK_NAME: &str = crate::identity::LEGACY_SENSOR_TASK_NAME;
 
 /// Batch script placed next to the Windows agent binary after install.
 /// Double-clicking it (or running from cmd) requests UAC elevation via VBScript
@@ -1754,8 +1772,8 @@ echo UAC.ShellExecute "%~f0", "", "", "runas", 1 >> "%temp%\lm_uac.vbs"
 del "%temp%\lm_uac.vbs"
 goto :eof
 :elevated
-schtasks /End /TN "LlamaMonitorAgent" >nul 2>&1
-schtasks /Delete /TN "LlamaMonitorAgent" /F >nul 2>&1
+schtasks /End /TN "LocalLLMFoundryAgent" >nul 2>&1
+schtasks /Delete /TN "LocalLLMFoundryAgent" /F >nul 2>&1
 schtasks /End /TN "llama-monitor-agent" >nul 2>&1
 schtasks /Delete /TN "llama-monitor-agent" /F >nul 2>&1
 echo Local LLM Foundry agent service removed.
@@ -1765,9 +1783,10 @@ pause
 
 /// Shell script placed next to the Unix/macOS agent binary after install.
 const UNIX_AGENT_UNINSTALL_SH: &[u8] = b"#!/bin/bash\n\
-pkill -f 'llama-monitor --agent' 2>/dev/null || true\n\
+pkill -x local-llm-foundry 2>/dev/null || true\n\
+pkill -x llama-monitor 2>/dev/null || true\n\
 SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n\
-echo \"Llama Monitor agent stopped.\"\n\
+echo \"Local LLM Foundry agent stopped.\"\n\
 echo \"To fully remove, delete: $SCRIPT_DIR\"\n";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1904,7 +1923,17 @@ impl LatestReleaseInfo {
     pub fn matching_asset(&self, os: &str, arch: &str) -> Option<&ReleaseAssetInfo> {
         self.assets
             .iter()
-            .find(|asset| asset.platform == os && asset.arch == normalize_arch(arch))
+            .filter(|asset| asset.platform == os && asset.arch == normalize_arch(arch))
+            .min_by_key(|asset| {
+                if asset
+                    .name
+                    .starts_with(crate::identity::CANONICAL_RELEASE_ASSET_PREFIX)
+                {
+                    0
+                } else {
+                    1
+                }
+            })
     }
 }
 
@@ -2310,10 +2339,16 @@ fn agent_client_for_url<'a>(
 
 fn install_path_for_os(os: RemoteOs) -> Option<&'static str> {
     match os {
-        RemoteOs::Windows => Some("%APPDATA%\\local-llm-foundry\\bin\\local-llm-foundry.exe"),
-        RemoteOs::Unix | RemoteOs::Macos => {
-            Some("~/.config/local-llm-foundry/bin/local-llm-foundry")
-        }
+        RemoteOs::Windows => Some(crate::identity::install_path(true)),
+        RemoteOs::Unix | RemoteOs::Macos => Some(crate::identity::install_path(false)),
+        RemoteOs::Unknown => None,
+    }
+}
+
+fn legacy_install_path_for_os(os: RemoteOs) -> Option<&'static str> {
+    match os {
+        RemoteOs::Windows => Some(crate::identity::legacy_install_path(true)),
+        RemoteOs::Unix | RemoteOs::Macos => Some(crate::identity::legacy_install_path(false)),
         RemoteOs::Unknown => None,
     }
 }
@@ -2360,6 +2395,21 @@ async fn remote_file_exists_with(connection: &SshConnection, os: RemoteOs, path:
     )
 }
 
+async fn preferred_remote_install_path(connection: &SshConnection, os: RemoteOs) -> String {
+    let canonical = install_path_for_os(os)
+        .unwrap_or("/tmp/local-llm-foundry")
+        .to_string();
+    if remote_file_exists_with(connection, os, &canonical).await {
+        return canonical;
+    }
+    if let Some(legacy) = legacy_install_path_for_os(os)
+        && remote_file_exists_with(connection, os, legacy).await
+    {
+        return legacy.to_string();
+    }
+    canonical
+}
+
 async fn agent_health_reachable(agent_url: &str) -> bool {
     agent_health_reachable_with_token(agent_url, None).await
 }
@@ -2389,7 +2439,17 @@ async fn agent_health_reachable_with_token(agent_url: &str, token: Option<&str>)
 /// another user. The files are cleaned up after 30 seconds.
 fn write_token_to_temp_file(token: &str) -> Vec<std::path::PathBuf> {
     let mut paths = Vec::new();
-    let file_name = format!("llama-monitor-agent-token-{}.tmp", std::process::id());
+    use rand::TryRng;
+    use rand::rngs::SysRng;
+    let mut nonce = [0u8; 16];
+    SysRng
+        .try_fill_bytes(&mut nonce)
+        .expect("system entropy unavailable; refusing temporary token transport");
+    let nonce = nonce.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let file_name = format!(
+        "{}{nonce}.tmp",
+        crate::identity::CANONICAL_AGENT_TOKEN_PREFIX
+    );
 
     // Determine home directories to write to
     let home_dirs: Vec<std::path::PathBuf> = if cfg!(windows) {
@@ -2404,7 +2464,7 @@ fn write_token_to_temp_file(token: &str) -> Vec<std::path::PathBuf> {
                     let name = entry.file_name().to_string_lossy().to_string();
                     !name.starts_with("$") && name != "Default" && name != "Public"
                 })
-                .map(|entry| entry.path().join(".llama-monitor"))
+                .map(|entry| entry.path().join(".local-llm-foundry"))
                 .collect(),
             Err(_) => Vec::new(),
         }
@@ -2417,12 +2477,25 @@ fn write_token_to_temp_file(token: &str) -> Vec<std::path::PathBuf> {
         let _ = std::fs::create_dir_all(&home_dir);
         home_dir.push(&file_name);
 
-        if std::fs::write(&home_dir, token).is_ok() {
+        let write_result = (|| {
+            #[cfg(unix)]
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            options.mode(0o600);
+            let mut file = options.open(&home_dir)?;
+            use std::io::Write;
+            file.write_all(token.as_bytes())?;
+            file.sync_all()
+        })();
+
+        if write_result.is_ok() {
             let cleanup_path = home_dir.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_secs(30));
                 let _ = std::fs::remove_file(&cleanup_path);
-                // Clean up the .llama-monitor dir if empty
+                // Clean up the canonical compatibility directory if empty.
                 if let Some(parent) = cleanup_path.parent() {
                     let _ = std::fs::remove_dir(parent);
                 }
@@ -2450,15 +2523,15 @@ async fn read_remote_agent_token(
     // home directory so the SSH user can read it. On Unix, it writes to /tmp.
     let temp_file_cmd = match os {
         RemoteOs::Windows => {
-            // Agent writes to C:\Users\<user>\.llama-monitor\agent-token-{pid}.tmp
-            // Read the most recent one from the current user's home directory.
-            "cmd.exe /C \"dir %USERPROFILE%\\.llama-monitor\\llama-monitor-agent-token-*.tmp /O:-D /B 2>NUL | set /p file= && type %USERPROFILE%\\.llama-monitor\\%file% 2>NUL\""
+            // Read canonical bootstrap files first, then retain the legacy glob
+            // for agents upgraded in place during the 2.x compatibility window.
+            "powershell.exe -NoProfile -NonInteractive -Command \"$files=@(Get-ChildItem -Path $env:USERPROFILE+'\\.local-llm-foundry\\local-llm-foundry-agent-token-*.tmp' -ErrorAction SilentlyContinue; Get-ChildItem -Path $env:USERPROFILE+'\\.llama-monitor\\llama-monitor-agent-token-*.tmp' -ErrorAction SilentlyContinue) | Sort-Object LastWriteTime -Descending; if ($files) { Get-Content -Raw -LiteralPath $files[0].FullName }\""
                 .to_string()
         }
         RemoteOs::Unix | RemoteOs::Macos => {
-            // Agent writes to /tmp/llama-monitor-agent-token-{pid}.tmp
-            // Read the most recent one.
-            "ls -t /tmp/llama-monitor-agent-token-*.tmp 2>/dev/null | head -1 | xargs cat 2>/dev/null"
+            // Canonical files are preferred; legacy files remain readable for
+            // old agents during the 2.x transition.
+            "(ls -t /tmp/local-llm-foundry-agent-token-*.tmp /tmp/llama-monitor-agent-token-*.tmp 2>/dev/null | head -1 | xargs cat 2>/dev/null)"
                 .to_string()
         }
         RemoteOs::Unknown => return None,
@@ -2481,10 +2554,10 @@ async fn read_remote_agent_token(
     let command = match os {
         RemoteOs::Windows => {
             // Agent runs as SYSTEM; token lives in SYSTEM's roaming profile.
-            r#"cmd.exe /C "type "C:\Windows\System32\config\systemprofile\AppData\Roaming\llama-monitor\agent-token" 2>NUL""#
+            r#"cmd.exe /C "(type "C:\Windows\System32\config\systemprofile\AppData\Roaming\local-llm-foundry\agent-token" 2>NUL || type "C:\Windows\System32\config\systemprofile\AppData\Roaming\llama-monitor\agent-token" 2>NUL)""#
                 .to_string()
         }
-        RemoteOs::Unix | RemoteOs::Macos => "cat ~/.config/llama-monitor/agent-token".to_string(),
+        RemoteOs::Unix | RemoteOs::Macos => "(cat ~/.config/local-llm-foundry/agent-token 2>/dev/null || cat ~/.config/llama-monitor/agent-token 2>/dev/null)".to_string(),
         RemoteOs::Unknown => return None,
     };
     match tokio::time::timeout(
@@ -2927,7 +3000,10 @@ pub mod install {
             .timeout(std::time::Duration::from_secs(300))
             .build()?
             .get(&asset.url)
-            .header(reqwest::header::USER_AGENT, "llama-monitor")
+            .header(
+                reqwest::header::USER_AGENT,
+                crate::identity::RELEASE_USER_AGENT,
+            )
             .send()
             .await?
             .error_for_status()?;
@@ -3207,7 +3283,7 @@ if (!(Test-Path '{dir}')) {{ New-Item -ItemType Directory -Path '{dir}' -Force |
 if (Test-Path '{extract_dir}') {{ Remove-Item -LiteralPath '{extract_dir}' -Recurse -Force -ErrorAction SilentlyContinue }}; \
 New-Item -ItemType Directory -Path '{extract_dir}' -Force | Out-Null; \
 Expand-Archive -LiteralPath '{archive}' -DestinationPath '{extract_dir}' -Force; \
-$targets = @('llama-monitor.exe', 'sensor_bridge.exe', 'WebView2Loader.dll'); \
+$targets = @('local-llm-foundry.exe', 'llama-monitor.exe', 'sensor_bridge.exe', 'WebView2Loader.dll'); \
 foreach ($name in $targets) {{ \
   $src = Join-Path '{extract_dir}' $name; \
   $dst = Join-Path '{dir}' $name; \
@@ -3246,11 +3322,13 @@ Remove-Item -LiteralPath '{archive}' -Force -ErrorAction SilentlyContinue\"",
 Stop-ScheduledTask -TaskName '{WINDOWS_AGENT_TASK_NAME}' -ErrorAction SilentlyContinue; \
 Stop-ScheduledTask -TaskName '{WINDOWS_SENSOR_BRIDGE_TASK_NAME}' -ErrorAction SilentlyContinue; \
 Start-Sleep -Seconds 2; \
+Stop-Process -Name local-llm-foundry -Force -ErrorAction SilentlyContinue; \
 Stop-Process -Name llama-monitor -Force -ErrorAction SilentlyContinue; \
 Stop-Process -Name sensor_bridge -Force -ErrorAction SilentlyContinue; \
 Unregister-ScheduledTask -TaskName '{WINDOWS_AGENT_TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue; \
 Unregister-ScheduledTask -TaskName '{WINDOWS_AGENT_LEGACY_TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue; \
 Unregister-ScheduledTask -TaskName '{WINDOWS_SENSOR_BRIDGE_TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue; \
+Unregister-ScheduledTask -TaskName '{WINDOWS_SENSOR_BRIDGE_LEGACY_TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue; \
 Start-Sleep -Seconds 2\""
         );
 
@@ -3600,7 +3678,7 @@ Start-Sleep -Seconds 2\""
             });
         }
 
-        let install_path = default_install_path_for_os(remote_os);
+        let install_path = preferred_remote_install_path(&connection, remote_os).await;
         let install_path_clone = install_path.clone();
         let stop_response = stop_remote_agent(ssh_target, Some(connection.clone())).await?;
 
@@ -3675,9 +3753,11 @@ Start-Sleep -Seconds 2\""
         let os = detect_remote_os_with(&connection).await;
         let command = match os {
             RemoteOs::Windows => {
-                "cmd.exe /C taskkill /IM llama-monitor.exe /F >NUL 2>NUL & exit /B 0"
+                "cmd.exe /C (taskkill /IM local-llm-foundry.exe /F >NUL 2>NUL & taskkill /IM llama-monitor.exe /F >NUL 2>NUL)"
             }
-            RemoteOs::Unix | RemoteOs::Macos => "pkill -f llama-monitor >/dev/null 2>&1; true",
+            RemoteOs::Unix | RemoteOs::Macos => {
+                "pkill -x local-llm-foundry >/dev/null 2>&1; pkill -x llama-monitor >/dev/null 2>&1; true"
+            }
             RemoteOs::Unknown => return Err(io::Error::other("Unknown OS").into()),
         };
 
@@ -3719,7 +3799,7 @@ Start-Sleep -Seconds 2\""
             });
         }
 
-        let install_path = default_install_path_for_os(os);
+        let install_path = preferred_remote_install_path(&connection, os).await;
         let installed = remote_file_exists_with(&connection, os, &install_path).await;
         let health_reachable =
             agent_health_reachable(&connection.agent_url(REMOTE_AGENT_DEFAULT_PORT)).await;
@@ -3765,14 +3845,16 @@ Start-Sleep -Seconds 2\""
     ) -> Result<RemoteAgentRemoveResponse> {
         let connection = ssh_connection.unwrap_or_else(|| SshConnection::from_target(ssh_target));
         let os = detect_remote_os_with(&connection).await;
-        let install_path = default_install_path_for_os(os);
+        let install_path = preferred_remote_install_path(&connection, os).await;
         let command = match os {
             RemoteOs::Windows => format!(
-                "cmd.exe /C taskkill /IM llama-monitor.exe /F >NUL 2>NUL & schtasks /Delete /TN \"{WINDOWS_AGENT_TASK_NAME}\" /F >NUL 2>NUL & schtasks /Delete /TN \"{WINDOWS_AGENT_LEGACY_TASK_NAME}\" /F >NUL 2>NUL & del /F /Q \"{install_path}\" >NUL 2>NUL & exit /B 0"
+                "cmd.exe /C (taskkill /IM local-llm-foundry.exe /F >NUL 2>NUL & taskkill /IM llama-monitor.exe /F >NUL 2>NUL & schtasks /Delete /TN \"{WINDOWS_AGENT_TASK_NAME}\" /F >NUL 2>NUL & schtasks /Delete /TN \"{WINDOWS_AGENT_LEGACY_TASK_NAME}\" /F >NUL 2>NUL & del /F /Q \"{install_path}\" >NUL 2>NUL & del /F /Q \"%APPDATA%\\llama-monitor\\bin\\llama-monitor.exe\" >NUL 2>NUL & exit /B 0)"
             ),
             RemoteOs::Unix | RemoteOs::Macos => {
                 let quoted = shell_quote_path(&install_path, os);
-                format!("pkill -f llama-monitor >/dev/null 2>&1; rm -f {quoted}")
+                format!(
+                    "pkill -x local-llm-foundry >/dev/null 2>&1; pkill -x llama-monitor >/dev/null 2>&1; rm -f {quoted}"
+                )
             }
             RemoteOs::Unknown => return Err(io::Error::other("Unknown OS").into()),
         };
@@ -3800,46 +3882,49 @@ Start-Sleep -Seconds 2\""
             return Ok(None);
         }
 
-        let output = remote_ssh::exec(
-            connection.clone(),
-            format!("cmd.exe /C schtasks /Query /TN \"{WINDOWS_AGENT_TASK_NAME}\" /V /FO LIST"),
-        )
-        .await?;
+        for task_name in [WINDOWS_AGENT_TASK_NAME, WINDOWS_AGENT_LEGACY_TASK_NAME] {
+            let output = remote_ssh::exec(
+                connection.clone(),
+                format!("cmd.exe /C schtasks /Query /TN \"{task_name}\" /V /FO LIST"),
+            )
+            .await?;
+            if output.status != 0 {
+                continue;
+            }
 
-        if output.status != 0 {
+            let command = output
+                .stdout
+                .lines()
+                .find_map(|line| line.trim().strip_prefix("Task To Run:").map(str::trim))
+                .filter(|value| !value.is_empty() && *value != "N/A")
+                .map(ToOwned::to_owned);
+            let matches_install_path = command.as_deref().is_some_and(|command| {
+                install_path.is_some_and(|path| {
+                    command
+                        .to_ascii_lowercase()
+                        .contains(&path.to_ascii_lowercase())
+                })
+            });
+
             return Ok(Some(ManagedTaskStatus {
-                name: WINDOWS_AGENT_TASK_NAME.to_string(),
-                installed: false,
-                command: None,
-                matches_install_path: false,
+                name: task_name.to_string(),
+                installed: true,
+                command,
+                matches_install_path,
             }));
         }
 
-        let command = output
-            .stdout
-            .lines()
-            .find_map(|line| line.trim().strip_prefix("Task To Run:").map(str::trim))
-            .filter(|value| !value.is_empty() && *value != "N/A")
-            .map(ToOwned::to_owned);
-        let matches_install_path = command.as_deref().is_some_and(|command| {
-            install_path.is_some_and(|path| {
-                command
-                    .to_ascii_lowercase()
-                    .contains(&path.to_ascii_lowercase())
-            })
-        });
-
         Ok(Some(ManagedTaskStatus {
             name: WINDOWS_AGENT_TASK_NAME.to_string(),
-            installed: true,
-            command,
-            matches_install_path,
+            installed: false,
+            command: None,
+            matches_install_path: false,
         }))
     }
 
     pub async fn get_remote_version_with(connection: SshConnection) -> Result<Option<String>> {
         let remote_os = detect_remote_os_with(&connection).await;
-        let install_path = default_install_path_for_os(remote_os);
+        let install_path = preferred_remote_install_path(&connection, remote_os).await;
         let command = match remote_os {
             RemoteOs::Windows => format!("cmd.exe /C \"\"{install_path}\" --version\""),
             RemoteOs::Unix | RemoteOs::Macos => format!("{install_path} --version"),
@@ -3884,17 +3969,20 @@ Start-Sleep -Seconds 2\""
     async fn fetch_checksums_json(
         release: &crate::agent::LatestReleaseInfo,
     ) -> Result<serde_json::Value> {
-        let checksums_asset = release.assets.iter().find(|a| a.name == "checksums.json");
-
-        let checksums_asset = checksums_asset
+        let checksums_url = release
+            .checksums_url
+            .as_deref()
             .ok_or_else(|| anyhow::anyhow!("Update failed: no checksums file in release"))?;
 
         let resp = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(15))
             .timeout(std::time::Duration::from_secs(60))
             .build()?
-            .get(&checksums_asset.url)
-            .header(reqwest::header::USER_AGENT, "llama-monitor")
+            .get(checksums_url)
+            .header(
+                reqwest::header::USER_AGENT,
+                crate::identity::RELEASE_USER_AGENT,
+            )
             .send()
             .await?
             .error_for_status()?;
@@ -3992,7 +4080,11 @@ Start-Sleep -Seconds 2\""
         let parent = current_exe
             .parent()
             .ok_or_else(|| anyhow::anyhow!("Binary path has no parent directory"))?;
-        let staged = parent.join(format!(".llama-monitor-update-{}", std::process::id()));
+        let staged = parent.join(format!(
+            "{}{}",
+            crate::identity::UPDATE_STAGE_PREFIX,
+            std::process::id()
+        ));
 
         fs::copy(&binary_path, &staged).map_err(|e| {
             if e.kind() == std::io::ErrorKind::PermissionDenied {
@@ -4057,7 +4149,7 @@ Start-Sleep -Seconds 2\""
                 // Fallback; not ideal but keeps us safe
                 "/tmp"
             };
-            let log_file = format!("{data_dir}/.llama-monitor-restart.log");
+            let log_file = format!("{data_dir}/.local-llm-foundry-restart.log");
 
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -4202,6 +4294,7 @@ Start-Sleep -Seconds 2\""
 
         let pid = std::process::id();
         let batch_path = std::env::temp_dir().join(format!("lm-update-{pid}.bat"));
+        let current_exe_batch = current_exe.to_string_lossy().replace('\\', "\\\\");
 
         // The batch file:
         //   :check      — loop until this PID disappears from tasklist
@@ -4233,12 +4326,12 @@ Start-Sleep -Seconds 2\""
                  goto check\r\n\
              )\r\n\
              {copy_lines}\
-             start \"\" \"{install_dir}\\\\llama-monitor.exe\"\r\n\
+             start \"\" \"{current_exe_batch}\"\r\n\
              rmdir /S /Q \"{extract_dir}\"\r\n\
              (goto) 2>NUL & del \"%~f0\"\r\n",
             pid = pid,
             copy_lines = copy_lines,
-            install_dir = install_dir.replace('\\', "\\\\"),
+            current_exe_batch = current_exe_batch,
             extract_dir = extract_dir.replace('\\', "\\\\"),
         );
 
@@ -4272,6 +4365,55 @@ mod tests {
         assert_eq!(normalize_version_label("llama-monitor 0.5.1"), "0.5.1");
         assert_eq!(normalize_version_label("other-agent 0.5.1"), "0.5.1");
         assert_eq!(normalize_version_label("v0.5.1"), "0.5.1");
+    }
+
+    #[test]
+    fn matching_asset_prefers_canonical_family_over_legacy_order() {
+        let release = LatestReleaseInfo {
+            tag_name: "v2.0.0".into(),
+            name: None,
+            html_url: None,
+            body: None,
+            published_at: None,
+            checksums_url: Some("https://example.test/checksums.json".into()),
+            assets: vec![
+                ReleaseAssetInfo {
+                    name: "llama-monitor-linux-x86_64".into(),
+                    url: String::new(),
+                    size: 1,
+                    platform: "linux".into(),
+                    arch: "x86_64".into(),
+                    archive: false,
+                },
+                ReleaseAssetInfo {
+                    name: "local-llm-foundry-linux-x86_64".into(),
+                    url: String::new(),
+                    size: 1,
+                    platform: "linux".into(),
+                    arch: "x86_64".into(),
+                    archive: false,
+                },
+            ],
+        };
+        assert_eq!(
+            release.matching_asset("linux", "amd64").unwrap().name,
+            "local-llm-foundry-linux-x86_64"
+        );
+    }
+
+    #[test]
+    fn release_checksum_url_is_independent_of_filtered_binary_assets() {
+        let checksum = "https://example.test/checksums.json";
+        let release = LatestReleaseInfo {
+            tag_name: "v2.0.0".into(),
+            name: None,
+            html_url: None,
+            body: None,
+            published_at: None,
+            checksums_url: Some(checksum.into()),
+            assets: Vec::new(),
+        };
+        assert_eq!(release.checksums_url.as_deref(), Some(checksum));
     }
 
     #[test]

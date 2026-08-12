@@ -21,7 +21,7 @@ use std::sync::OnceLock;
 
 /// Name this crate's manifest must declare for an ancestor directory to count. A
 /// checkout of some other project in the executable's ancestry is not our checkout.
-const CRATE_NAME: &str = "llama-monitor";
+const CRATE_NAMES: &[&str] = &["local-llm-foundry", "llama-monitor"];
 
 /// How far up to look. `target/release/llama-monitor` is two levels below the root;
 /// the extra room covers `target/<triple>/release/` cross-compilation layouts without
@@ -85,7 +85,9 @@ fn is_checkout_root(dir: &Path) -> bool {
         line.starts_with("name")
             && line.contains('=')
             && line.split('=').nth(1).is_some_and(|value| {
-                value.trim().trim_matches(|c| c == '"' || c == '\'') == CRATE_NAME
+                CRATE_NAMES
+                    .iter()
+                    .any(|name| value.trim().trim_matches(|c| c == '"' || c == '\'') == *name)
             })
     })
 }
@@ -114,7 +116,7 @@ mod tests {
     #[test]
     fn a_release_build_inside_the_checkout_is_a_repo_context() {
         let dir = tempfile::tempdir().unwrap();
-        make_checkout(dir.path(), CRATE_NAME);
+        make_checkout(dir.path(), "local-llm-foundry");
         // The case the build profile alone would get wrong: release, but in-tree.
         let exe = place_exe(dir.path(), "release");
         assert_eq!(detect_from(&exe).unwrap().root, dir.path());
@@ -123,14 +125,14 @@ mod tests {
     #[test]
     fn a_debug_build_inside_the_checkout_is_a_repo_context() {
         let dir = tempfile::tempdir().unwrap();
-        make_checkout(dir.path(), CRATE_NAME);
+        make_checkout(dir.path(), "local-llm-foundry");
         assert!(detect_from(&place_exe(dir.path(), "debug")).is_some());
     }
 
     #[test]
     fn a_cross_compiled_target_triple_layout_still_finds_the_root() {
         let dir = tempfile::tempdir().unwrap();
-        make_checkout(dir.path(), CRATE_NAME);
+        make_checkout(dir.path(), "local-llm-foundry");
         assert!(detect_from(&place_exe(dir.path(), "aarch64-apple-darwin/release")).is_some());
     }
 
@@ -159,7 +161,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("Cargo.toml"),
-            format!("[package]\nname = \"{CRATE_NAME}\"\n"),
+            "[package]\nname = \"local-llm-foundry\"\n",
         )
         .unwrap();
         assert!(detect_from(&place_exe(dir.path(), "release")).is_none());
@@ -168,7 +170,7 @@ mod tests {
     #[test]
     fn a_named_file_is_only_reported_when_it_exists() {
         let dir = tempfile::tempdir().unwrap();
-        make_checkout(dir.path(), CRATE_NAME);
+        make_checkout(dir.path(), "local-llm-foundry");
         let context = detect_from(&place_exe(dir.path(), "release")).unwrap();
         assert!(context.file("scripts/not-there.mjs").is_none());
         std::fs::write(dir.path().join("scripts").join("lane.mjs"), b"//").unwrap();

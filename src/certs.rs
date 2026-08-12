@@ -317,14 +317,20 @@ pub fn ensure_ca() -> Cert {
     // Sentinel written alongside every new-format CA.
     let sentinel = dir.join(".ca-v2");
 
-    if sentinel.exists()
-        && let Some(ca) = Cert::load(&ca_path, &ca_key_path)
+    if let Some(ca) = Cert::load(&ca_path, &ca_key_path)
         && !ca.needs_renewal()
     {
+        // Existing trust anchors are part of the public compatibility contract.
+        // The sentinel only records that this process has observed the CA; it
+        // must never be required for reusing an otherwise valid legacy CA.
+        if !sentinel.exists() {
+            let _ = std::fs::write(&sentinel, b"2");
+        }
         return ca;
     }
 
-    // No sentinel → old CA or first run. Rotate everything.
+    // No usable CA (first run or expiry) → generate a replacement. A valid old
+    // CA above is deliberately retained even when it predates the sentinel.
     let _ = std::fs::remove_file(&ca_path);
     let _ = std::fs::remove_file(&ca_key_path);
     let _ = std::fs::remove_file(dir.join("agent-client.pem"));
