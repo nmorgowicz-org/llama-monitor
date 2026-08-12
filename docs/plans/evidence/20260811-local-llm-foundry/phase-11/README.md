@@ -1,9 +1,9 @@
 # Phase 11 — CI, release, packaging, and repository cutover
 
-Status: **implementation gates passed; external cutover remains intentionally open** (2026-08-12).
+Status: **repository cutover and PR identity complete; release artifact gates remain open** (2026-08-12).
 
-This receipt covers the source-controlled portion of Phase 11. It does not claim
-that GitHub has been renamed or that a 2.0.0 release has been published.
+This receipt covers the source-controlled portion and authorized GitHub repository
+cutover. It does not claim that a 2.0.0 release has been published.
 
 ## Completed source gates
 
@@ -21,6 +21,12 @@ that GitHub has been renamed or that a 2.0.0 release has been published.
 | Release contract validator | `npm run validate-release-contract` passed, including frozen bridge fixture |
 | Workflow syntax | CI and release YAML parsed successfully |
 | Repository state | `git diff --check` passed |
+| GitHub repository rename | `nmorgowicz-org/llama-monitor` → `nmorgowicz-org/local-llm-foundry` |
+| Old web URL continuity | HTTP 301 redirects to the canonical repository |
+| Git continuity | `git ls-remote` old and new URLs returned the same `main` HEAD |
+| PR identity | #314 now has title `feat!: launch Local LLM Foundry 2.0 with backend-neutral Rapid-MLX` |
+| PR body | Compact migration/architecture summary with 20-entry `BEGIN_COMMIT_OVERRIDE` block |
+| Actions/API continuity | New repository API and workflow metadata reachable; runner inventory currently empty |
 
 ## Validation commands
 
@@ -41,12 +47,11 @@ git diff --check                      PASS
 These require the release owner and external GitHub state; they must remain open
 until the final qualification phase:
 
-1. Confirm `nmorgowicz-org/local-llm-foundry` ownership and freeze merges.
-2. Generate a release-please PR whose version is exactly `2.0.0` and whose PR
+1. Generate a release-please PR whose version is exactly `2.0.0` and whose PR
    body carries the breaking-change declaration.
-3. Run the release workflow dry run or authorized prerelease and inspect all
+2. Run the release workflow dry run or authorized prerelease and inspect all
    eight assets, archive layouts, checksums, and the frozen 1.x parser probe.
-4. Rename the GitHub repository, verify web/API/git/Actions app continuity, then
-   update local `origin` deliberately.
-5. Do not publish the public 2.0 announcement until Phase 12–14 native,
+3. Restore/verify self-hosted runner registrations before release execution if
+   the empty post-rename runner inventory is not expected.
+4. Do not publish the public 2.0 announcement until Phase 12–14 native,
    updater, migration, and artifact probes pass.
