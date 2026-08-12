@@ -116,12 +116,14 @@ function _renderPrereqIdle(vData, platform) {
     picker.id = 'wizard-prereq-backend-picker';
     picker.className = 'wizard-prereq-backend-picker';
 
-    const pickerLabel = document.createElement('div');
+    const pickerLabel = document.createElement('label');
     pickerLabel.className = 'wizard-prereq-backend-label';
+    pickerLabel.htmlFor = 'wizard-prereq-backend-select';
     pickerLabel.textContent = 'Select your GPU / backend:';
     picker.appendChild(pickerLabel);
 
     const select = document.createElement('select');
+    select.id = 'wizard-prereq-backend-select';
     select.className = 'wizard-prereq-backend-select';
     platform.backends.forEach(b => {
       const opt = document.createElement('option');

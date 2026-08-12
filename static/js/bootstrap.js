@@ -261,7 +261,12 @@ async function initializeApp() {
     Router.init();
 }
 
-initializeApp().catch(err => console.error('[bootstrap] initializeApp failed:', err));
+// `modules-ready` is the synchronization point used by the UI harness.  Keep
+// it behind the async bootstrap so consumers cannot race initialization of
+// feature event handlers (notably presets and the spawn wizard).
+initializeApp()
+    .catch(err => console.error('[bootstrap] initializeApp failed:', err))
+    .finally(() => document.documentElement.classList.add('modules-ready'));
 
 // Mutual exclusion: opening one guided panel closes the other.
 window.addEventListener('suggestionsOpened', () => closeQuickGuide());
@@ -521,6 +526,3 @@ scheduleDeferredUpdateCheck();
         }
     });
 })();
-
-// Signal that all modules are loaded and initialized
-document.documentElement.classList.add('modules-ready');

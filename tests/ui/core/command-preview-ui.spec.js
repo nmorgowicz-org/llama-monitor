@@ -28,6 +28,10 @@ test.describe('Rapid-MLX launch command preview (step 6)', () => {
       const { openSpawnWizard, wizardState } = await import('/js/features/spawn-wizard.js');
       openSpawnWizard();
       wizardState.engine.selected = 'rapid_mlx';
+      // This is an in-memory command-preview test; bypass the host-platform
+      // availability gate so it exercises the preview surface on Linux CI.
+      wizardState.engine.rapidMlxLocalAvailable = true;
+      wizardState.engine.rapidMlxRuntimeCompatible = true;
       wizardState.model.source = 'local';
       wizardState.model.path = '/tmp/Qwen3-8B-4bit';
       wizardState.access.port = 8001;
