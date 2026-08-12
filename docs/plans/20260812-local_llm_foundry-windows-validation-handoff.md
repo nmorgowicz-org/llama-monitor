@@ -13,7 +13,7 @@ return markers needed to close Phases 11–14.
 
 - Repository: `nmorgowicz-org/local-llm-foundry`
 - Local checkout branch: `feat/rapid-mlx-integration`
-- Current validated commit: post-fix branch `HEAD` (`fix(ui): stabilize preset editor qualification handoff`; record the exact SHA with `git log -1` after checkout)
+- Current validated commit: checkout the pushed branch and record its exact SHA with `git log -1`; it includes the UI qualification fixes described below.
 - Pull request: #314
 - Product: Local LLM Foundry 2.0
 - Canonical Windows application home: `%APPDATA%\\local-llm-foundry\\`
@@ -29,23 +29,25 @@ not reset or discard unrelated user changes. Read `AGENTS.md`,
 
 ## Current CI state that must not be misreported as green
 
-The latest completed PR run is `31603543480`. Windows-target clippy, Windows
+The latest completed PR run is `31615465442`. Windows-target clippy, Windows
 GNU release smoke, Linux/macOS release smoke, lint, and CodeQL passed. Its UI
 job failed with 268 passed, 5 skipped, and 2 failed:
 
-1. `core/app-shell.spec.js:176` — Gemma recommendation left
-   `#modal-chat-template-file` empty in CI retries.
-2. `core/rapid-preset-visibility.spec.js:99` — Rapid-MLX control reachability
+1. `core/rapid-preset-visibility.spec.js:99` — Rapid-MLX control reachability
    timed out while repeatedly navigating sections/opening details.
+2. `core/kv-usecase.spec.js:7` — the test selected a use-case before async
+   bootstrap had bound its card listeners, leaving the default `q8_0` value.
 
 The downloaded report is on the development Mac at
-`/tmp/local-llm-foundry-ci-31603543480/playwright-report/`. If it is needed on
+`/tmp/local-llm-foundry-ci-31615465442/playwright-report/`. If it is needed on
 Windows, copy it as an investigation artifact; it is not source evidence.
-The source fix is now included in the pushed post-fix branch HEAD. Local release-built focused repeats
-pass Gemma 20/20 and Rapid reachability 10/10; the full local suite completed
-267 passed, 5 skipped, and 3 flaky-but-passed-on-retry. A fresh GitHub run must
-still be completed before declaring the release candidate green. Do not remove
-or restore `ready-to-test` based only on native Windows results.
+The source fix adds an explicit `modules-ready` barrier to the affected tests
+and visits each Rapid editor section once instead of repeating animated nav
+clicks for every control. Focused release-built repeats passed 15/15 (five
+repetitions of both affected specs), and the complete release-built suite passed
+270 tests with 5 skipped. These are local receipts, not a substitute for a
+fresh GitHub run. Do not remove or restore `ready-to-test` based only on native
+Windows results.
 
 ## Windows prerequisites
 
@@ -225,8 +227,8 @@ Native Windows work can close its markers only when all of these are true:
   package checks have raw receipts.
 - The mandatory Rust/JS checks and the complete release-built UI suite are
   green on the current commit.
-- CI run after the fix is green; the two failures from run `31603543480` are not
-  merely hidden by retries.
+- A fresh CI run after the fix is green; the two failures from run
+  `31615465442` are not merely hidden by retries.
 - Phase 12 evidence is complete and the plan status table is updated before
   Phase 13 screenshot capture or public 2.0 release work begins.
 

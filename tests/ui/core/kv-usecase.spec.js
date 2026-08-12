@@ -6,6 +6,7 @@ import { test, expect } from '@playwright/test';
 test.describe('use-case drives KV dtype', () => {
   test('@in-memory-test roleplay drops KV to q4_0, agentic holds q8_0, and a user choice wins', async ({ page }) => {
     await page.goto('/');
+    await page.waitForFunction(() => document.documentElement.classList.contains('modules-ready'), { timeout: 15000 });
     await page.waitForFunction(() => !!document.querySelector('[data-usecase]'), { timeout: 15000 });
 
     const result = await page.evaluate(async () => {

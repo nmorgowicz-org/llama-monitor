@@ -1337,13 +1337,16 @@ current-doc edits; never rewrite receipts to make a gate pass.
 
 **Current execution position (2026-08-12):** source-controlled implementation
 and authorized GitHub cutover gates are complete; release launch gates remain
-open. The latest CI run (`31603543480`) passed all non-UI jobs but failed two UI
-tests, so this phase cannot close yet. The release
+open. The latest completed CI run (`31615465442`) passed all non-UI jobs but
+failed two timing-sensitive UI tests. Both are now corrected in the working
+tree and verified with focused release-built repeats plus a complete
+release-built UI run; a fresh remote run is still required before this phase
+can close. The release
 workflow now publishes the four canonical and four legacy 2.0.x bridge assets,
 checksums them fail-closed, preserves archive layouts, and validates the source
 identity contract. See `evidence/20260811-local-llm-foundry/phase-11/README.md`.
 The downloaded Playwright report is retained at
-`/tmp/local-llm-foundry-ci-31603543480/playwright-report/`.
+`/tmp/local-llm-foundry-ci-31615465442/playwright-report/`.
 
 Completed in this phase: release-please package identity, canonical CI paths and
 cache keys, release path filters, dual-asset packaging, exact checksum coverage,
@@ -1354,7 +1357,7 @@ git URLs resolve to the same `main` HEAD. PR #314 uses the proven major-release
 title `feat!: launch Local LLM Foundry 2.0 with backend-neutral Rapid-MLX` and a
 compact 20-entry override block. The pending 1.8.2 release-please PR will be
 superseded by this merged feature delta. Remaining before Phase 11 closure:
-resolve and rerun the CI UI failures, generate 2.0.0 release artifacts,
+push the UI qualification fixes and obtain a fresh passing CI run, generate 2.0.0 release artifacts,
 complete real updater probes, and validate the self-hosted runner after the
 repository rename.
 

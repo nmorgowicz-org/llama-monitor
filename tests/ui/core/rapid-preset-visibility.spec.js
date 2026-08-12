@@ -28,6 +28,7 @@ test.describe('Rapid-MLX preset editor control reachability', () => {
       });
     });
     await page.goto('/');
+    await page.waitForFunction(() => document.documentElement.classList.contains('modules-ready'), { timeout: 15000 });
     await page.waitForLoadState('networkidle');
     await page.evaluate(async () => {
       const { sessionState } = await import('/js/core/app-state.js');
@@ -98,6 +99,7 @@ test.describe('Rapid-MLX preset editor control reachability', () => {
 
   test('@in-memory-test every control the save path reads is visible in a Rapid preset', async ({ page }) => {
     await page.goto('/');
+    await page.waitForFunction(() => document.documentElement.classList.contains('modules-ready'), { timeout: 15000 });
     await page.waitForLoadState('networkidle');
 
     // Brace-match the Rapid branch of _buildFormPreset and take *every* modal-* id it reads,
@@ -135,22 +137,27 @@ test.describe('Rapid-MLX preset editor control reachability', () => {
     // model entered + preflight says trust required), so it's always hidden for this test.
     const conditionalIds = new Set(['modal-rapid-speculative-trust-consent']);
 
-    const hidden = [];
+    // Navigate each section once, then inspect every save-path control while its
+    // section is active. Re-clicking the same animated nav four times per field
+    // made this reachability check exceed CI's actionability timeout under load.
+    const controls = [];
     for (const id of ids) {
       // A referenced id with no element is a separate defect, out of scope here.
       if (conditionalIds.has(id)) continue;
       const el = page.locator(`#${id}`);
-      if (await el.count() === 0) continue;
-      let seen = false;
-      for (const section of sections) {
-        await page.locator(`#preset-modal .preset-nav-item[data-section="${section}"]`).click();
-        await page.locator('#preset-modal details.mlx-native-group').evaluateAll(
-          details => details.forEach(detail => { detail.open = true; }),
-        );
-        if (await el.isVisible()) { seen = true; break; }
-      }
-      if (!seen) hidden.push(id);
+      if (await el.count() > 0) controls.push({ id, el });
     }
+    const visible = new Set();
+    for (const section of sections) {
+      await page.locator(`#preset-modal .preset-nav-item[data-section="${section}"]`).click();
+      await page.locator('#preset-modal details.mlx-native-group').evaluateAll(
+        details => details.forEach(detail => { detail.open = true; }),
+      );
+      for (const { id, el } of controls) {
+        if (await el.isVisible()) visible.add(id);
+      }
+    }
+    const hidden = controls.filter(({ id }) => !visible.has(id)).map(({ id }) => id);
     expect(hidden, 'controls read on save but never rendered').toEqual([]);
 
     await page.locator('#preset-modal .preset-nav-item[data-section="advanced"]').click();
