@@ -1,6 +1,6 @@
 # Hardware-native llama.cpp calibration inspired by `llama-optimize`
 
-**State:** Approved as a bounded Local LLM Foundry 2.0.0 release requirement; the Phase 5 screenshot-acceptance gate is complete and its backend receipt gates remain in progress. Rapid-MLX benchmark classification is informational-only (`classify_rapid_mlx_benchmark_result`); typed contracts, active-root persistence, durable recovery, authenticated preflight/start/poll/cancel, deterministic typed candidate planning, sequential bounded Quick execution with per-candidate receipts/winner selection, db-admin transactional apply with optimistic conflict checks and derived-preset default, and the Preset Editor Calibrate flow pass full Rust/JS validation, release build, clippy, diff checks, and focused release-built Playwright coverage. Nick accepted the six fresh release-built Calibration screenshots on 2026-08-13. A native bounded L9/L25 orthogonal-array generator and cross-platform regular-file classifier are now implemented with focused tests and upstream attribution. The pinned upstream source/license ledger, offline self-test, and macOS managed-binary capability receipt are recorded; the upstream regular-file portability caveat, native Windows capability receipt, deterministic fake-runtime post-apply receipts, interrupted-job resume evidence, Balanced executor wiring/analysis, Phase 6, and Phase 10 qualification remain open.
+**State:** Approved as a bounded Local LLM Foundry 2.0.0 release requirement; the Phase 5 screenshot-acceptance gate is complete and its backend receipt gates remain in progress. Rapid-MLX benchmark classification is informational-only (`classify_rapid_mlx_benchmark_result`); typed contracts, active-root persistence, durable recovery, authenticated preflight/start/poll/cancel, deterministic typed Quick and Balanced candidate planning, sequential bounded Quick execution with per-candidate receipts/winner selection, db-admin transactional apply with optimistic conflict checks and derived-preset default, and the Preset Editor Calibrate flow pass full Rust/JS validation, release build, clippy, diff checks, and focused release-built Playwright coverage. Nick accepted the six fresh release-built Calibration screenshots on 2026-08-13. A native bounded L9/L25 orthogonal-array generator, capability-gated typed factor catalog, fail-closed Balanced budget calculator, and cross-platform regular-file classifier are now implemented with focused tests and upstream attribution. The pinned upstream source/license ledger, offline self-test, and macOS managed-binary capability receipt are recorded; the upstream regular-file portability caveat, native Windows capability receipt, deterministic fake-runtime post-apply receipts, interrupted-job resume evidence, Balanced executor/analysis wiring, Phase 6, and Phase 10 qualification remain open.
 **Date:** 2026-08-13
 **Primary owner:** Luna, executed phase-by-phase with one focused verifier after each hard gate.
 **Target release:** 2.0.0 for the bounded llama.cpp Calibration v1 scope below; advanced stages remain post-2.0 follow-ups.
@@ -704,8 +704,8 @@ A single candidate must be trustworthy and recoverable before implementing a mul
 - [ ] Add pure design modules for bounded grid, Morris screening, Taguchi arrays, conditional stages, and deterministic randomization.
 - [ ] Generate and commit machine-readable oracle fixtures from pinned upstream L9/L25/L125 and Morris examples with source/license metadata.
 - [ ] Implement run-count calculation before job consent.
-- [ ] Implement workload-aware factor levels from introspected hardware/model/runtime/baseline, not model name.
-- [ ] Implement the budget limits from section 6.2 and refuse/stage oversized designs.
+- [x] Implement workload-aware factor levels from introspected hardware/model/runtime/baseline, not model name (the bounded v1 catalog currently uses workload, preset baseline, and exact runtime flag evidence).
+- [x] Implement the Balanced budget limits from section 6.2 and refuse oversized designs; staging and consent wiring remain with executor integration.
 - [ ] Preserve context as a tradeoff axis through screening/refinement.
 - [ ] Persist the random seed and group load-affecting candidates to reduce redundant work without biasing execution order.
 - [ ] Implement main effects as diagnostics, measured Pareto frontier, and Fastest/Balanced/Max-context selection.
@@ -716,6 +716,7 @@ A single candidate must be trustworthy and recoverable before implementing a mul
 #### Verification
 
 - [ ] Rust fixture tests match pinned array dimensions, level coverage/balance, main-effect ordering, and recommendation semantics.
+- [x] Focused planner tests prove deterministic candidate order/IDs, budget ceilings, no invalid `ubatch > batch` combinations, llama.cpp-only rejection, and capability-gated flash-attention factors.
 - [ ] Property tests prove deterministic seed behavior, budget ceilings, no invalid combinations, and context survivor invariants.
 - [ ] Synthetic response surfaces recover known dominant factors and measured Pareto points.
 - [ ] OOM/timeout/implausible rows never become winners.
@@ -725,6 +726,8 @@ A single candidate must be trustworthy and recoverable before implementing a mul
 #### Hard gate
 
 The verifier must sign off that result selection is measured, bounded, reproducible, and not dependent on parsing upstream human output.
+
+**Current planner evidence (2026-08-13):** `src/calibration/candidates.rs` now maps a typed, preset/workload-derived factor catalog onto deterministic L9 (four core factors) or L25 (verified flash-attention capability adds a fifth factor) rows. Every mapped patch is validated through `request_from_preset`; invalid context and batch/ubatch combinations fail closed; Rapid-MLX is rejected before planning; and the Balanced screen/final-array/verification ceilings are checked before a plan is returned. This slice does not start subprocesses or claim executor/analysis completion. Receipt: `docs/plans/evidence/20260811-local-llm-foundry/phase-11/calibration-balanced-planner-receipt.md`.
 
 ### Phase 5 — Preset Editor calibration UX and transactional apply
 
