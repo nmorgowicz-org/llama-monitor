@@ -562,13 +562,16 @@ async fn run_job(
     }
 
     let completed_trials = candidate_results.len() as u32;
-    let selected_candidate = select_winner(&candidate_results);
+    let analysis = super::analysis::analyze(&candidate_results);
+    let selected_candidate = match budget {
+        CalibrationBudget::Balanced => analysis.balanced_candidate.clone(),
+        _ => analysis.fastest_candidate.clone(),
+    };
     let measurement = candidate_results
         .iter()
         .find(|result| result.candidate.id == "baseline")
         .map(|result| result.measurement.clone())
         .unwrap_or_default();
-    let analysis = super::analysis::analyze(&candidate_results);
     let receipt = CalibrationReceipt {
         schema_version: super::CALIBRATION_SCHEMA_VERSION,
         method_version: if budget == CalibrationBudget::Balanced {
@@ -957,6 +960,7 @@ fn rollback_immediate(
     Ok(())
 }
 
+#[allow(dead_code)]
 fn select_winner(results: &[CalibrationCandidateResult]) -> Option<String> {
     results
         .iter()

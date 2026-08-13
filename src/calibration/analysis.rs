@@ -15,9 +15,22 @@ pub struct CandidateAnalysis {
     pub median_tg_tps: f64,
     pub median_effective_tps: f64,
     pub spread_tg_tps: f64,
+    pub sample_count: usize,
+    pub confidence: AnalysisConfidence,
+    pub noise_warning: bool,
     pub baseline_delta_tg_tps: Option<f64>,
     pub context_size: Option<u64>,
     pub pareto: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisConfidence {
+    #[default]
+    None,
+    Low,
+    Medium,
+    High,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -28,6 +41,7 @@ pub struct CalibrationAnalysis {
     pub fastest_candidate: Option<String>,
     pub balanced_candidate: Option<String>,
     pub max_context_candidate: Option<String>,
+    pub warnings: Vec<String>,
 }
 
 pub fn analyze(results: &[CalibrationCandidateResult]) -> CalibrationAnalysis {
@@ -44,6 +58,9 @@ pub fn analyze(results: &[CalibrationCandidateResult]) -> CalibrationAnalysis {
             median_tg_tps: median(&result.measurement.tg_tps_samples),
             median_effective_tps: median(&result.measurement.effective_tps_samples),
             spread_tg_tps: relative_spread(&result.measurement.tg_tps_samples),
+            sample_count: valid_sample_count(&result.measurement.tg_tps_samples),
+            confidence: confidence(&result.measurement.tg_tps_samples),
+            noise_warning: relative_spread(&result.measurement.tg_tps_samples) > 0.15,
             baseline_delta_tg_tps: baseline_tg
                 .map(|value| median(&result.measurement.tg_tps_samples) - value),
             context_size: result.candidate.typed_patch.context_size,
@@ -71,12 +88,18 @@ pub fn analyze(results: &[CalibrationCandidateResult]) -> CalibrationAnalysis {
         })
         .map(|candidate| candidate.candidate_id.clone());
 
+    let warnings = candidates
+        .iter()
+        .filter(|candidate| candidate.noise_warning)
+        .map(|candidate| format!("{} has high decode noise", candidate.candidate_id))
+        .collect();
     CalibrationAnalysis {
         candidates,
         pareto_candidate_ids: pareto_ids,
         fastest_candidate: fastest,
         balanced_candidate: balanced,
         max_context_candidate: max_context,
+        warnings,
     }
 }
 
@@ -151,6 +174,28 @@ fn relative_spread(values: &[f64]) -> f64 {
         .map(|value| (*value - center).abs())
         .collect::<Vec<_>>();
     median(&deviations) / center
+}
+
+fn valid_sample_count(values: &[f64]) -> usize {
+    values
+        .iter()
+        .filter(|value| value.is_finite() && **value > 0.0)
+        .count()
+}
+
+fn confidence(values: &[f64]) -> AnalysisConfidence {
+    match valid_sample_count(values) {
+        0 => AnalysisConfidence::None,
+        1 => AnalysisConfidence::Low,
+        2..=3 => AnalysisConfidence::Medium,
+        _ => {
+            if relative_spread(values) <= 0.10 {
+                AnalysisConfidence::High
+            } else {
+                AnalysisConfidence::Medium
+            }
+        }
+    }
 }
 
 #[cfg(test)]
