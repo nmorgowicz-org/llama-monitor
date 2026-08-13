@@ -287,13 +287,10 @@ fn api_benchmark(
                         match bench_result {
                             Ok(Some((prompt_tps, gen_tps, ttft_ms))) => {
                                 let benchmark =
-                                    crate::llama::spawn_wizard::classify_benchmark_result(
+                                    crate::llama::spawn_wizard::classify_rapid_mlx_benchmark_result(
                                         prompt_tps,
                                         gen_tps,
                                         ttft_ms,
-                                        None,
-                                        None,
-                                        0,
                                     );
                                 return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                                     Box::new(warp::reply::json(&serde_json::json!({

@@ -218,6 +218,46 @@ pub fn classify_benchmark_result(
     }
 }
 
+/// Classify a Rapid-MLX benchmark without emitting llama.cpp tuning patches.
+///
+/// Rapid-MLX owns a different configuration surface. Until it has a
+/// capability-backed classifier, benchmark output remains informational so the
+/// shared Tune UI cannot apply llama.cpp fields such as `flash_attn`,
+/// `batch_size`, or `n_cpu_moe` to a Rapid preset.
+pub fn classify_rapid_mlx_benchmark_result(
+    prompt_tps: f64,
+    gen_tps: f64,
+    ttft_ms: f64,
+) -> BenchmarkResult {
+    let verdict = if gen_tps >= 15.0 && ttft_ms <= 1500.0 {
+        "good"
+    } else if gen_tps >= 4.0 && ttft_ms <= 3000.0 {
+        "moderate"
+    } else {
+        "poor"
+    };
+
+    let mut hints = Vec::new();
+    if gen_tps < 4.0 {
+        hints.push("Rapid-MLX generation is below the local baseline; review the backend-specific runtime settings and model fit.".to_string());
+    }
+    if ttft_ms > 1500.0 {
+        hints.push("Rapid-MLX reported a high time to first token; compare against a repeat measurement before changing settings.".to_string());
+    }
+    if prompt_tps < 300.0 {
+        hints.push("Rapid-MLX prefill throughput is below the local baseline; treat this result as informational until repeated.".to_string());
+    }
+
+    BenchmarkResult {
+        prompt_tokens_per_second: prompt_tps,
+        gen_tokens_per_second: gen_tps,
+        time_to_first_token_ms: ttft_ms,
+        verdict: verdict.to_string(),
+        hints,
+        suggestions: Vec::new(),
+    }
+}
+
 /// Predictive, config-time advisory hints surfaced in the Spawn Wizard and Preset
 /// Editor — *before* a benchmark is run. Each returned suggestion reuses the same
 /// `{label, description, param, value, patch}` contract as benchmark suggestions so
@@ -1342,6 +1382,14 @@ mod tests {
         for d in &dirs {
             assert!(d.is_dir(), "Returned dir should exist: {:?}", d);
         }
+    }
+
+    #[test]
+    fn rapid_benchmark_is_informational_only() {
+        let result = classify_rapid_mlx_benchmark_result(120.0, 2.5, 2_000.0);
+        assert_eq!(result.verdict, "poor");
+        assert!(!result.hints.is_empty());
+        assert!(result.suggestions.is_empty());
     }
 
     #[test]
