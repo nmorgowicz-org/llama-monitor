@@ -79,6 +79,18 @@ No upstream source was modified. The failure is retained as a caveat and the
 full upstream test gate remains open until the contract is either reproduced
 on the reference platform or the source maintainer supplies a portable fix.
 
+Windows may reject the directory at `fopen`, `fseek`, or `ftell` with a
+different platform error. Therefore the Local LLM Foundry implementation must
+not match these human strings. Its cross-platform invariant is:
+
+1. inspect the path metadata before reading;
+2. reject directories, symlinks, and other non-regular files;
+3. return one stable typed error such as `not_regular_file`; and
+4. test that invariant with macOS/Linux/Windows fixtures.
+
+This keeps a platform-specific upstream parser behavior from becoming a
+product compatibility contract.
+
 ## CLI contract snapshot
 
 `python3 llama-optimize.py --help` was captured successfully. The integration
@@ -98,6 +110,6 @@ typed capability/argv contract described in the pinned source regions:
 
 **Partial pass.** Commit/license pins, source manifest, offline self-test, and
 native build evidence are recorded. The upstream full-test portability defect,
-managed-binary capability receipts, and the native llama.cpp contract matrix
-remain open. No source or binary from either upstream repository is shipped by
-this receipt.
+the cross-platform regular-file invariant, managed-binary capability receipts,
+and the native llama.cpp contract matrix remain open. No source or binary from
+either upstream repository is shipped by this receipt.
