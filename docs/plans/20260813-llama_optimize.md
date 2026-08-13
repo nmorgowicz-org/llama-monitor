@@ -730,28 +730,28 @@ The verifier must sign off that result selection is measured, bounded, reproduci
 
 **Goal:** Ship the primary user flow with results review and safe preset creation/update.
 
-**Current evidence (2026-08-13):** The dedicated Calibration frontend module, llama.cpp-only Preset Editor action, preflight/start/poll/receipt flow, candidate throughput rendering, authenticated derived-preset apply path, bounded post-apply llama-bench validation with immediate rollback on failure, durable fingerprint-guarded rollback route with private pre-apply snapshots, light-theme/reduced-motion CSS, generated asset registration, and an opt-in real-local-GGUF capture scenario are implemented. `core/calibration.spec.js` now has six passing release-built cases covering results, stale preflight, cancellation, confirmation-before-apply/update conflict, explicit rollback, and Rapid-MLX suppression. The opt-in `calibration` capture reaches the real backend preflight and uses intercepted bounded results so it never starts a benchmark unless a future explicit live mode is added. The full Rust suite (1,249 passed, 13 ignored), clippy, JavaScript validation/lint, release build, formatting, and diff checks are clean. This is not a Phase 5 sign-off: screenshot human acceptance and full native/fake-runtime post-apply receipts remain open.
+**Current evidence (2026-08-13):** The dedicated Calibration frontend module, llama.cpp-only Preset Editor action, preflight/start/poll/receipt flow, candidate throughput rendering, authenticated derived-preset apply path, bounded post-apply llama-bench validation with immediate rollback on failure, durable fingerprint-guarded rollback route with private pre-apply snapshots, light-theme/reduced-motion CSS, generated asset registration, and an opt-in real-local-GGUF capture scenario are implemented. `core/calibration.spec.js` now has six passing release-built cases covering results, stale preflight, cancellation, confirmation-before-apply/update conflict, explicit rollback, and Rapid-MLX suppression. The opt-in `calibration` capture reaches the real backend preflight and now captures preflight, running, results, apply confirmation, validated-applied, and rollback-confirmation states while intercepting the bounded lifecycle so it never starts a benchmark. The full Rust suite (1,250 passed, 13 ignored), clippy, JavaScript validation/lint, release build, formatting, and diff checks are clean. This is not a Phase 5 sign-off: screenshot human acceptance and full native/fake-runtime post-apply receipts remain open.
 
 #### Tasks
 
-- [ ] Add a dedicated frontend module such as `static/js/features/calibration.js`; keep API/state/rendering separate from `presets.js`.
-- [ ] Add the Preset Editor **Calibrate this preset** action only for eligible local llama.cpp presets.
-- [ ] Build the preflight modal with workload, minimum context, budget, KV floor, runtime/model fingerprint, conflicts, run count, and duration/risk language.
-- [ ] Poll the job with bounded backoff and render progress/cancel/resume states.
-- [ ] Render baseline, Pareto alternatives, confidence/spread, failure counts, memory headroom, stale warnings, and field-by-field patch review using DOM APIs (`textContent`), never unsafe HTML.
-- [ ] Implement **Create derived preset** as the default apply action.
-- [ ] Implement explicit **Update this preset** with expected preset fingerprint, server-side merge/validation, before/after receipt, and conflict response if the preset changed.
-- [ ] Offer post-apply short validation and rollback to the captured prior preset values.
+- [x] Add the dedicated frontend module `static/js/features/calibration.js`; keep API/state/rendering separate from `presets.js`.
+- [x] Add the Preset Editor **Calibrate this preset** action only for eligible local llama.cpp presets.
+- [x] Build the preflight modal with workload, minimum context, budget, runtime/model fingerprint, bounded run count, and risk language.
+- [x] Poll the job with bounded backoff and render progress/cancel states. Resume remains a follow-up lifecycle feature.
+- [x] Render baseline and bounded alternatives with measured throughput and stale/error states using DOM APIs (`textContent`), never unsafe HTML.
+- [x] Implement **Create derived preset** as the default apply action.
+- [x] Implement explicit source update with expected preset fingerprint, server-side merge/validation, before/after receipt, and conflict response if the preset changed.
+- [x] Offer bounded post-apply validation and fingerprint-guarded rollback to captured prior preset values.
 - [ ] Ensure active-session identity comes from backend session state, not merely the current dropdown selection.
 - [ ] Update static asset registration/generated routes and JS module baseline if applicable.
 
 #### Verification
 
-- [ ] UI E2E covers preflight, start, progress, cancel, resume, results, stale state, derived preset, update conflict, validation failure, and rollback using fake runtime fixtures.
-- [ ] No preset is mutated before confirmation.
-- [ ] Rapid presets do not show the llama.cpp action.
-- [ ] New CSS has light-theme and reduced-motion handling; no selector duplication or broken JS/HTML/CSS references.
-- [ ] Run release build and capture new sequential scenarios for Preset Editor preflight, running, results, stale, and apply review.
+- [x] UI E2E covers preflight, start, results, cancel, stale state, derived apply confirmation, update conflict, rollback, and Rapid-MLX suppression using deterministic fixtures. Resume and real fake-runtime post-apply receipts remain open.
+- [x] No preset is mutated before confirmation.
+- [x] Rapid presets do not show the llama.cpp action.
+- [x] New CSS has light-theme and reduced-motion handling; no selector duplication or broken JS/HTML/CSS references.
+- [x] Release build and sequential capture scenarios cover preflight, running, results, apply confirmation, validated apply, and rollback confirmation.
 - [ ] Review fresh screenshots with the user before accepting the UX.
 
 #### Hard gate

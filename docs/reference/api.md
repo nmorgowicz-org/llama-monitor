@@ -895,6 +895,30 @@ Cleanup is a separate receipt-scoped operation.
 Auth: api-token.
 Rescans `models_dir`.
 
+### Calibration routes
+
+Calibration is llama.cpp-only and requires a regular local GGUF inside the
+configured model library. Read and job-control routes use `api-token`;
+apply and rollback require `db-admin-token` plus their exact confirmation
+phrases. Calibration never changes the active inference session.
+
+- `POST /api/calibrations/preflight` — validate the selected preset, model
+  library, managed sibling `llama-bench`, and bounded Quick plan.
+- `POST /api/calibrations` — start a confirmed bounded Quick job.
+- `GET /api/calibrations/{id}` — poll the durable job snapshot.
+- `GET /api/calibrations/{id}/receipt` — read the measured receipt and apply
+  history.
+- `POST /api/calibrations/{id}/cancel` — cancel the owned benchmark process.
+- `POST /api/calibrations/{id}/apply` — apply the measured candidate, creating
+  a derived preset by default; bounded post-apply validation runs by default
+  and immediately rolls back failed validation.
+- `POST /api/calibrations/{id}/rollback` — restore the private pre-apply
+  snapshot or remove the derived preset when its fingerprint is unchanged.
+
+Apply requires `APPLY_CALIBRATION`; rollback requires
+`ROLLBACK_CALIBRATION`. Both operations reject stale fingerprints and never
+silently overwrite user edits.
+
 Success:
 
 ```json

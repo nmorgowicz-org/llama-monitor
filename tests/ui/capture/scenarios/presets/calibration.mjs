@@ -46,7 +46,14 @@ export default async function(ctx) {
             return;
         }
         if (url.pathname === '/api/calibrations/capture-job/apply') {
-            request.respond({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+            request.respond({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, apply: {
+                preset_id: 'derived-capture', derived: true, candidate_id: 'bounded-batch',
+                before_fingerprint: 'sha256:before', after_fingerprint: 'sha256:after', validation: 'passed',
+            } }) });
+            return;
+        }
+        if (url.pathname === '/api/calibrations/capture-job/rollback') {
+            request.respond({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, rollback: {} }) });
             return;
         }
         request.continue();
@@ -93,5 +100,11 @@ export default async function(ctx) {
     await page.click('#calibration-apply');
     await page.waitForSelector('.app-confirm-overlay.active', { visible: true });
     await captureShot(page, 'calibration-apply-confirmation.png', { fullPage: true });
+    await page.click('.app-confirm-overlay.active .btn-modal-save');
+    await page.waitForSelector('#calibration-rollback:not([hidden])', { visible: true });
+    await captureShot(page, 'calibration-applied.png', { fullPage: true });
+    await page.click('#calibration-rollback');
+    await page.waitForSelector('.app-confirm-overlay.active', { visible: true });
+    await captureShot(page, 'calibration-rollback-confirmation.png', { fullPage: true });
     await page.click('.app-confirm-overlay.active .btn-modal-cancel');
 }
