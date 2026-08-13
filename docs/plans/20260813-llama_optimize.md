@@ -703,7 +703,7 @@ A single candidate must be trustworthy and recoverable before implementing a mul
 
 - [ ] Add pure design modules for bounded grid, Morris screening, Taguchi arrays, conditional stages, and deterministic randomization.
 - [ ] Generate and commit machine-readable oracle fixtures from pinned upstream L9/L25/L125 and Morris examples with source/license metadata.
-- [ ] Implement run-count calculation before job consent.
+- [x] Implement run-count calculation before job consent (preflight reports planned OA rows plus Balanced verification slots and rejects Thorough).
 - [x] Implement workload-aware factor levels from introspected hardware/model/runtime/baseline, not model name (the bounded v1 catalog currently uses workload, preset baseline, and exact runtime flag evidence).
 - [x] Implement the Balanced budget limits from section 6.2 and refuse oversized designs; staging and consent wiring remain with executor integration.
 - [ ] Preserve context as a tradeoff axis through screening/refinement.

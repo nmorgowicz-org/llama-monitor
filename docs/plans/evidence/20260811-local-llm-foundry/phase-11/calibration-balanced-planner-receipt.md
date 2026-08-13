@@ -43,6 +43,14 @@ attention. Executor/preflight wiring remains a subsequent slice.
 
 Balanced executor wiring now uses the shared measurement and cancellation-safe path; real-runtime receipts and analysis/noise/Pareto reporting remain open.
 
+## Current implementation status
+
+The source now includes bounded Balanced execution, journaled verification,
+receipt-persisted Pareto labels, baseline deltas, confidence, and noise
+warnings. The remaining Phase 4 gates are real-runtime receipt evidence,
+main-effects diagnostics, upstream oracle fixtures, deterministic randomization,
+and synthetic response-surface validation.
+
 ## Gate result
 
 **Pass — deterministic Balanced planner and preflight foundation.** The Phase
