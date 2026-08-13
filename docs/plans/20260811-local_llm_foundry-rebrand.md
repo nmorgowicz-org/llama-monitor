@@ -7,7 +7,7 @@
 - Target release: 2.0.0
 - Source snapshot: 2026-08-11
 
-## Execution status (verified 2026-08-12)
+## Execution status (verified through 2026-08-13)
 
 | Phase | Status | Evidence / remaining gate |
 |---|---|---|
@@ -23,7 +23,8 @@
 | 9 — runtime, agent, updater, tray, and platform identities | Complete | Runtime compatibility, updater, remote-path/task migration, CA continuity, entropy hardening, and Token Ingot tray integration are validated; native Windows proofs remain explicit return markers. |
 | 10 — documentation, API, CLI, migration, and historical policy | Complete | Current docs/templates, upgrade guide, brand usage policy, compatibility notes, historical allowlist, and 42-file relative-link validation pass. Fresh screenshot promotion remains Phase 13. |
 | 11 — CI, release-please, packaging, dual assets, and repository rename | In progress | Source and GitHub cutover gates pass: repository renamed, old URL redirects, git continuity verified, and PR #314 carries `feat!:` with a compact 20-entry override. Windows-target clippy/build and release-smoke jobs pass. The two UI races from CI run `31603543480` are fixed locally; a fresh remote run, generated 2.0.0 release, and real artifact/update probes remain open. |
-| 12–14 — cross-platform, security, final qualification, and launch | Not started; Windows handoff prepared | Native Windows work is intentionally deferred to the Windows machine. Use `docs/plans/20260812-local_llm_foundry-windows-validation-handoff.md`; do not close these phases from macOS cross-compilation alone. |
+| 11.5 — bounded llama.cpp Calibration v1 | Approved; not started | Required before Phase 12. Execute the 2.0-owned scope in `docs/plans/20260813-llama_optimize.md`: native Quick/Balanced hardware calibration, receipts, Preset Editor, wizard reuse/queueing, and safe apply/rollback. |
+| 12–14 — cross-platform, security, final qualification, and launch | Not started; Windows handoff prepared | Native Windows work is intentionally deferred to the Windows machine. Phase 12 now qualifies Calibration with the rebrand release candidate. Use `docs/plans/20260812-local_llm_foundry-windows-validation-handoff.md`; do not close these phases from macOS cross-compilation alone. |
 
 ### Current CI qualification incident and local resolution (2026-08-12)
 
@@ -127,6 +128,7 @@ acceptance gates, not implementation uncertainty.
 | 8 | Source-level closure remains valid; the two CI timing races from run `31603543480` are fixed and verified locally (focused Gemma 20/20, Rapid reachability 10/10; full suite 267 passed, 5 skipped, 3 flaky retries). External CI closure remains open until a fresh remote run is green. |
 | 9 | Complete 2026-08-11: runtime identity centralization, deterministic canonical-first assets, checksum URL retention, exact process/task compatibility, legacy install-path preservation, CA continuity, entropy hardening, Token Ingot tray integration, and current-exe update paths pass source-level gates. Native Windows task/tray/mixed-version proofs remain explicit return markers. |
 | 10 | Complete 2026-08-12: current docs/templates, upgrade guide, brand usage policy, CLI/API/runtime compatibility notes, historical allowlist, and 42-file relative-link validation pass. Fresh screenshot promotion remains Phase 13. |
+| 11.5 | Open: bounded llama.cpp Calibration v1 must pass its Phase 0–6 release scope, required Phase 8 documentation/findings, and applicable Phase 10 gates before rebrand Phase 12 begins. Advanced server search, Rapid calibration, and other explicitly deferred items are not 2.0 blockers. |
 
 ## 1. Purpose and execution contract
 
@@ -134,8 +136,8 @@ This plan coordinates the complete public rebrand from Llama Monitor /
 `llama-monitor` to **Local LLM Foundry**. It covers product identity, visual
 identity, application roots, migration of existing user resources, package and
 binary identity, frontend and backend surfaces, remote agents, updater behavior,
-CI and releases, repository rename, documentation, compatibility, rollback, and
-the 2.0 cutover.
+CI and releases, repository rename, bounded llama.cpp hardware Calibration,
+documentation, compatibility, rollback, and the 2.0 cutover.
 
 Luna should execute this plan consecutively. Each phase is a fresh-context work
 unit with its own prerequisites, owned files, tasks, tests, receipts, gate, stop
@@ -1505,6 +1507,107 @@ redirect failure, missing secret, wrong version, archive mismatch, or any old
 parser failure. Repository rollback uses GitHub rename reversal only before
 public release and only with Nick’s authorization.
 
+### Phase 11.5 — Bounded llama.cpp hardware Calibration v1
+
+**Authoritative implementation plan**
+
+`docs/plans/20260813-llama_optimize.md`. Its explicit **2.0.0 release boundary**
+controls scope. Do not expand the release gate to its post-2.0 Thorough,
+MTP/ngram/concurrency, broad Doctor-consolidation, multi-GPU, or Rapid-MLX
+follow-ups.
+
+**Objective**
+
+Make Local LLM Foundry 2.0 capable of measuring and safely applying a bounded
+llama.cpp preset calibration for the user's actual hardware, model, managed
+runtime, context requirement, and workload instead of presenting only generic
+advanced defaults.
+
+**Prerequisites and serialization**
+
+- Phase 11 source/repository/package contract is stable enough to supply the
+  canonical application home and managed llama.cpp bundle.
+- Do not publish or merge the final 2.0 release while this phase is open.
+- Preserve the Phase 11 release/asset contract. Calibration resolves
+  `llama-server`, sibling `llama-bench`, and optional sibling
+  `llama-fit-params` through `AppConfig`; it never hardcodes either legacy or
+  canonical application-home paths.
+- One exclusive calibration job owns the local GPU/runtime lifecycle. Never
+  run benchmark scenarios or screenshot harness processes in parallel.
+
+**Required 2.0 scope**
+
+- [ ] Complete Calibration Phase 0: pin upstream contracts/licenses, fix
+  backend-crossing tuning patches, and remove filename/name-derived tuning
+  qualification in favor of authoritative introspection or degraded state.
+- [ ] Complete Calibration Phases 1–3: versioned fingerprints/receipts,
+  cancellable and crash-resumable single-job lifecycle, typed candidate
+  patches, managed sibling tool/capability resolution, structured
+  `llama-bench -o json`, bounded process control, and measurement-validity
+  gates.
+- [ ] Complete the Quick and Balanced portion of Calibration Phase 4: bounded
+  run counts, deterministic/randomized design receipts, measured Pareto picks,
+  noise/confidence reporting, and pick verification. Thorough/overnight and
+  context-ceiling search remain deferred.
+- [ ] Complete Calibration Phase 5: Preset Editor **Calibrate this preset**,
+  preflight/progress/cancel/resume/results, derived-preset-by-default apply,
+  optimistic fingerprint conflict handling, bounded post-apply validation,
+  and rollback.
+- [ ] Complete Calibration Phase 6: exact current-receipt reuse and explicit
+  optional post-download calibration in the Spawn Wizard without blocking the
+  normal setup path.
+- [ ] Complete the 2.0-owned portion of Calibration Phase 8: current docs,
+  backend-safe Tune behavior, minimal current/stale/noisy receipt findings,
+  and consolidation only where needed to prevent contradictory or unsafe
+  behavior.
+- [ ] Run the applicable Calibration Phase 10 security, auth, platform,
+  release-build, UI, screenshot, process-recovery, and real-hardware gates.
+- [ ] Update the breaking PR title/body override and changelog inputs so the
+  2.0 release accurately includes hardware Calibration without changing the
+  already-frozen dual-asset bridge contract.
+
+**Owned files**
+
+- New calibration domain/API/persistence/tests under the paths assigned by
+  `20260813-llama_optimize.md`
+- Preset Editor, Spawn Wizard, Tune/Doctor minimum integration, current
+  reference docs, capture scenarios, and Calibration evidence
+- Phase 11 release metadata only where needed to describe the added 2.0 feature;
+  no unrelated rebrand or migration rewrite
+
+**Verification and evidence**
+
+- Store raw contracts, produced-file manifests, design fixtures, auth/security
+  receipts, cancellation/crash-recovery proofs, managed-binary hashes, and
+  real-hardware qualification under
+  `docs/plans/evidence/20260813-llama-optimize/`.
+- Run the project-mandated checks and the isolated release-built Playwright
+  suite before handing the combined release candidate to Phase 12.
+- Capture Calibration preflight, running, results, stale, and apply-review
+  scenarios sequentially after a release build. Fresh human acceptance remains
+  required.
+- Prove on each claimed platform that sibling binary resolution follows the
+  active configured application root and that cancellation leaves no child,
+  port, mutated preset, or lost prior session.
+
+**Pass gate**
+
+An eligible local llama.cpp preset can run a bounded Quick or Balanced
+calibration, survive cancellation/restart safely, present measured alternatives
+with reproducible evidence, create or explicitly update a preset, validate the
+applied result, and roll it back. Backend-specific settings never cross into
+Rapid-MLX, model facts are introspection-backed, and all required security/UI
+gates pass.
+
+**Stop/rollback**
+
+Stop on unsafe process cleanup, unbounded trial growth, missing auth or exact
+confirmation, path/capability ambiguity, filename-derived model facts,
+backend-crossing patches, preset mutation before confirmation, non-reproducible
+winners, suspected-crash retry, or missing native-platform proof. Roll back to
+the last Calibration phase boundary; do not waive the defect or remove the
+feature's evidence contract to preserve the launch date.
+
 ### Phase 12 — Cross-platform, security, migration, and regression qualification
 
 **Objective**
@@ -1514,7 +1617,7 @@ runtime, packaging, and platforms.
 
 **Prerequisites**
 
-- Phases 0–11 passed.
+- Phases 0–11 and Phase 11.5 passed.
 - Release candidate worktree contains only intended changes.
 
 **Task matrix**
@@ -1533,6 +1636,14 @@ runtime, packaging, and platforms.
   incomplete pairs, HF cache, sidecars, provenance, cross-volume resume.
 - [ ] Auth cookie old/new/both/conflict/logout/TLS.
 - [ ] API auth-routing and malformed JSON.
+- [ ] Calibration fresh/no-receipt/current/stale/noisy/interrupted states;
+  Quick and Balanced run bounds; cancellation/resume/crash journal; derived
+  preset apply, validation, rollback, and optimistic conflict behavior.
+- [ ] Calibration managed sibling tools under canonical, legacy-selected, and
+  explicit custom config roots; missing/unsupported tool degradation.
+- [ ] Calibration process cleanup, exclusive GPU/runtime lease, loopback-only
+  validation server, bounded output, receipt permissions/redaction, and no
+  preset mutation before confirmation.
 - [ ] Remote agent old/new controller/agent/task/path/cert/update matrices.
 - [ ] Updater old/new assets/checksums/current-exe/archive matrices.
 - [ ] Browser preference preservation, current UI copy, accessibility/themes.
@@ -1587,12 +1698,15 @@ Additional gates:
 **Pass gate**
 
 Every matrix row is green on its required native platform and the mandatory
-sequence passes from a clean intended worktree.
+sequence passes from a clean intended worktree. Bounded Calibration behavior,
+receipts, process cleanup, apply/rollback, and backend separation are green on
+every platform where the feature is claimed.
 
 **Stop/rollback**
 
-Any data, auth, update, native platform, or release-contract failure blocks
-cutover. Roll back to the last phase boundary; do not waive failures.
+Any data, auth, update, Calibration safety/correctness, native platform, or
+release-contract failure blocks cutover. Roll back to the last phase boundary;
+do not waive failures.
 
 ### Phase 13 — Screenshot refresh and visual acceptance
 
@@ -1613,6 +1727,8 @@ and refresh only documentation-used screenshots.
 - [ ] Capture welcome, auth, navigation, main shell, compact popover,
   migration pending/preview/conflict/success, settings, models, and update
   surfaces.
+- [ ] Capture Calibration preflight, active progress/cancel, measured results,
+  stale evidence, and preset apply/rollback review from the release build.
 - [ ] Capture dark/light, 1440×900 and 1280×900 desktop, 430×900 narrow, and
   reduced motion where relevant.
 - [ ] Produce deterministic favicon/PWA/small-size proof sheets.
@@ -1639,7 +1755,8 @@ and refresh only documentation-used screenshots.
 **Pass gate**
 
 Fresh receipts and native proofs demonstrate the approved identity across all
-required surfaces; every promoted screenshot is referenced.
+required surfaces and the accepted Calibration flow; every promoted screenshot
+is referenced.
 
 **Stop/rollback**
 
@@ -1657,14 +1774,15 @@ public announcement, launch campaign, or announcement-approval gate.
 
 **Prerequisites and serialization**
 
-- Phases 0–13 passed.
+- Phases 0–13, including Phase 11.5, passed.
 - Repository renamed and verified.
 - Merge freeze active.
 
 **Cutover sequence**
 
 1. Record the final commit, clean worktree, version, identity contract,
-   migration schema, release contract, screenshots, and rollback owner.
+   migration schema, Calibration schema/method version, release contract,
+   screenshots, and rollback owner.
 2. Merge the implementation PR with a breaking conventional squash title/body.
 3. Inspect the release-please PR; stop unless it is exactly 2.0.0 with the
    expected changelog.
@@ -1677,25 +1795,30 @@ public announcement, launch campaign, or announcement-approval gate.
 8. Each probe preserves sentinel config, token, preset, model reference, and
    migration state; proves restarted 2.0 health and receipt.
 9. Run fresh 2.0 install and old-root migration probes on native platforms.
-10. Verify old/new repository, release, API, and git URLs once more.
-11. Keep the friend/tester update handoff pending until all probes pass. The
+10. Run a bounded shipped-binary Calibration smoke on each claimed native
+    platform using a disposable root/model fixture; verify receipt, apply,
+    rollback, cancellation cleanup, and managed sibling-tool resolution.
+11. Verify old/new repository, release, API, and git URLs once more.
+12. Keep the friend/tester update handoff pending until all probes pass. The
     workflow’s publish-before-assets window is not acceptable proof of readiness.
-12. Share the 2.0 update with the intended friends/testers, publish the upgrade
+13. Share the 2.0 update with the intended friends/testers, publish the upgrade
     guide, and update any external integrations that are actually in use.
-13. Monitor issues/update failures/migration failures and retain rollback
-    authority through the acceptance window.
+14. Monitor issues, update failures, migration failures, and Calibration
+    failures, and retain rollback authority through the acceptance window.
 
 **Evidence**
 
 - `release-contract.json`, downloaded asset manifest, hashes, archive listings,
   v1.8.1 probe logs, fresh/migration receipts, URLs, workflow runs, final
-  screenshot manifest, and release-handoff record.
+  screenshot manifest, shipped-binary Calibration smoke/receipt/rollback
+  evidence, and release-handoff record.
 
 **Pass gate**
 
 2.0 is available with complete dual assets, real old-client update and old-root
-migration proof, correct repository identity, and no unresolved release-blocking
-defect; the owner can safely share the update with the intended testers.
+migration proof, bounded llama.cpp hardware Calibration proof, correct repository
+identity, and no unresolved release-blocking defect; the owner can safely share
+the update with the intended testers.
 
 **Stop/rollback**
 

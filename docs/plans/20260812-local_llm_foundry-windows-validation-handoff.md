@@ -1,6 +1,6 @@
 # Local LLM Foundry 2.0 — Native Windows Validation Handoff
 
-Status: native Windows Rust/JS/UI validation completed 2026-08-12; Windows core/config captures pass, while Rapid-MLX wizard/preset captures remain platform-gated; remaining markers are application-home, tray/WebView2, packaging, screenshot parity, and fresh CI evidence
+Status: native Windows Rust/JS/UI validation completed 2026-08-12; Windows core/config captures pass, while Rapid-MLX wizard/preset captures remain platform-gated; remaining markers are application-home, tray/WebView2, packaging, bounded llama.cpp Calibration v1, screenshot parity, and fresh CI evidence
 
 The Windows checkout now has the portability and test-fixture fixes required for
 the native MSVC build. Commit `3069a1b` is clean and validated with Rust 1.97.1:
@@ -11,12 +11,16 @@ through Portmaster, the complete release-built native UI suite passed (270
 passed, 5 intentional skips, 0 failures). WSL2 release preflight remains a
 separate environment marker, and the disposable application-home, tray/
 WebView2, sensor bridge, updater, remote-agent, and package checks still need
-their explicit receipts before the Windows phase is fully closed.
+their explicit receipts before the Windows phase is fully closed. The later
+2.0 scope decision also adds bounded llama.cpp Calibration v1 as a required
+native Windows return marker; earlier Windows receipts do not prove it.
 
 This document is the operational handoff for a fresh Codex session running on
 the Windows development machine. The authoritative implementation and release
 decisions remain in
 [`20260811-local_llm_foundry-rebrand.md`](20260811-local_llm_foundry-rebrand.md).
+Calibration implementation and its bounded 2.0 release boundary are authoritative
+in [`20260813-llama_optimize.md`](20260813-llama_optimize.md).
 This handoff records only the Windows-specific setup, evidence contract, and
 return markers needed to close Phases 11–14.
 
@@ -79,6 +83,7 @@ for the pair manifest, high-impact review order, and acceptance classifications.
 - Legacy Windows home: `%APPDATA%\\llama-monitor\\`
 - Canonical executable: `local-llm-foundry.exe`
 - Supported 2.0.x legacy executable alias: `llama-monitor.exe`
+- Phase 11.5: bounded llama.cpp Calibration v1 must pass before Phase 12 can close.
 - Do not delete or silently move the legacy root or external model trees.
 
 Before starting, confirm the checkout is clean and at the intended commit. Do
@@ -225,6 +230,43 @@ Validate the following on the native machine:
 - Remote-agent install/update/uninstall uses canonical paths while accepting
   supported legacy controller/agent/task names.
 
+## Bounded Calibration v1 native checks
+
+These checks begin only after Phase 11.5 implementation reaches the Windows
+machine. Do not manufacture proof from the pre-Calibration binaries described
+earlier in this handoff.
+
+- Resolve the managed `llama-server.exe` from the active configured
+  application root and resolve `llama-bench.exe` plus optional
+  `llama-fit-params.exe` as exact siblings. Test canonical, legacy-selected,
+  and explicit disposable `--config-dir` roots; never rely on `%PATH%`.
+- Record each sibling's SHA-256, `--help` stdout/stderr, exit code, capability
+  hash, and missing/unsupported degradation behavior.
+- Use a small non-private GGUF fixture inside a disposable configured model
+  library. Run bounded Quick and Balanced preflights and at least the
+  release-required bounded smoke; record the planned and actual run counts.
+- Verify job polling, cancellation, app restart/resume, suspected-crash
+  classification, retained journal/receipt, exact child process-tree cleanup,
+  and port cleanup.
+- Verify an active server is stopped only after explicit authorization and is
+  restored only when its original configuration fingerprint still matches.
+- Review measured alternatives and create a derived preset. Prove the source
+  preset is unchanged before confirmation, post-apply validation is recorded,
+  rollback restores the exact prior values, and optimistic conflicts fail
+  without data loss.
+- Verify receipt permissions/redaction, bounded diagnostics/output, loopback
+  networking, no secrets/private prompts, no free-form `extra_args`, and no
+  filename-derived architecture or capability claims.
+- Verify a Rapid-MLX preset cannot enter the llama.cpp factor catalog or receive
+  a llama.cpp Calibration patch.
+- Run the release-built Calibration UI scenarios for preflight, progress/cancel,
+  results, stale evidence, and apply/rollback review. Capture them sequentially
+  under the isolated Windows application home.
+
+Thorough/overnight search, MTP/ngram/concurrency optimization, automatic
+multi-GPU placement, and Rapid-MLX calibration are not Windows 2.0 closure
+markers.
+
 ## Packaging and release checks
 
 Run the release preflight and inspect the generated archives without publishing:
@@ -265,6 +307,7 @@ docs/plans/evidence/20260811-local-llm-foundry/phase-12/windows/
   path-matrix.tsv
   migration-receipts/
   runtime-checks.tsv
+  calibration/
   package-manifest.tsv
   screenshots/
   SHA256SUMS
@@ -279,6 +322,9 @@ Native Windows work can close its markers only when all of these are true:
 - The full disposable application-home matrix passes without data loss.
 - Native executable, tray/WebView2, sensor bridge, updater, remote-agent, and
   package checks have raw receipts.
+- Bounded Calibration v1 passes its managed-sibling, Quick/Balanced bound,
+  cancellation/recovery, receipt, apply/rollback, backend-separation, and
+  release-built UI checks on the current Windows release binary.
 - The mandatory Rust/JS checks and the complete release-built UI suite are
   green on the current commit (270 passed, 5 intentional skips). The remaining
   Windows closure markers are the native runtime/package matrix and a fresh CI
@@ -293,15 +339,17 @@ Native Windows work can close its markers only when all of these are true:
 Stop and report instead of improvising if WebView2/driver installation needs
 credentials, signing keys are unavailable, the repository checkout is dirty,
 the migration classification is ambiguous, a checksum/archive differs from
-the release contract, a legacy client cannot consume the bridge asset, or a
-native failure cannot be reproduced with a disposable root. Do not delete
-legacy data, alter the public release, or waive a failing gate.
+the release contract, a legacy client cannot consume the bridge asset,
+Calibration leaves a child/port or mutates a preset unsafely, or a native
+failure cannot be reproduced with a disposable root. Do not delete legacy
+data, alter the public release, or waive a failing gate.
 
 ## Authoritative references
 
 - [`20260811-local_llm_foundry-rebrand.md`](20260811-local_llm_foundry-rebrand.md)
-- [`../../agents/platform-details.md`](../../agents/platform-details.md)
-- [`../../reference/windows-support.md`](../../reference/windows-support.md)
-- [`../../reference/cross-compilation.md`](../../reference/cross-compilation.md)
+- [`20260813-llama_optimize.md`](20260813-llama_optimize.md)
+- [`../agents/platform-details.md`](../agents/platform-details.md)
+- [`../reference/windows-support.md`](../reference/windows-support.md)
+- [`../reference/cross-compilation.md`](../reference/cross-compilation.md)
 - [`20260622-windows_build_toolchain.md`](20260622-windows_build_toolchain.md)
 - [`evidence/20260811-local-llm-foundry/phase-11/README.md`](evidence/20260811-local-llm-foundry/phase-11/README.md)
