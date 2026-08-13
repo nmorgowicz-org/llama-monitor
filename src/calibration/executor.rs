@@ -11,14 +11,14 @@ use super::jobs::{
     recover_snapshot, suspected_crash_trials, write_snapshot,
 };
 use super::{
-    CalibrationCandidate, CalibrationCandidateResult, CalibrationFingerprint,
-    CalibrationJobSnapshot, CalibrationJobState, CalibrationMeasurement, CalibrationReceipt,
-    LlamaCppCalibrationPatch, StartCalibrationRequest, TrialStatus,
+    CalibrationApplyRecord, CalibrationCandidate, CalibrationCandidateResult,
+    CalibrationFingerprint, CalibrationJobSnapshot, CalibrationJobState, CalibrationMeasurement,
+    CalibrationReceipt, LlamaCppCalibrationPatch, StartCalibrationRequest, TrialStatus,
 };
 use crate::config::AppConfig;
 use crate::inference::InferenceBackend;
 use crate::llama::bench_runner::{SweepPoint, llama_bench_path, run_sweep_with_tokens};
-use crate::presets::ModelPreset;
+use crate::presets::{self, ModelPreset};
 use crate::state::AppState;
 use anyhow::{Context, Result, anyhow, bail};
 use sha2::{Digest, Sha256};
@@ -27,6 +27,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{Notify, Semaphore};
 
 const METHOD_VERSION: &str = "calibration-v1-single-trial";
@@ -59,6 +60,30 @@ pub struct CalibrationPreflight {
     pub requires_server_stop: bool,
     pub supported_budget: &'static str,
     pub confirmation: &'static str,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+pub struct ApplyCalibrationRequest {
+    pub target_preset_id: String,
+    pub expected_target_fingerprint: String,
+    pub candidate_id: Option<String>,
+    #[serde(default = "default_create_derived")]
+    pub create_derived: bool,
+    pub exact_confirmation: Option<String>,
+}
+
+fn default_create_derived() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ApplyCalibrationResult {
+    pub preset_id: String,
+    pub derived: bool,
+    pub candidate_id: String,
+    pub before_fingerprint: String,
+    pub after_fingerprint: String,
 }
 
 pub fn confirmation_phrase() -> &'static str {
@@ -404,13 +429,16 @@ async fn run_job(
         method_version: METHOD_VERSION.into(),
         job_id: id.clone(),
         fingerprint: CalibrationFingerprint {
-            baseline_config_hash: fingerprint,
+            baseline_config_hash: fingerprint.clone(),
             workload,
             ..CalibrationFingerprint::current(InferenceBackend::LlamaCpp, Default::default())
         },
         measurement,
         candidate_results,
         selected_candidate,
+        preset_id: preset.id.clone(),
+        preset_fingerprint: fingerprint.clone(),
+        apply_history: Vec::new(),
     };
     let receipt_path = config
         .app_paths
@@ -432,6 +460,118 @@ async fn run_job(
         snapshot.completed_trials = completed_trials;
         snapshot.receipt_id = Some(id);
     });
+}
+
+const APPLY_CONFIRMATION: &str = "APPLY_CALIBRATION";
+
+pub fn apply_confirmation_phrase() -> &'static str {
+    APPLY_CONFIRMATION
+}
+
+pub fn apply(
+    config: &AppConfig,
+    state: &AppState,
+    job_id: &str,
+    request: ApplyCalibrationRequest,
+) -> Result<ApplyCalibrationResult> {
+    if request.exact_confirmation.as_deref() != Some(APPLY_CONFIRMATION) {
+        bail!("Exact confirmation APPLY_CALIBRATION is required");
+    }
+    let receipt_path = config
+        .app_paths
+        .calibration_receipts_dir()
+        .join(format!("{job_id}.json"));
+    let receipt_bytes =
+        fs::read(&receipt_path).map_err(|_| anyhow!("Calibration receipt not found"))?;
+    let mut receipt: CalibrationReceipt =
+        serde_json::from_slice(&receipt_bytes).context("Calibration receipt is invalid")?;
+    let candidate_id = request
+        .candidate_id
+        .clone()
+        .or_else(|| receipt.selected_candidate.clone())
+        .ok_or_else(|| anyhow!("Calibration receipt has no measured winner"))?;
+    let candidate = receipt
+        .candidate_results
+        .iter()
+        .find(|result| result.candidate.id == candidate_id)
+        .ok_or_else(|| anyhow!("Calibration candidate not found"))?;
+    if candidate.measurement.status != Some(TrialStatus::Ok) {
+        bail!("Only a valid measured Calibration candidate may be applied");
+    }
+    let source_id = if request.target_preset_id.is_empty() {
+        receipt.preset_id.clone()
+    } else {
+        request.target_preset_id.clone()
+    };
+    let mut presets = state
+        .presets
+        .lock()
+        .map_err(|_| anyhow!("Preset store unavailable"))?
+        .clone();
+    let original_presets = presets.clone();
+    let source_index = presets
+        .iter()
+        .position(|preset| preset.id == source_id)
+        .ok_or_else(|| anyhow!("Target preset not found"))?;
+    let before = preset_fingerprint(&presets[source_index])?;
+    if !request.expected_target_fingerprint.is_empty()
+        && request.expected_target_fingerprint != before
+    {
+        bail!("Preset changed since Calibration; refresh before applying");
+    }
+    if source_id != receipt.preset_id && before != receipt.preset_fingerprint {
+        bail!("Target preset does not match the Calibration source");
+    }
+
+    let mut updated = presets[source_index].clone();
+    apply_patch_to_preset(&mut updated, &candidate.candidate.typed_patch);
+    updated.backend = InferenceBackend::LlamaCpp;
+    crate::inference::launch::validate_preset_backend_config(&updated)?;
+    let derived = request.create_derived;
+    let target_id = if derived {
+        let id = crate::config::generate_random_token()
+            .chars()
+            .take(24)
+            .collect::<String>();
+        updated.id = id.clone();
+        updated.name = format!("{} (Calibrated)", updated.name);
+        id
+    } else {
+        updated.id.clone()
+    };
+    if derived {
+        presets.push(updated.clone());
+    } else {
+        presets[source_index] = updated.clone();
+    }
+    presets::save_presets(&config.presets_file, &presets).context("save applied preset")?;
+    let after = preset_fingerprint(&updated)?;
+    let record = CalibrationApplyRecord {
+        target_preset_id: target_id.clone(),
+        candidate_id: candidate_id.clone(),
+        derived,
+        before_fingerprint: before.clone(),
+        after_fingerprint: after.clone(),
+        timestamp_unix_ms: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_millis()),
+        validation: "not_run".into(),
+    };
+    receipt.apply_history.push(record);
+    if let Err(error) = write_receipt(&receipt_path, &receipt) {
+        // Restore the previous preset file/state if the receipt audit record
+        // cannot be persisted; an apply without an audit trail is unsafe.
+        let _ = presets::save_presets(&config.presets_file, &original_presets);
+        return Err(error.context("persist Calibration apply history"));
+    }
+    *state.presets.lock().unwrap() = presets;
+    Ok(ApplyCalibrationResult {
+        preset_id: target_id,
+        derived,
+        candidate_id,
+        before_fingerprint: before,
+        after_fingerprint: after,
+    })
 }
 
 fn select_winner(results: &[CalibrationCandidateResult]) -> Option<String> {

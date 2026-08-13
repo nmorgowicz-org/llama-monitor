@@ -195,6 +195,9 @@ pub struct CalibrationReceipt {
     pub measurement: CalibrationMeasurement,
     pub candidate_results: Vec<CalibrationCandidateResult>,
     pub selected_candidate: Option<String>,
+    pub preset_id: String,
+    pub preset_fingerprint: String,
+    pub apply_history: Vec<CalibrationApplyRecord>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -202,6 +205,18 @@ pub struct CalibrationReceipt {
 pub struct CalibrationCandidateResult {
     pub candidate: CalibrationCandidate,
     pub measurement: CalibrationMeasurement,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct CalibrationApplyRecord {
+    pub target_preset_id: String,
+    pub candidate_id: String,
+    pub derived: bool,
+    pub before_fingerprint: String,
+    pub after_fingerprint: String,
+    pub timestamp_unix_ms: u128,
+    pub validation: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

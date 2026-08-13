@@ -2,14 +2,15 @@ use std::sync::Arc;
 
 use warp::Filter;
 
-use crate::calibration::StartCalibrationRequest;
 use crate::calibration::executor;
+use crate::calibration::{StartCalibrationRequest, executor::ApplyCalibrationRequest};
 use crate::config::AppConfig;
 use crate::state::AppState;
 use crate::web::safe_json_body;
 
 use super::{
-    ApiCtx, ApiRoute, box_reply, check_api_token, unauthorized_api_token, with_app_config,
+    ApiCtx, ApiRoute, box_reply, check_api_token, check_db_admin_token, unauthorized_api_token,
+    unauthorized_db_admin_token, with_app_config,
 };
 
 pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
@@ -22,9 +23,47 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .or(api_get(config.clone()).map(box_reply))
         .unify()
+        .or(api_apply(state.clone(), config.clone()).map(box_reply))
+        .unify()
         .or(api_cancel(config).map(box_reply))
         .unify()
         .boxed()
+}
+
+fn api_apply(
+    state: AppState,
+    config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "calibrations" / String / "apply")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(safe_json_body::<ApplyCalibrationRequest>())
+        .and(with_app_config(config))
+        .and_then(
+            move |id: String,
+                  auth: Option<String>,
+                  request: ApplyCalibrationRequest,
+                  cfg: Arc<AppConfig>| {
+                if !check_db_admin_token(&auth, &cfg) {
+                    return futures_util::future::ready(Ok(unauthorized_db_admin_token()));
+                }
+                let response = match executor::apply(&cfg, &state, &id, request) {
+                    Ok(result) => warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({"ok": true, "apply": result})),
+                        warp::http::StatusCode::OK,
+                    ),
+                    Err(error) => warp::reply::with_status(
+                        warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": error.to_string()}),
+                        ),
+                        warp::http::StatusCode::BAD_REQUEST,
+                    ),
+                };
+                futures_util::future::ready(Ok::<Box<dyn warp::Reply>, warp::Rejection>(Box::new(
+                    response,
+                )))
+            },
+        )
 }
 
 fn api_preflight(

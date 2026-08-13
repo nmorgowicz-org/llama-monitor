@@ -438,6 +438,11 @@ The authenticated API is:
 - **GET `/api/calibrations/{id}`** — polls the durable job snapshot.
 - **POST `/api/calibrations/{id}/cancel`** — requests cancellation and cleans up
   the owned benchmark process.
+- **POST `/api/calibrations/{id}/apply`** — requires `db-admin-token`, the
+  `APPLY_CALIBRATION` confirmation, and the expected target fingerprint. It
+  creates a derived preset by default; updating the source preset is an
+  explicit `create_derived: false` choice. Applying never changes the active
+  session and records before/after fingerprints in the receipt.
 
 Quick Calibration is intentionally a foundation for the later measured
 Pareto/Quick/Balanced funnel. It is not a claim that one baseline trial has
