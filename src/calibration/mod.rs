@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod jobs;
 
+pub mod candidates;
 pub mod executor;
 
 pub const CALIBRATION_SCHEMA_VERSION: u32 = 1;
@@ -173,6 +174,15 @@ pub struct LlamaCppCalibrationPatch {
     pub ubatch_size: Option<u32>,
     pub flash_attn: Option<bool>,
     pub n_cpu_moe: Option<i32>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CalibrationCandidate {
+    pub id: String,
+    pub typed_patch: LlamaCppCalibrationPatch,
+    pub capability_evidence: Vec<String>,
+    pub predicted_memory_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
