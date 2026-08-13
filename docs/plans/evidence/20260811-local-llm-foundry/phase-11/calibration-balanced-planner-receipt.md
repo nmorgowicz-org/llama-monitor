@@ -13,7 +13,9 @@ pick verification are complete.
 
 - `src/calibration/candidates.rs` owns a typed llama.cpp-only factor catalog.
 - Four core factors (context, batch, ubatch, and threads) map to L9 rows.
-- A verified `-fa`/`--flash-attn` capability adds a fifth factor and selects L25.
+- A verified `-fa`/`--flash-attn` capability selects L25, whose numeric factors
+  use five distinct levels. Flash attention is scheduled as a separate
+  capability-gated control candidate, never as a duplicated binary OA level.
 - Every generated patch is applied to a cloned preset and validated through
   `request_from_preset`; Rapid-MLX and invalid context/batch relationships fail
   closed.
