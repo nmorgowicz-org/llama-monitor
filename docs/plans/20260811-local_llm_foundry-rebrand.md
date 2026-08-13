@@ -72,6 +72,18 @@ application-home, tray/WebView2, sensor bridge, updater, remote-agent,
 package, and fresh-CI receipts. The receipt is tracked in
 `docs/plans/evidence/20260811-local-llm-foundry/phase-12/windows/`.
 
+### Native Windows qualification update (2026-08-13)
+
+On commit `f691a2b`, the disposable application-home smoke matrix was rerun
+against the native release binary. Fresh canonical startup and legacy-only
+startup passed without silent migration; legacy-only status remained
+`legacy_active`; both-root status reported `conflict`; and normal both-root
+startup exited nonzero with an explicit migration-flow instruction. Bundled
+font WOFF2 routing, native Windows settings capture, and the `0.9`/`1.0`/`1.2`
+font-scale probe also passed. These receipts are additive and do not close
+Phase 12: explicit migration journal recovery, tray/WebView2, sensor bridge,
+updater, remote-agent, package, and fresh-CI gates remain open.
+
 ### Screenshot parity scope update (2026-08-12)
 
 Windows core/config capture groups are valid cross-platform UI evidence at the
