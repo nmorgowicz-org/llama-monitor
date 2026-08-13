@@ -195,6 +195,7 @@ pub struct CalibrationReceipt {
     pub job_id: String,
     pub fingerprint: CalibrationFingerprint,
     pub measurement: CalibrationMeasurement,
+    pub budget: CalibrationBudget,
     pub candidate_results: Vec<CalibrationCandidateResult>,
     pub selected_candidate: Option<String>,
     pub preset_id: String,

@@ -4,9 +4,10 @@ Date: 2026-08-13
 
 ## Scope
 
-This receipt covers the native deterministic Balanced candidate-planning slice.
-It does not claim that the executor launches Balanced jobs or that analysis,
-Pareto selection, noise reporting, or pick verification are complete.
+This receipt covers the native deterministic Balanced candidate-planning slice
+and its authenticated preflight exposure. It does not claim that the executor
+launches Balanced jobs or that analysis, Pareto selection, noise reporting, or
+pick verification are complete.
 
 ## Contract
 
@@ -20,13 +21,17 @@ Pareto selection, noise reporting, or pick verification are complete.
   measured control, and duplicate mapped patches are not scheduled twice.
 - Screen, final-array, verification, and total-trial ceilings are checked
   before a plan is returned. No larger design is selected implicitly.
+- Preflight accepts an explicit workload and budget, reports deterministic
+  Balanced rows, and rejects Thorough. Start remains fail-closed for Balanced
+  until executor repetitions and pick verification are implemented.
 
 ## Focused validation
 
 ```text
 cargo fmt                         PASS
 cargo clippy -- -D warnings      PASS
-cargo test calibration::candidates PASS — 5 tests
+cargo test calibration:: --lib    PASS — 20 tests
+cargo check                       PASS
 git diff --check                  PASS
 ```
 
@@ -36,6 +41,8 @@ attention. Executor/preflight wiring remains a subsequent slice.
 
 ## Gate result
 
-**Pass — deterministic Balanced planner foundation.** The Phase 4 hard gate
-remains open until subprocess execution, measured analysis, and the remaining
-receipts are implemented and independently validated.
+**Pass — deterministic Balanced planner and preflight foundation.** The Phase
+4 hard gate remains open until subprocess execution, measured analysis, and the
+remaining receipts are implemented and independently validated. Balanced start
+is intentionally rejected with an actionable gated message rather than
+silently running an unverified single-trial approximation.

@@ -5,16 +5,17 @@
 //! `llama-bench` run, durable journal transitions, cancellation, and a
 //! redacted receipt. It never stops an active server or mutates a preset.
 
-use super::candidates::quick_candidates;
+use super::candidates::{balanced_candidates, quick_candidates};
 use super::jobs::{
     JournalEvent, JournalEventKind, append_event, mark_recovered_crash, read_events,
     recover_snapshot, suspected_crash_trials, write_snapshot,
 };
 use super::paths::{RegularFileError, require_regular_file};
 use super::{
-    CalibrationApplyRecord, CalibrationCandidate, CalibrationCandidateResult,
+    CalibrationApplyRecord, CalibrationBudget, CalibrationCandidate, CalibrationCandidateResult,
     CalibrationFingerprint, CalibrationJobSnapshot, CalibrationJobState, CalibrationMeasurement,
-    CalibrationReceipt, LlamaCppCalibrationPatch, StartCalibrationRequest, TrialStatus,
+    CalibrationReceipt, CalibrationWorkload, LlamaCppCalibrationPatch, StartCalibrationRequest,
+    TrialStatus,
 };
 use crate::config::AppConfig;
 use crate::inference::InferenceBackend;
@@ -61,7 +62,16 @@ pub struct CalibrationPreflight {
     pub candidate_ids: Vec<String>,
     pub requires_server_stop: bool,
     pub supported_budget: &'static str,
+    pub requested_budget: CalibrationBudget,
     pub confirmation: &'static str,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+pub struct CalibrationPreflightRequest {
+    pub preset_id: String,
+    pub workload: CalibrationWorkload,
+    pub budget: CalibrationBudget,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -127,6 +137,8 @@ pub fn preflight(
     config: &AppConfig,
     state: &AppState,
     preset_id: &str,
+    workload: &CalibrationWorkload,
+    budget: CalibrationBudget,
 ) -> Result<CalibrationPreflight> {
     let preset = find_preset(state, preset_id)?;
     if preset.backend != InferenceBackend::LlamaCpp {
@@ -143,7 +155,15 @@ pub fn preflight(
     }
 
     let fingerprint = preset_fingerprint(&preset)?;
-    let candidate_ids = quick_candidates(&preset, &super::CalibrationWorkload::default(), None)?
+    validate_workload(workload)?;
+    let candidates = match &budget {
+        CalibrationBudget::Quick => quick_candidates(&preset, workload, None)?,
+        CalibrationBudget::Balanced => balanced_candidates(&preset, workload, None)?,
+        CalibrationBudget::Thorough => {
+            bail!("Thorough Calibration is not available in the bounded 2.0 release")
+        }
+    };
+    let candidate_ids = candidates
         .into_iter()
         .map(|candidate| candidate.id)
         .collect::<Vec<_>>();
@@ -164,7 +184,12 @@ pub fn preflight(
         planned_trials: candidate_ids.len() as u32,
         candidate_ids,
         requires_server_stop: true,
-        supported_budget: "quick_single_trial",
+        supported_budget: match budget {
+            CalibrationBudget::Quick => "quick_single_trial",
+            CalibrationBudget::Balanced => "balanced_bounded_plan",
+            CalibrationBudget::Thorough => unreachable!(),
+        },
+        requested_budget: budget,
         confirmation: CONFIRMATION,
     })
 }
@@ -174,8 +199,14 @@ pub fn start(
     state: AppState,
     request: StartCalibrationRequest,
 ) -> Result<CalibrationJobSnapshot> {
-    if request.budget != super::CalibrationBudget::Quick {
-        bail!("Only the bounded Quick single-trial Calibration is available yet");
+    match request.budget {
+        CalibrationBudget::Quick => {}
+        CalibrationBudget::Balanced => bail!(
+            "Balanced Calibration planning is available, but executor repetitions and pick verification are still gated"
+        ),
+        CalibrationBudget::Thorough => {
+            bail!("Thorough Calibration is not available in the bounded 2.0 release")
+        }
     }
     if request.exact_confirmation.as_deref() != Some(CONFIRMATION) {
         bail!("Exact confirmation CALIBRATE is required to start the bounded trial");
@@ -195,8 +226,18 @@ pub fn start(
     {
         bail!("Preset changed since preflight; refresh before starting Calibration");
     }
-    let preflight = preflight(&config, &state, &request.preset_id)?;
-    let candidates = quick_candidates(&preset, &request.workload, None)?;
+    let preflight = preflight(
+        &config,
+        &state,
+        &request.preset_id,
+        &request.workload,
+        request.budget.clone(),
+    )?;
+    let candidates = match &request.budget {
+        CalibrationBudget::Quick => quick_candidates(&preset, &request.workload, None)?,
+        CalibrationBudget::Balanced => balanced_candidates(&preset, &request.workload, None)?,
+        CalibrationBudget::Thorough => unreachable!(),
+    };
     let model_path = resolve_model_path(&config, &preset.model_path)?;
     let bench_path = llama_bench_path(&config.llama_server_path);
     let id = crate::config::generate_random_token()
@@ -256,6 +297,7 @@ pub fn start(
         model_path,
         bench_path,
         fingerprint,
+        request.budget,
         runtime,
     ));
     Ok(snapshot)
@@ -339,6 +381,7 @@ async fn run_job(
     model_path: PathBuf,
     bench_path: PathBuf,
     fingerprint: String,
+    budget: CalibrationBudget,
     runtime: RuntimeJob,
 ) {
     let _permit = match JOB_GATE.clone().acquire_owned().await {
@@ -471,6 +514,7 @@ async fn run_job(
             ..CalibrationFingerprint::current(InferenceBackend::LlamaCpp, Default::default())
         },
         measurement,
+        budget,
         candidate_results,
         selected_candidate,
         preset_id: preset.id.clone(),

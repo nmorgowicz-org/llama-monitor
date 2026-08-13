@@ -151,19 +151,22 @@ fn api_preflight(
     warp::path!("api" / "calibrations" / "preflight")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(safe_json_body::<serde_json::Value>())
+        .and(safe_json_body::<executor::CalibrationPreflightRequest>())
         .and(with_app_config(config.clone()))
         .and_then(
-            move |auth: Option<String>, body: serde_json::Value, cfg: Arc<AppConfig>| {
+            move |auth: Option<String>,
+                  body: executor::CalibrationPreflightRequest,
+                  cfg: Arc<AppConfig>| {
                 if !check_api_token(&auth, &cfg) {
                     return futures_util::future::ready(Ok(unauthorized_api_token()));
                 }
-                let preset_id = body
-                    .get("preset_id")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
-                let response = match executor::preflight(&cfg, &state, &preset_id) {
+                let response = match executor::preflight(
+                    &cfg,
+                    &state,
+                    &body.preset_id,
+                    &body.workload,
+                    body.budget,
+                ) {
                     Ok(preflight) => warp::reply::with_status(
                         warp::reply::json(&serde_json::json!({"ok": true, "preflight": preflight})),
                         warp::http::StatusCode::OK,
