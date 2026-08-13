@@ -20,6 +20,9 @@
 - Both-roots migration status reported `conflict` with no writes.
 - Both-roots normal startup exited nonzero and instructed the operator to use
   the explicit migration flow.
+- Legacy-only migration preview produced a plan ID without creating the
+  canonical root; explicitly confirmed execution copied the sentinel and
+  preserved both source and destination roots.
 - Release-built Windows settings capture passed the deterministic local-font
   assertion and produced the expected settings artifacts.
 - Font-scale probe reported root/body sizes of `14.4px`, `16px`, and `19.2px`
@@ -28,7 +31,7 @@
 
 ## Still open
 
-- Explicit migration preview/execute/resume/rollback journal matrix.
+- Interrupted migration resume/rollback journal matrix.
 - Tray/WebView2, sensor bridge, updater, remote-agent, and package/archive
   receipts on this commit.
 - Fresh full CI run after all code and evidence changes.
