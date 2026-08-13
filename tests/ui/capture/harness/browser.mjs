@@ -60,7 +60,7 @@ export async function switchTab(page, tabName) {
 
 export async function gotoApp(page, baseUrl, waitUntil = 'networkidle0') {
     await page.goto(baseUrl, { waitUntil });
-    await assertDeterministicFonts(page);
+    page.__fontDiagnostics = await assertDeterministicFonts(page);
     // See the scoped CSS rule in spawn-wizard.css. This marker prevents
     // Chromium's capture-only :focus-visible heuristic from outlining the
     // entire programmatically focused wizard step.
@@ -111,7 +111,7 @@ export async function loadAppDocument(page, baseUrl) {
 
     const hasAppShell = await page.$('#page-server') !== null;
     if (hasAppShell) {
-        await assertDeterministicFonts(page);
+        page.__fontDiagnostics = await assertDeterministicFonts(page);
         await page.evaluate(() => { document.documentElement.dataset.screenshotCapture = 'true'; });
         await sleep(1500);
         return;
@@ -131,7 +131,7 @@ export async function loadAppDocument(page, baseUrl) {
         document.getElementById('auth-shell')?.classList.add('hidden');
         document.body.classList.remove('auth-required');
     });
-    await assertDeterministicFonts(page);
+    page.__fontDiagnostics = await assertDeterministicFonts(page);
     await sleep(1500);
 }
 

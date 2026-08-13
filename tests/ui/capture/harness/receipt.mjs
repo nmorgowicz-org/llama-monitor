@@ -16,7 +16,11 @@ export function beginCaptureReceipt({ scenario, category, runtime, intent, expec
     }
     const artifactDir = currentArtifactsDir();
     for (const filename of expectedOutputs) fs.rmSync(join(artifactDir, filename), { force: true });
-    active = { scenario, category, runtime, intent, expectedOutputs: new Set(expectedOutputs), produced: [] };
+    active = { scenario, category, runtime, intent, expectedOutputs: new Set(expectedOutputs), produced: [], diagnostics: null };
+}
+
+export function setCaptureDiagnostics(diagnostics) {
+    if (active) active.diagnostics = diagnostics;
 }
 
 export function recordCapture(filename, viewport) {
@@ -56,6 +60,7 @@ export function finishCaptureReceipt() {
         runtime: receipt.runtime,
         intent: receipt.intent,
         produced: receipt.produced,
+        diagnostics: receipt.diagnostics,
     };
     fs.writeFileSync(join(currentArtifactsDir(), `${receipt.scenario}--receipt.json`), `${JSON.stringify(output, null, 2)}\n`);
     return output;

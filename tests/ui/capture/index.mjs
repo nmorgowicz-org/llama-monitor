@@ -8,7 +8,7 @@ import { seedConfig, findAvailablePort, spawnLlamaMonitor, cleanupServer, cleanu
 import { seedRapidMlxCapturePreset, seedNestedMlxFixture, seedCanonicalMlxFixture, seedModelsDirFixture } from './harness/fixtures.mjs';
 import { launchBrowser } from './harness/browser.mjs';
 import { cleanupFrames } from './harness/shot.mjs';
-import { beginCaptureReceipt, finishCaptureReceipt } from './harness/receipt.mjs';
+import { beginCaptureReceipt, finishCaptureReceipt, setCaptureDiagnostics } from './harness/receipt.mjs';
 
 import scenarioWelcome from './scenarios/core/welcome.mjs';
 import scenarioFreeCache from './scenarios/core/free-cache.mjs';
@@ -445,7 +445,10 @@ export async function runCli({ scenario: forcedScenario = null, argv = process.a
             browser = launched.browser;
             const page = launched.page;
             await scenario.run({ page, baseUrl, browser }, { ...options, scenarioSource: scenario.source });
-            if (scenario.contract) finishCaptureReceipt();
+            if (scenario.contract) {
+                setCaptureDiagnostics(page.__fontDiagnostics || null);
+                finishCaptureReceipt();
+            }
             console.log(`[CAPTURE] Scenario "${scenarioName}" complete.`);
             lastErr = null;
             break;

@@ -41,6 +41,14 @@ The first implementation slice is now in progress:
 - The root CSS baseline is explicitly `16px`.
 - Capture navigation now waits for the required local faces and fails closed on
   missing faces or Google Fonts resource requests.
+- Contract receipts now retain the font status, missing-face list, external
+  font-request list, root size, and body family used by the capture.
+
+The native Windows capture on the same release-built commit passed the local
+font contract. The `0.9`/`1.0`/`1.2` probe also confirmed the root and body sizes
+move with the saved scale. Responsive `clamp()` headings may remain bounded by
+the shared viewport at larger scales; those are recorded as responsive
+exceptions rather than mistaken for missing local-font loading.
 
 The implementation is not phase-complete until the Windows release-built
 capture, offline/no-external-request check, and `0.9`/`1.0`/`1.2` font-scale
