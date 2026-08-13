@@ -19,8 +19,10 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Rapid-MLX command preview endpoint', () => {
   test('@runtime-required command preview returns valid argv for Phase 7 config', async ({ page }) => {
-    const hasRuntime = !!process.env.LLAMA_MONITOR_HAS_RUNTIME;
-    test.skip(!hasRuntime, 'Set LLAMA_MONITOR_HAS_RUNTIME=1 to run runtime-dependent tests.');
+    const hasRuntime = !!process.env.LLAMA_MONITOR_HAS_RUNTIME
+      && process.platform === 'darwin'
+      && process.arch === 'arm64';
+    test.skip(!hasRuntime, 'Set LLAMA_MONITOR_HAS_RUNTIME=1 on Apple Silicon macOS to run Rapid-MLX runtime tests.');
 
     const apiToken = await page.evaluate(async () => {
       const r = await fetch('/api/internal/api-token');
@@ -65,8 +67,10 @@ test.describe('Rapid-MLX command preview endpoint', () => {
   });
 
   test('@runtime-required command preview omits disabled optional Phase 7 flags', async ({ page }) => {
-    const hasRuntime = !!process.env.LLAMA_MONITOR_HAS_RUNTIME;
-    test.skip(!hasRuntime, 'Set LLAMA_MONITOR_HAS_RUNTIME=1 to run runtime-dependent tests.');
+    const hasRuntime = !!process.env.LLAMA_MONITOR_HAS_RUNTIME
+      && process.platform === 'darwin'
+      && process.arch === 'arm64';
+    test.skip(!hasRuntime, 'Set LLAMA_MONITOR_HAS_RUNTIME=1 on Apple Silicon macOS to run Rapid-MLX runtime tests.');
 
     const apiToken = await page.evaluate(async () => {
       const r = await fetch('/api/internal/api-token');
@@ -106,8 +110,10 @@ test.describe('Rapid-MLX command preview endpoint', () => {
   });
 
   test('@runtime-required command preview requires auth', async ({ page }) => {
-    const hasRuntime = !!process.env.LLAMA_MONITOR_HAS_RUNTIME;
-    test.skip(!hasRuntime, 'Set LLAMA_MONITOR_HAS_RUNTIME=1 to run runtime-dependent tests.');
+    const hasRuntime = !!process.env.LLAMA_MONITOR_HAS_RUNTIME
+      && process.platform === 'darwin'
+      && process.arch === 'arm64';
+    test.skip(!hasRuntime, 'Set LLAMA_MONITOR_HAS_RUNTIME=1 on Apple Silicon macOS to run Rapid-MLX runtime tests.');
 
     const payload = {
       model_source: { kind: 'hugging_face_repo', repo_id: 'test/model' },

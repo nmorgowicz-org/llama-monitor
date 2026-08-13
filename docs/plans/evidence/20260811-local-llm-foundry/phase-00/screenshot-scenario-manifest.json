@@ -298,9 +298,9 @@
       "target_surface": "spawn-wizard"
     },
     {
-      "scenario": "spawn-wizard-launch-full-config",
+      "scenario": "spawn-wizard-rapid-launch-full-config",
       "group": "wizard-rapidmlx",
-      "source": "tests/ui/capture/scenarios/wizard-rapidmlx/spawn-wizard-launch-full-config.mjs",
+      "source": "tests/ui/capture/scenarios/wizard-rapidmlx/spawn-wizard-rapid-launch-full-config.mjs",
       "symbol": "scenarioSpawnWizardRapidLaunchFullConfig",
       "viewport": {
         "width": 1440,

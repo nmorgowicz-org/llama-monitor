@@ -50,12 +50,7 @@ function main() {
         const scenarioPath = relative(SCENARIOS_DIR, file);
         const scenarioName = file.slice(file.lastIndexOf('/') + 1, -4);
         const expectedCategory = scenarioPath.startsWith('wizard-rapidmlx/') ? 'wizard-rapidmlx' : 'wizard-llamacpp';
-        // The llama and Rapid launch scenarios intentionally share a basename;
-        // resolve the Rapid registration by its group-qualified key.
-        const registryName = expectedCategory === 'wizard-rapidmlx' && scenarioName === 'spawn-wizard-launch-full-config'
-            ? 'spawn-wizard-rapid-launch-full-config'
-            : scenarioName;
-        const registered = SCENARIOS[registryName];
+        const registered = SCENARIOS[scenarioName];
         if (strict && scenarioPath.includes('spawn-wizard')) {
             if (!registered) violations.push(`${scenarioPath} is not registered`);
             if (registered && registered.category !== expectedCategory) {

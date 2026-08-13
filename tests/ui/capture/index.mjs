@@ -34,7 +34,7 @@ import scenarioSpawnWizardProBaseline from './scenarios/wizard-llamacpp/spawn-wi
 import scenarioSpawnWizardLaunchFullConfig from './scenarios/wizard-llamacpp/spawn-wizard-launch-full-config.mjs';
 import scenarioSpawnWizardRapidGuidedBaseline from './scenarios/wizard-rapidmlx/spawn-wizard-rapid-guided-baseline.mjs';
 import scenarioSpawnWizardRapidProBaseline from './scenarios/wizard-rapidmlx/spawn-wizard-rapid-pro-baseline.mjs';
-import scenarioSpawnWizardRapidLaunchFullConfig from './scenarios/wizard-rapidmlx/spawn-wizard-launch-full-config.mjs';
+import scenarioSpawnWizardRapidLaunchFullConfig from './scenarios/wizard-rapidmlx/spawn-wizard-rapid-launch-full-config.mjs';
 import scenarioSpawnWizardGif from './scenarios/wizard-llamacpp/spawn-wizard-gif.mjs';
 import scenarioSpawnWizardHfDownload from './scenarios/wizard-llamacpp/spawn-wizard-hf-download.mjs';
 import scenarioSpawnWizardTierMatrix from './scenarios/wizard-llamacpp/spawn-wizard-tier-matrix.mjs';
@@ -197,7 +197,7 @@ with a remote agent reporting GPU data). No binary is spawned; no temp config is
 export const SCENARIOS = {
     'welcome': { run: scenarioWelcome, category: 'core', runtime: 'neutral' },
     'free-cache': { run: scenarioFreeCache, category: 'core', runtime: 'neutral' },
-    'rapid-preset': { run: scenarioRapidPreset, setup: () => { seedRapidMlxCapturePreset(); }, category: 'presets', runtime: 'rapidmlx-local' },
+    'rapid-preset': { run: scenarioRapidPreset, setup: () => { seedRapidMlxCapturePreset(); }, category: 'presets', runtime: 'rapidmlx-local', requiresRapidMlx: true },
     'evidence-drawer': { run: scenarioEvidenceDrawer, category: 'presets', runtime: 'neutral' },
     'community-sources': { run: scenarioCommunitySources, category: 'presets', runtime: 'neutral' },
     'chat': { run: scenarioChat, source: 'remote', category: 'core', runtime: 'neutral' },
@@ -223,6 +223,8 @@ export const SCENARIOS = {
     'panels': { run: scenarioPanels, setup: () => ({ extraArgs: seedModelsDirFixture() }), category: 'core', runtime: 'neutral' },
     'models': { run: scenarioModels, setup: () => ({ extraArgs: seedModelsDirFixture() }), category: 'models', runtime: 'neutral' },
     'dashboard': { run: scenarioDashboard, source: 'remote', category: 'core', runtime: 'neutral' },
+    // Synthetic DOM-only telemetry cards are intentionally cross-platform; they
+    // do not query platform-info or launch a Rapid executable.
     'dashboard-rapid-mlx': { run: scenarioDashboardRapidMlx, category: 'features', runtime: 'rapidmlx-local' },
     'spawn-wizard': {
         run: scenarioSpawnWizard, category: 'wizard-llamacpp', runtime: 'llamacpp-local',
@@ -256,7 +258,7 @@ export const SCENARIOS = {
         },
     },
   'spawn-wizard-rapid-guided-baseline': {
-        run: scenarioSpawnWizardRapidGuidedBaseline, setup: () => { seedNestedMlxFixture(); }, category: 'wizard-rapidmlx', runtime: 'rapidmlx-local',
+        run: scenarioSpawnWizardRapidGuidedBaseline, setup: () => { seedNestedMlxFixture(); }, category: 'wizard-rapidmlx', runtime: 'rapidmlx-local', requiresRapidMlx: true,
         contract: {
             intent: 'Document the current Rapid-MLX wizard baseline in its own Rapid artifact group.',
             expectedOutputs: [
@@ -275,6 +277,7 @@ export const SCENARIOS = {
     setup: () => { seedNestedMlxFixture(); },
     category: 'wizard-rapidmlx',
     runtime: 'rapidmlx-local',
+    requiresRapidMlx: true,
     contract: {
       intent: 'Capture Rapid-MLX Pro parity, effective-state, access, filtering, companion-gating, and responsive evidence.',
       expectedOutputs: [
@@ -311,6 +314,7 @@ export const SCENARIOS = {
   run: scenarioSpawnWizardRapidLaunchFullConfig,
   category: 'wizard-rapidmlx',
   runtime: 'rapidmlx-local',
+  requiresRapidMlx: true,
   contract: {
     intent: 'Capture canonical Rapid-MLX launch Full config with requested and runtime-effective labels.',
     expectedOutputs: [
@@ -340,7 +344,7 @@ export const SCENARIOS = {
         },
     },
     'spawn-wizard-guided-drawer': {
-        run: scenarioSpawnWizardGuidedDrawer, category: 'wizard-llamacpp', runtime: 'llamacpp-local',
+        run: scenarioSpawnWizardGuidedDrawer, category: 'wizard-llamacpp', runtime: 'llamacpp-local', requiresRapidMlx: true,
         contract: {
             intent: 'Verify the single canonical Guided settings drawer across llama.cpp and Rapid-MLX, including engine switching and honest Pro availability.',
             expectedOutputs: [
@@ -353,21 +357,34 @@ export const SCENARIOS = {
         },
     },
     'spawn-wizard-rapid-mlx-gif': {
-        run: scenarioSpawnWizardRapidMlxGif, category: 'wizard-rapidmlx', runtime: 'rapidmlx-local',
+        run: scenarioSpawnWizardRapidMlxGif, category: 'wizard-rapidmlx', runtime: 'rapidmlx-local', requiresRapidMlx: true,
         contract: { intent: 'Capture the Rapid-MLX wizard flow as a diagnostic GIF.', expectedOutputs: ['rapidmlx-local--spawn-wizard-rapid-mlx-flow.gif'] },
     },
-    'discussions': { run: scenarioDiscussions, setup: () => { seedRapidMlxCapturePreset(); }, category: 'presets', runtime: 'neutral' },
+    'discussions': { run: scenarioDiscussions, setup: () => { seedRapidMlxCapturePreset(); }, category: 'presets', runtime: 'neutral', requiresRapidMlx: true },
     'tune-panel': { run: scenarioTunePanel, category: 'features', runtime: 'neutral' },
     'benchmark-results': { run: scenarioBenchmarkResults, category: 'features', runtime: 'neutral' },
     'llama-updater': { run: scenarioLlamaUpdater, category: 'features', runtime: 'llamacpp-local' },
     'chat-history-qa': { run: scenarioChatHistoryQA, category: 'features', runtime: 'neutral' },
-    'rapid-mlx-runtime': { run: scenarioRapidMlxRuntime, category: 'features', runtime: 'rapidmlx-local' },
-    'rapid-mlx-live': { run: scenarioRapidMlxLive, category: 'validation', runtime: 'rapidmlx-local' },
+    'rapid-mlx-runtime': { run: scenarioRapidMlxRuntime, category: 'features', runtime: 'rapidmlx-local', requiresRapidMlx: true },
+    'rapid-mlx-live': { run: scenarioRapidMlxLive, category: 'validation', runtime: 'rapidmlx-local', requiresRapidMlx: true },
     'sparkline': { run: scenarioSparkline, category: 'validation', runtime: 'neutral' },
     'gifs': { run: scenarioGifs, category: 'validation', runtime: 'neutral' },
     'smoke': { run: scenarioSmoke, source: 'remote', category: 'core', runtime: 'neutral' },
     'navbar': { run: scenarioNavbar, category: 'core', runtime: 'neutral' },
 };
+
+/**
+ * Return a deterministic skip reason before a scenario creates a temp home,
+ * starts the application, or launches Chromium. Rapid-MLX local evidence is
+ * only meaningful on Apple Silicon macOS; Windows/Linux should skip it rather
+ * than exercising the platform gate and timing out in the browser.
+ */
+export function capturePlatformSkipReason(scenario, host = { platform: process.platform, arch: process.arch }) {
+    if (scenario?.requiresRapidMlx && (host.platform !== 'darwin' || host.arch !== 'arm64')) {
+        return `requires Apple Silicon macOS (host=${host.platform}/${host.arch})`;
+    }
+    return null;
+}
 
 export async function runCli({ scenario: forcedScenario = null, argv = process.argv.slice(2) } = {}) {
     const options = parseArgs(argv);
@@ -386,6 +403,11 @@ export async function runCli({ scenario: forcedScenario = null, argv = process.a
     const scenario = SCENARIOS[scenarioName];
     if (!scenario) {
         throw new Error(`Unknown scenario "${scenarioName}". Use --list-scenarios.`);
+    }
+    const skipReason = capturePlatformSkipReason(scenario);
+    if (skipReason) {
+        console.log(`[CAPTURE] SKIP "${scenarioName}": ${skipReason}.`);
+        return { skipped: true, reason: skipReason };
     }
     setArtifactCategory(scenario.category);
     setArtifactRuntime(scenarioName, scenario.runtime);

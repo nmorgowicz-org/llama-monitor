@@ -83,6 +83,11 @@ are explicitly non-evidence. The Windows handoff records this distinction and
 the remaining macOS Rapid capture/parity work; it is the operational companion
 to this plan, not a competing status ledger.
 
+The capture harness now skips every scenario marked as Rapid-dependent before
+starting the app on non-Apple-Silicon hosts. Playwright's mocked Rapid UI tests
+remain cross-platform; only local executable/runtime screenshot evidence is
+gated.
+
 ### Phase closure blockers
 
 These are the specific reasons an earlier phase remains open; they are

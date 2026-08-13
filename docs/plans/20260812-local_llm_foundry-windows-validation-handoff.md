@@ -42,6 +42,14 @@ scenarios such as the synthetic Rapid dashboard cards may be captured on
 Windows when they do not cross the platform gate; label them as UI fixture
 evidence, not runtime evidence.
 
+The capture harness now marks Rapid-dependent scenarios explicitly and skips
+them before creating a temporary application home, starting the server, or
+launching Chromium unless the host is `darwin/arm64`. The skip is printed as a
+visible `SKIP` line and exits successfully, so a Windows capture group remains
+useful for the non-Rapid scenarios without spending minutes on impossible
+browser timeouts. The Playwright suite deliberately keeps its mocked Rapid UI
+tests cross-platform; only executable/runtime evidence is platform-gated.
+
 For the final parity pass, capture the complete Rapid-MLX group on macOS and
 compare only the shared, non-runtime surfaces across Windows and macOS. Do not
 add a test-only platform override merely to manufacture Windows Rapid runtime
