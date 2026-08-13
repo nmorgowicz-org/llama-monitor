@@ -193,6 +193,15 @@ pub struct CalibrationReceipt {
     pub job_id: String,
     pub fingerprint: CalibrationFingerprint,
     pub measurement: CalibrationMeasurement,
+    pub candidate_results: Vec<CalibrationCandidateResult>,
+    pub selected_candidate: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CalibrationCandidateResult {
+    pub candidate: CalibrationCandidate,
+    pub measurement: CalibrationMeasurement,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

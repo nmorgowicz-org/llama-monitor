@@ -5,13 +5,15 @@
 //! `llama-bench` run, durable journal transitions, cancellation, and a
 //! redacted receipt. It never stops an active server or mutates a preset.
 
+use super::candidates::quick_candidates;
 use super::jobs::{
     JournalEvent, JournalEventKind, append_event, mark_recovered_crash, read_events,
     recover_snapshot, suspected_crash_trials, write_snapshot,
 };
 use super::{
-    CalibrationFingerprint, CalibrationJobSnapshot, CalibrationJobState, CalibrationMeasurement,
-    CalibrationReceipt, LlamaCppCalibrationPatch, StartCalibrationRequest, TrialStatus,
+    CalibrationCandidate, CalibrationCandidateResult, CalibrationFingerprint,
+    CalibrationJobSnapshot, CalibrationJobState, CalibrationMeasurement, CalibrationReceipt,
+    LlamaCppCalibrationPatch, StartCalibrationRequest, TrialStatus,
 };
 use crate::config::AppConfig;
 use crate::inference::InferenceBackend;
@@ -53,8 +55,10 @@ pub struct CalibrationPreflight {
     pub server_identity: String,
     pub bench_identity: String,
     pub planned_trials: u32,
+    pub candidate_ids: Vec<String>,
     pub requires_server_stop: bool,
     pub supported_budget: &'static str,
+    pub confirmation: &'static str,
 }
 
 pub fn confirmation_phrase() -> &'static str {
@@ -91,6 +95,10 @@ pub fn preflight(
     }
 
     let fingerprint = preset_fingerprint(&preset)?;
+    let candidate_ids = quick_candidates(&preset, &super::CalibrationWorkload::default(), None)?
+        .into_iter()
+        .map(|candidate| candidate.id)
+        .collect::<Vec<_>>();
     Ok(CalibrationPreflight {
         preset_id: preset.id.clone(),
         preset_fingerprint: fingerprint,
@@ -105,9 +113,11 @@ pub fn preflight(
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "llama-bench".into()),
-        planned_trials: 1,
+        planned_trials: candidate_ids.len() as u32,
+        candidate_ids,
         requires_server_stop: true,
         supported_budget: "quick_single_trial",
+        confirmation: CONFIRMATION,
     })
 }
 
@@ -138,6 +148,7 @@ pub fn start(
         bail!("Preset changed since preflight; refresh before starting Calibration");
     }
     let preflight = preflight(&config, &state, &request.preset_id)?;
+    let candidates = quick_candidates(&preset, &request.workload, None)?;
     let model_path = resolve_model_path(&config, &preset.model_path)?;
     let bench_path = llama_bench_path(&config.llama_server_path);
     let id = crate::config::generate_random_token()
@@ -193,6 +204,7 @@ pub fn start(
         config,
         preset,
         request.workload,
+        candidates,
         model_path,
         bench_path,
         fingerprint,
@@ -261,6 +273,7 @@ async fn run_job(
     config: Arc<AppConfig>,
     preset: ModelPreset,
     workload: super::CalibrationWorkload,
+    candidates: Vec<CalibrationCandidate>,
     model_path: PathBuf,
     bench_path: PathBuf,
     fingerprint: String,
@@ -277,20 +290,7 @@ async fn run_job(
         let _ = finish_cancelled(&runtime);
         return;
     }
-    if let Err(error) = transition(&runtime, CalibrationJobState::Running, "trial")
-        .and_then(|_| {
-            append_event(
-                &runtime.journal_path,
-                &JournalEvent::new(JournalEventKind::TrialPlanned, Some("baseline".into())),
-            )
-        })
-        .and_then(|_| {
-            append_event(
-                &runtime.journal_path,
-                &JournalEvent::new(JournalEventKind::TrialStarted, Some("baseline".into())),
-            )
-        })
-    {
+    if let Err(error) = transition(&runtime, CalibrationJobState::Running, "trial") {
         let _ = fail_job(
             &runtime,
             &format!("Calibration journal could not be prepared: {error}"),
@@ -298,105 +298,161 @@ async fn run_job(
         return;
     }
 
-    let ngl = preset.gpu_layers.unwrap_or(99);
-    let flash_attn = matches!(preset.flash_attn.trim(), "on" | "1" | "true");
-    let ctk = non_empty_or(&preset.ctk, "q8_0");
-    let ctv = non_empty_or(&preset.ctv, "q8_0");
-    let batch_size = if preset.batch_size == 0 {
-        2048
-    } else {
-        preset.batch_size
-    };
-    let ubatch_size = if preset.ubatch_size == 0 {
-        512
-    } else {
-        preset.ubatch_size
-    };
-    let depths = vec![workload.minimum_context.max(1)];
-    let model_path_string = model_path.to_string_lossy().into_owned();
-    let bench = run_sweep_with_tokens(
-        &bench_path,
-        &config.llama_server_cwd,
-        &model_path_string,
-        ngl,
-        flash_attn,
-        &ctk,
-        &ctv,
-        batch_size,
-        ubatch_size,
-        &depths,
-        preset.n_cpu_moe,
-        workload.prompt_tokens,
-        workload.generation_tokens,
-    );
-    let result = tokio::select! {
-        result = bench => Some(result),
-        _ = runtime.cancel_notify.notified() => None,
-    };
-    if runtime.cancel.load(Ordering::Acquire) {
-        let _ = append_event(
-            &runtime.journal_path,
-            &JournalEvent::new(JournalEventKind::JobCancelled, Some("baseline".into())),
-        );
-        let _ = finish_cancelled(&runtime);
-        return;
-    }
-    match result {
-        Some(Ok(points)) => {
-            let measurement = measurement_from_points(points);
-            let receipt = CalibrationReceipt {
-                schema_version: super::CALIBRATION_SCHEMA_VERSION,
-                method_version: METHOD_VERSION.into(),
-                job_id: id.clone(),
-                fingerprint: CalibrationFingerprint {
-                    baseline_config_hash: fingerprint,
-                    workload,
-                    ..CalibrationFingerprint::current(
-                        InferenceBackend::LlamaCpp,
-                        Default::default(),
-                    )
-                },
-                measurement,
-            };
-            let receipt_path = config
-                .app_paths
-                .calibration_receipts_dir()
-                .join(format!("{id}.json"));
-            if let Err(error) = write_receipt(&receipt_path, &receipt) {
-                let _ = fail_job(
-                    &runtime,
-                    &format!(
-                        "Calibration receipt could not be written: {}",
-                        sanitize_error(&error)
-                    ),
-                );
-                return;
-            }
+    let mut candidate_results = Vec::new();
+    for candidate in candidates {
+        if runtime.cancel.load(Ordering::Acquire) {
             let _ = append_event(
                 &runtime.journal_path,
-                &JournalEvent::new(JournalEventKind::TrialFinished, Some("baseline".into())),
+                &JournalEvent::new(JournalEventKind::JobCancelled, Some(candidate.id)),
             );
-            let _ = update_snapshot(&runtime, |snapshot| {
-                snapshot.state = CalibrationJobState::Complete;
-                snapshot.phase = "complete".into();
-                snapshot.completed_trials = 1;
-                snapshot.receipt_id = Some(id);
-            });
+            let _ = finish_cancelled(&runtime);
+            return;
         }
-        Some(Err(error)) => {
-            let _ = append_event(
+        let candidate_id = candidate.id.clone();
+        if let Err(error) = append_event(
+            &runtime.journal_path,
+            &JournalEvent::new(JournalEventKind::TrialPlanned, Some(candidate_id.clone())),
+        )
+        .and_then(|_| {
+            append_event(
                 &runtime.journal_path,
-                &JournalEvent::new(JournalEventKind::JobFailed, Some("baseline".into())),
-            );
+                &JournalEvent::new(JournalEventKind::TrialStarted, Some(candidate_id.clone())),
+            )
+        }) {
             let _ = fail_job(
                 &runtime,
-                &format!("Calibration trial failed: {}", sanitize_error(&error)),
+                &format!("Calibration journal could not be prepared: {error}"),
             );
+            return;
         }
-        None => {
+        let mut candidate_preset = preset.clone();
+        apply_patch_to_preset(&mut candidate_preset, &candidate.typed_patch);
+        let ngl = candidate_preset.gpu_layers.unwrap_or(99);
+        let flash_attn = matches!(candidate_preset.flash_attn.trim(), "on" | "1" | "true");
+        let ctk = non_empty_or(&candidate_preset.ctk, "q8_0");
+        let ctv = non_empty_or(&candidate_preset.ctv, "q8_0");
+        let batch_size = if candidate_preset.batch_size == 0 {
+            2048
+        } else {
+            candidate_preset.batch_size
+        };
+        let ubatch_size = if candidate_preset.ubatch_size == 0 {
+            512
+        } else {
+            candidate_preset.ubatch_size
+        };
+        let depths = vec![workload.minimum_context.max(1)];
+        let model_path_string = model_path.to_string_lossy().into_owned();
+        let bench = run_sweep_with_tokens(
+            &bench_path,
+            &config.llama_server_cwd,
+            &model_path_string,
+            ngl,
+            flash_attn,
+            &ctk,
+            &ctv,
+            batch_size,
+            ubatch_size,
+            &depths,
+            candidate_preset.n_cpu_moe,
+            workload.prompt_tokens,
+            workload.generation_tokens,
+        );
+        let result = tokio::select! {
+            result = bench => Some(result),
+            _ = runtime.cancel_notify.notified() => None,
+        };
+        if runtime.cancel.load(Ordering::Acquire) {
             let _ = finish_cancelled(&runtime);
+            return;
         }
+        let measurement = match result {
+            Some(Ok(points)) => measurement_from_points(points),
+            Some(Err(error)) => CalibrationMeasurement {
+                trial_id: candidate_id.clone(),
+                status: Some(TrialStatus::Error),
+                bounded_diagnostics: vec![sanitize_error(&error)],
+                ..Default::default()
+            },
+            None => {
+                let _ = finish_cancelled(&runtime);
+                return;
+            }
+        };
+        candidate_results.push(CalibrationCandidateResult {
+            candidate,
+            measurement,
+        });
+        let _ = append_event(
+            &runtime.journal_path,
+            &JournalEvent::new(JournalEventKind::TrialFinished, Some(candidate_id)),
+        );
+        let _ = update_snapshot(&runtime, |snapshot| {
+            snapshot.completed_trials = snapshot.completed_trials.saturating_add(1);
+        });
     }
+
+    let completed_trials = candidate_results.len() as u32;
+    let selected_candidate = select_winner(&candidate_results);
+    let measurement = candidate_results
+        .iter()
+        .find(|result| result.candidate.id == "baseline")
+        .map(|result| result.measurement.clone())
+        .unwrap_or_default();
+    let receipt = CalibrationReceipt {
+        schema_version: super::CALIBRATION_SCHEMA_VERSION,
+        method_version: METHOD_VERSION.into(),
+        job_id: id.clone(),
+        fingerprint: CalibrationFingerprint {
+            baseline_config_hash: fingerprint,
+            workload,
+            ..CalibrationFingerprint::current(InferenceBackend::LlamaCpp, Default::default())
+        },
+        measurement,
+        candidate_results,
+        selected_candidate,
+    };
+    let receipt_path = config
+        .app_paths
+        .calibration_receipts_dir()
+        .join(format!("{id}.json"));
+    if let Err(error) = write_receipt(&receipt_path, &receipt) {
+        let _ = fail_job(
+            &runtime,
+            &format!(
+                "Calibration receipt could not be written: {}",
+                sanitize_error(&error)
+            ),
+        );
+        return;
+    }
+    let _ = update_snapshot(&runtime, |snapshot| {
+        snapshot.state = CalibrationJobState::Complete;
+        snapshot.phase = "complete".into();
+        snapshot.completed_trials = completed_trials;
+        snapshot.receipt_id = Some(id);
+    });
+}
+
+fn select_winner(results: &[CalibrationCandidateResult]) -> Option<String> {
+    results
+        .iter()
+        .filter(|result| result.measurement.status == Some(TrialStatus::Ok))
+        .max_by(|left, right| {
+            median(&left.measurement.tg_tps_samples)
+                .partial_cmp(&median(&right.measurement.tg_tps_samples))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|result| result.candidate.id.clone())
+}
+
+fn median(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    sorted[sorted.len() / 2]
 }
 
 fn find_preset(state: &AppState, id: &str) -> Result<ModelPreset> {
