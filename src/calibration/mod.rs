@@ -8,8 +8,10 @@ use crate::inference::InferenceBackend;
 use serde::{Deserialize, Serialize};
 
 pub mod jobs;
+pub mod paths;
 
 pub mod candidates;
+pub mod design;
 pub mod executor;
 
 pub const CALIBRATION_SCHEMA_VERSION: u32 = 1;

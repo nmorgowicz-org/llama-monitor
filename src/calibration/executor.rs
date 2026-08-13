@@ -10,6 +10,7 @@ use super::jobs::{
     JournalEvent, JournalEventKind, append_event, mark_recovered_crash, read_events,
     recover_snapshot, suspected_crash_trials, write_snapshot,
 };
+use super::paths::{RegularFileError, require_regular_file};
 use super::{
     CalibrationApplyRecord, CalibrationCandidate, CalibrationCandidateResult,
     CalibrationFingerprint, CalibrationJobSnapshot, CalibrationJobState, CalibrationMeasurement,
@@ -900,14 +901,14 @@ fn resolve_model_path(config: &AppConfig, value: &str) -> Result<PathBuf> {
             .unwrap_or_else(|| config.app_paths.models_dir())
             .join(raw)
     };
-    let metadata =
-        fs::symlink_metadata(&path).map_err(|_| anyhow!("Calibration model is unavailable"))?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        bail!("Calibration requires a regular, non-symlink model file");
-    }
-    let canonical = path
-        .canonicalize()
-        .map_err(|_| anyhow!("Calibration model is unavailable"))?;
+    let canonical = require_regular_file(&path).map_err(|error| match error {
+        RegularFileError::NotFound | RegularFileError::Canonicalize => {
+            anyhow!("Calibration model is unavailable")
+        }
+        RegularFileError::Symlink | RegularFileError::NotRegular => {
+            anyhow!("Calibration requires a regular, non-symlink model file")
+        }
+    })?;
     let root = config
         .models_dir
         .clone()
