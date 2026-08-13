@@ -202,7 +202,7 @@ A second, independent archive finding closes the door on the alternative axis: `
 1. **Design constraint from day one.** `20260710-rapid_mlx_integration.md:368`: *"TurboQuant cannot be combined with standard KV-cache quantization."* Since reasoning pins standard KV to int8 (§2.4), TurboQuant and the shipped default configuration are mutually exclusive by construction.
 2. **Gated at launch, by design, with the reason in code.** `mod.rs:1132-1134` `.turboquant_mode(None)` — *"Keep the requested setting persisted, but omit TurboQuant until a receipt is available."* `rapid_mlx_runtime.rs:725-731` maps `V4`/`K8V4` → `Off` in the effective policy. `rapidmlx-integration-contract.md:166`: *"TurboQuant — UI wired, but launch keeps it disabled pending per-model qualification."* `20260727-…:1622-1624` records it as Item 16 with the JS defaults (`spawn-wizard.js:426 turboquantMode: 'none'`, `presets.js:1314 || 'none'`) and `:1727` classifies it *"intentional, documented."*
 3. **It does not do what the scenario cards would need it to do.** `20260724-rapidmlx-benchmark-continuation.md:232`: *"TurboQuant affects retained reusable prefix snapshots, not cold active KV or weights — do not compare it using only cold rows."* It is a *retained-cache* lever, not an active-KV lever. A "context fit" card set built on TurboQuant would be measuring the wrong pool.
-4. **The harness numbers were suspect.** `20260724-…:430` flags the "LARGER BUG": whether `scripts/rapid-mlx-benchmark-suite.mjs` recorded the *effective* or the *requested* `--kv-cache-turboquant`, given the V4/K8V4→Off fallback — the same silent-fallback class as the KV-dtype issue. Savings coefficients that were derived (`K8V4 = 0.575`, `V4 = 0.34`, applied to retained KV only — `docs/plans/20260718-final_rapidmlx_followups_execution.md:271`) therefore have an unresolved provenance question.
+4. **The harness numbers were suspect.** `20260724-…:430` flags the "LARGER BUG": whether `scripts/rapid-mlx-benchmark-suite.mjs` recorded the *effective* or the *requested* `--kv-cache-turboquant`, given the V4/K8V4→Off fallback — the same silent-fallback class as the KV-dtype issue. Savings coefficients that were derived (`K8V4 = 0.575`, `V4 = 0.34`, applied to retained KV only — `docs/archive/rapid-mlx/20260718-final_rapidmlx_followups_execution.md:271`) therefore have an unresolved provenance question.
 
 **And, for completeness, PFlash is genuinely ruled out** — `20260724-…:281`, verdict dated 2026-07-24: `--pflash auto` is **not recommended** at Rapid-MLX 0.11.0; recall collapsed to 0.0/0.2/0.4/0.2 at 63k/131k/160k/200k vs 1.0 with `pflash off`, while throughput jumped ~4×, i.e. the compressed region was being dropped rather than lossily retained. *"In an agentic coding loop this is a silent failure mode."* Default guidance stays `off`; do not re-open without a source-level fix.
 
@@ -456,9 +456,9 @@ This is a small, self-contained addition to Phase 1 (§2.2's implementation), no
 ---
 
 ### Critical Files for Implementation
-- `/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/js/features/spawn-wizard-mlx-ia.js` — becomes the shared registry + generalised relocation engine
-- `/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/js/features/spawn-wizard.js` — `applyProfileVisibility()` (1948-1963), `selectWizardEngine()` (2070)
-- `/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/js/features/spawn-wizard-chat-template.js` — the `meta.data.config` bug (87), evidence-ladder family detection
-- `/Users/nick/SCRIPTS/CLAUDE/llama-monitor/src/hf/qualify.rs` + `/Users/nick/SCRIPTS/CLAUDE/llama-monitor/src/hf/mod.rs` — variant capability search; `fetch_raw_bytes_at` / `fetch_mlx_config_revision_aware` remote introspection
-- `/Users/nick/SCRIPTS/CLAUDE/llama-monitor/src/web/api/rapid_mlx_runtime.rs` — `build_effective_policy` (720-757) / `build_requested_vs_effective` (759+), the int8 pin and TurboQuant gate
-- `/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/index.html` — step-2/3 markup, `#rapid-hardware-panel` (3941), `#spawn-advanced-fields` (4375), `#spawn-spec-details` (4488)
+- `static/js/features/spawn-wizard-mlx-ia.js` — becomes the shared registry + generalised relocation engine
+- `static/js/features/spawn-wizard.js` — `applyProfileVisibility()` (1948-1963), `selectWizardEngine()` (2070)
+- `static/js/features/spawn-wizard-chat-template.js` — the `meta.data.config` bug (87), evidence-ladder family detection
+- `src/hf/qualify.rs` + `src/hf/mod.rs` — variant capability search; `fetch_raw_bytes_at` / `fetch_mlx_config_revision_aware` remote introspection
+- `src/web/api/rapid_mlx_runtime.rs` — `build_effective_policy` (720-757) / `build_requested_vs_effective` (759+), the int8 pin and TurboQuant gate
+- `static/index.html` — step-2/3 markup, `#rapid-hardware-panel` (3941), `#spawn-advanced-fields` (4375), `#spawn-spec-details` (4488)

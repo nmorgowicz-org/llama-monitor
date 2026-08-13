@@ -16,7 +16,7 @@
 
 Give a fresh agent this document and the following instruction:
 
-> Act as the Coordinator. Begin with Phase 0 in `docs/plans/20260718-final_rapidmlx_followups_execution.md`. Follow its startup procedure, read every referenced section of the comprehensive plan, and use the required Coordinator -> bounded Builder -> fresh Verifier -> focused remediation workflow. Do not implement from the execution companion alone, skip prerequisites, reopen frozen decisions, modify or discard unrelated user work, or proceed past a user-authority gate without asking me. Maintain the checkpoint ledger and durable phase handoffs as specified. Continue methodically through verified phase closure unless the plan requires user approval or external evidence blocks safe progress.
+> Act as the Coordinator. Begin with Phase 0 in `docs/archive/rapid-mlx/20260718-final_rapidmlx_followups_execution.md`. Follow its startup procedure, read every referenced section of the comprehensive plan, and use the required Coordinator -> bounded Builder -> fresh Verifier -> focused remediation workflow. Do not implement from the execution companion alone, skip prerequisites, reopen frozen decisions, modify or discard unrelated user work, or proceed past a user-authority gate without asking me. Maintain the checkpoint ledger and durable phase handoffs as specified. Continue methodically through verified phase closure unless the plan requires user approval or external evidence blocks safe progress.
 
 The agent must treat this execution companion as the route map and [`20260718-final_rapidmlx_followups.md`](./20260718-final_rapidmlx_followups.md) as the authoritative specification. No conversation history from the planning session is required.
 
@@ -101,7 +101,7 @@ Refresh line hints with:
 
 ```bash
 rtk rg -n '^## |^### Phase|^### 6\.|^### 8\.' \
-  docs/plans/20260718-final_rapidmlx_followups.md
+  docs/archive/rapid-mlx/20260718-final_rapidmlx_followups.md
 ```
 
 Do not mechanically rewrite links after small line drift. Update this table only when navigation becomes misleading.
@@ -341,7 +341,7 @@ Do not begin broad UI exposure, multi-slot experiments, or release claims.
 
 #### Phase 7A — Rust backend (split into 3 parts for context management) — Verified complete — 7A1/7A2/7A3 reconciled 2026-07-30
 
-Phase 7A = builder brief items 1–5 from `docs/plans/20260718-final_rapidmlx_followups.md` §1850-1854.
+Phase 7A = builder brief items 1–5 from `docs/archive/rapid-mlx/20260718-final_rapidmlx_followups.md` §1850-1854.
 Checkpoint: 774b611 (2026-07-21). 820 tests pass.
 
 ##### Phase 7A1 — Semantic catalog + config fields — Verified complete (Coordinator, 2026-07-30)
@@ -1260,15 +1260,15 @@ You are the Builder for Phase <N><Part>.
 Read ONLY the exact line ranges specified below.
 
 File paths (use these EXACT paths):
-- Authoritative plan: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/plans/20260718-final_rapidmlx_followups.md
-- Execution companion: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/plans/20260718-final_rapidmlx_followups_execution.md
-- Repository rules: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/AGENTS.md
+- Authoritative plan: docs/archive/rapid-mlx/20260718-final_rapidmlx_followups.md
+- Execution companion: docs/archive/rapid-mlx/20260718-final_rapidmlx_followups_execution.md
+- Repository rules: AGENTS.md
 
 Read completely (exact ranges ONLY):
-- AGENTS.md: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/AGENTS.md (full file)
-- Plan Section 9 (Coordinator/Builder/Verifier protocol): /Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/plans/20260718-final_rapidmlx_followups.md lines ~1422-1512
-- Plan Phase <N> specific builder items ONLY: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/plans/20260718-final_rapidmlx_followups.md lines <start>-<end>
-- Routed supporting sections ONLY: e.g. "/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/plans/20260718-final_rapidmlx_followups.md lines 351-362 (gap 3.8), lines 627-638 (D13)"
+- AGENTS.md: AGENTS.md (full file)
+- Plan Section 9 (Coordinator/Builder/Verifier protocol): docs/archive/rapid-mlx/20260718-final_rapidmlx_followups.md lines ~1422-1512
+- Plan Phase <N> specific builder items ONLY: docs/archive/rapid-mlx/20260718-final_rapidmlx_followups.md lines <start>-<end>
+- Routed supporting sections ONLY: e.g. "docs/archive/rapid-mlx/20260718-final_rapidmlx_followups.md lines 351-362 (gap 3.8), lines 627-638 (D13)"
 
 Frozen state:
 - branch:
@@ -1304,15 +1304,15 @@ You are the fresh independent Verifier for Phase <N><Part>.
 Read ONLY exact line ranges specified below.
 
 File paths (use these EXACT paths):
-- Authoritative plan: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/plans/20260718-final_rapidmlx_followups.md
-- Execution companion: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/plans/20260718-final_rapidmlx_followups_execution.md
-- Repository rules: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/AGENTS.md
+- Authoritative plan: docs/archive/rapid-mlx/20260718-final_rapidmlx_followups.md
+- Execution companion: docs/archive/rapid-mlx/20260718-final_rapidmlx_followups_execution.md
+- Repository rules: AGENTS.md
 
 Read completely (exact ranges ONLY):
-- AGENTS.md: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/AGENTS.md (full file)
-- Plan Section 9 (Verifier protocol): /Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/plans/20260718-final_rapidmlx_followups.md lines ~1422-1512
-- Plan Phase <N> hard gates: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/plans/20260718-final_rapidmlx_followups.md lines <start>-<end>
-- Routed sections: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/plans/20260718-final_rapidmlx_followups.md lines <ranges>
+- AGENTS.md: AGENTS.md (full file)
+- Plan Section 9 (Verifier protocol): docs/archive/rapid-mlx/20260718-final_rapidmlx_followups.md lines ~1422-1512
+- Plan Phase <N> hard gates: docs/archive/rapid-mlx/20260718-final_rapidmlx_followups.md lines <start>-<end>
+- Routed sections: docs/archive/rapid-mlx/20260718-final_rapidmlx_followups.md lines <ranges>
 
 Frozen pre-phase HEAD:
 Builder handoff:

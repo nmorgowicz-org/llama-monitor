@@ -72,6 +72,17 @@ application-home, tray/WebView2, sensor bridge, updater, remote-agent,
 package, and fresh-CI receipts. The receipt is tracked in
 `docs/plans/evidence/20260811-local-llm-foundry/phase-12/windows/`.
 
+### Screenshot parity scope update (2026-08-12)
+
+Windows core/config capture groups are valid cross-platform UI evidence at the
+shared `1440x900` viewport. Rapid-MLX local execution, live telemetry, and
+runtime-manager evidence remain Apple-Silicon/macOS-only. The current Rapid
+wizard/preset scenarios also consult the real platform-info gate, so the
+Windows `wizard-rapidmlx` and `rapid-preset` probes fell back or timed out and
+are explicitly non-evidence. The Windows handoff records this distinction and
+the remaining macOS Rapid capture/parity work; it is the operational companion
+to this plan, not a competing status ledger.
+
 ### Phase closure blockers
 
 These are the specific reasons an earlier phase remains open; they are

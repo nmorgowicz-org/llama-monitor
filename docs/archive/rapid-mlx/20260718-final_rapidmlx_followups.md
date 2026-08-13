@@ -139,8 +139,8 @@ Prior plans are evidence, not authority when they conflict with code or upstream
 
 - `docs/plans/archived/20260710-rapid_mlx_integration.md`
 - `docs/plans/archived/20260710-rapid_mlx_roadmap.md`
-- `docs/plans/20260718-rapid_mlx_phase8_parity_and_power_features.md`
-- `docs/plans/20260718-rapid_mlx_phase8_remediation.md`
+- `docs/archive/rapid-mlx/20260718-rapid_mlx_phase8_parity_and_power_features.md`
+- `docs/archive/rapid-mlx/20260718-rapid_mlx_phase8_remediation.md`
 
 ### 2.5 Screenshot evidence from this audit
 

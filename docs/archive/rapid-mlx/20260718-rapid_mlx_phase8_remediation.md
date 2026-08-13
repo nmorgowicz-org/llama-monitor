@@ -9,7 +9,7 @@ local model) **without re-deriving context** — every defect has an exact
 items in the order listed; they share files, so **work one item at a time**.
 
 Companion docs:
-- Original plan / verified CLI reality: `docs/plans/20260718-rapid_mlx_phase8_parity_and_power_features.md`
+- Original plan / verified CLI reality: `docs/archive/rapid-mlx/20260718-rapid_mlx_phase8_parity_and_power_features.md`
 - That doc's "Verified CLI Reality" (lines 27–109) is ground truth — do **not** re-derive it.
 
 ---

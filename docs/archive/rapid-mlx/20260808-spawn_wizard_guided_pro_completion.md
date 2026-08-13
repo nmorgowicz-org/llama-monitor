@@ -6,7 +6,7 @@
 | Status | Complete; Phase 13 final validation and Phase 3 active-authority cleanup complete; ready for human acceptance |
 | Scope | Complete the three-step Spawn Wizard for llama.cpp/GGUF and Rapid-MLX with Guided and Pro views, trustworthy capture evidence, introspection-backed recommendations, and documentation closure |
 | Primary design source | [`20260806-spawn_wizard_uiux_redesign.md`](20260806-spawn_wizard_uiux_redesign.md) |
-| Phase-router context | [`20260718-final_rapidmlx_followups_execution.md`](../../plans/20260718-final_rapidmlx_followups_execution.md), Phase 10 |
+| Phase-router context | [`20260718-final_rapidmlx_followups_execution.md`](./20260718-final_rapidmlx_followups_execution.md), Phase 10 |
 | Intended executor | Coordinator -> bounded Builder -> fresh Verifier -> focused remediation |
 
 ### Execution progress ledger

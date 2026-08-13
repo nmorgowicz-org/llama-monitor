@@ -7,7 +7,7 @@
 | Stack | mlx 0.32.0, mlx_lm 0.31.3, Python 3.11 |
 | Hardware | Apple Silicon M5 Max (single machine, single operator) |
 | First captured | 2026-07-29 |
-| Companions | Product plan, live state, and open items: Phase 6.5 of `docs/plans/20260718-final_rapidmlx_followups.md`. Cross-runtime audit: `docs/reference/apple-silicon-mtp-runtime-comparison.md`. The former working-handoff doc was folded into those two and deleted on 2026-07-30 (git `396644b`). |
+| Companions | Product plan, live state, and open items: Phase 6.5 of `docs/archive/rapid-mlx/20260718-final_rapidmlx_followups.md`. Cross-runtime audit: `docs/reference/apple-silicon-mtp-runtime-comparison.md`. The former working-handoff doc was folded into those two and deleted on 2026-07-30 (git `396644b`). |
 
 This document holds what was **measured** and what the **source says**. It deliberately
 contains no roadmap, no UI design, and no enablement policy. Those live in Phase 6.5.

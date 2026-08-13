@@ -13,7 +13,7 @@ matches families by substring on the model/repo name (`lower.includes('qwen3.6')
 `lower.includes('gemma-4')`, etc.).
 
 Per the standing "introspection-only, never filename checking" mandate (Phase 10e in
-`docs/plans/20260718-final_rapidmlx_followups_execution.md`), this is in scope for replacement —
+`docs/archive/rapid-mlx/20260718-final_rapidmlx_followups_execution.md`), this is in scope for replacement —
 but it was explicitly *not* touched in the 10e pass because it isn't a simple "guess a property
 from the filename" bug like the ones already fixed (paramB/MoE/MTP pre-fill, sampling-defaults
 family detection). It's a deliberate fallback layer: `getEffectiveArch()` already overrides every

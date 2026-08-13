@@ -1,6 +1,6 @@
 # Local LLM Foundry 2.0 — Native Windows Validation Handoff
 
-Status: native Windows Rust/JS/UI validation completed 2026-08-12; remaining markers are application-home, tray/WebView2, packaging, and fresh CI evidence
+Status: native Windows Rust/JS/UI validation completed 2026-08-12; Windows core/config captures pass, while Rapid-MLX wizard/preset captures remain platform-gated; remaining markers are application-home, tray/WebView2, packaging, screenshot parity, and fresh CI evidence
 
 The Windows checkout now has the portability and test-fixture fixes required for
 the native MSVC build. Commit `3069a1b` is clean and validated with Rust 1.97.1:
@@ -19,6 +19,35 @@ decisions remain in
 [`20260811-local_llm_foundry-rebrand.md`](20260811-local_llm_foundry-rebrand.md).
 This handoff records only the Windows-specific setup, evidence contract, and
 return markers needed to close Phases 11–14.
+
+## Screenshot parity scope (2026-08-12)
+
+Screenshot captures have two different evidence classes and must not be mixed:
+
+- **Cross-platform UI evidence:** configuration and core captures run on
+  Windows at the shared `1440x900` viewport. These exercise the release-built
+  frontend and are valid for typography, wrapping, spacing, overflow, theme,
+  and accessibility comparison against macOS.
+- **Rapid-MLX product evidence:** local Rapid-MLX execution, live telemetry,
+  runtime-manager behavior, and platform availability are Apple-Silicon/macOS
+  only. The `rapid-mlx-live` scenario correctly skips on Windows when
+  `/api/llama-binary/platform-info` reports Rapid-MLX unavailable.
+
+The current Rapid wizard/preset scenarios also consult that real platform-info
+gate. A Windows `wizard-rapidmlx` probe therefore produced a llama.cpp fallback
+or timed out before opening the Rapid wizard, and the Windows `presets` group
+did not render the seeded Rapid card. Those are **not** Windows Rapid visual
+receipts and must not be compared as if they were. Deterministic DOM-only
+scenarios such as the synthetic Rapid dashboard cards may be captured on
+Windows when they do not cross the platform gate; label them as UI fixture
+evidence, not runtime evidence.
+
+For the final parity pass, capture the complete Rapid-MLX group on macOS and
+compare only the shared, non-runtime surfaces across Windows and macOS. Do not
+add a test-only platform override merely to manufacture Windows Rapid runtime
+receipts; if cross-platform Rapid UI coverage becomes a release requirement,
+introduce an explicit fixture-mode contract and keep it separate from live
+runtime scenarios.
 
 ## Starting context
 
