@@ -7,6 +7,8 @@
 use crate::inference::InferenceBackend;
 use serde::{Deserialize, Serialize};
 
+pub mod jobs;
+
 pub const CALIBRATION_SCHEMA_VERSION: u32 = 1;
 pub const CALIBRATION_FACTOR_CATALOG_VERSION: u32 = 1;
 
