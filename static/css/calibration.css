@@ -1,0 +1,68 @@
+.calibration-modal-shell {
+    width: min(640px, var(--modal-available-width));
+}
+
+.calibration-modal-body {
+    display: grid;
+    gap: 14px;
+}
+
+.calibration-description,
+.calibration-status,
+.calibration-error {
+    margin: 0;
+    line-height: 1.5;
+}
+
+.calibration-status {
+    padding: 12px 14px;
+    border: 1px solid color-mix(in srgb, var(--color-accent) 24%, var(--color-border));
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+}
+
+.calibration-candidates {
+    display: grid;
+    gap: 8px;
+}
+
+.calibration-candidate {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+}
+
+.calibration-candidate-label {
+    font-weight: 600;
+}
+
+.calibration-candidate-value {
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.calibration-error {
+    color: var(--color-error);
+}
+
+.calibration-modal-footer {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .calibration-modal-shell,
+    .calibration-modal-shell * {
+        animation: none !important;
+        transition: none !important;
+    }
+}
+
+[data-theme="light"] .calibration-status {
+    background: color-mix(in srgb, var(--color-accent) 5%, var(--color-bg-elevated));
+}

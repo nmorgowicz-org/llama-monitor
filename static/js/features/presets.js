@@ -20,6 +20,7 @@ import {
 import { buildEstimateBody, rapidEstimatePolicyFromConfig } from './vram-estimate.js';
 import { rapidMlxPrefillStepSizeDefault, rapidMlxProfileHasVision } from './rapid-mlx-prefill.js';
 import { openEstimateEvidenceDrawer } from './evidence-drawer.js';
+import { initCalibrationUi } from './calibration.js';
 import {
     chatTemplateStatusText,
     openChatTemplateManageModal,
@@ -1578,8 +1579,13 @@ export function openPresetModal(mode, section, seedPreset = null) {
     const deleteBtn = document.getElementById('preset-modal-delete');
     if (mode === 'edit') {
         if (deleteBtn) deleteBtn.style.display = '';
+        const calibrateBtn = document.getElementById('preset-modal-calibrate');
+        const editingPreset = sessionState.presets.find(preset => preset.id === document.getElementById('modal-preset-id')?.value);
+        if (calibrateBtn) calibrateBtn.style.display = editingPreset?.backend === 'rapid_mlx' ? 'none' : '';
     } else {
         if (deleteBtn) deleteBtn.style.display = 'none';
+        const calibrateBtn = document.getElementById('preset-modal-calibrate');
+        if (calibrateBtn) calibrateBtn.style.display = 'none';
     }
 
     modal.classList.add('open');
@@ -3302,6 +3308,8 @@ export function getPresetUnifiedProfile() {
 export function initPresets() {
     // Init preset editor nav
     initPresetEditorNav();
+    initCalibrationUi();
+    window.addEventListener('presets:reload', () => { loadPresets(); });
 
     // Bind preset action buttons (toolbar — minimal)
     document.getElementById('preset-edit-btn')?.addEventListener('click', () => openPresetModal('edit'));

@@ -1,6 +1,6 @@
 # Hardware-native llama.cpp calibration inspired by `llama-optimize`
 
-**State:** Approved as a bounded Local LLM Foundry 2.0.0 release requirement; the Phase 5 transactional boundary is in progress. Rapid-MLX benchmark classification is informational-only (`classify_rapid_mlx_benchmark_result`); typed contracts, active-root persistence, durable recovery, authenticated preflight/start/poll/cancel, deterministic typed candidate planning, sequential bounded Quick execution with per-candidate receipts/winner selection, and db-admin transactional apply with optimistic conflict checks and derived-preset default pass focused/full Rust validation, release build, clippy, and diff checks. Upstream pin/evidence, full runtime capability probing, Balanced search, post-apply validation/rollback, UI, and Phase 10 gates remain open.
+**State:** Approved as a bounded Local LLM Foundry 2.0.0 release requirement; the Phase 5 UI boundary is in progress. Rapid-MLX benchmark classification is informational-only (`classify_rapid_mlx_benchmark_result`); typed contracts, active-root persistence, durable recovery, authenticated preflight/start/poll/cancel, deterministic typed candidate planning, sequential bounded Quick execution with per-candidate receipts/winner selection, db-admin transactional apply with optimistic conflict checks and derived-preset default, and the Preset Editor Calibrate flow pass full Rust/JS validation, release build, clippy, diff checks, and a focused release-built Playwright test. Remaining Phase 5 gates are complete result-review/apply-conflict/rollback coverage, release-built screenshots with human acceptance, and post-apply validation. Upstream pin/evidence, full runtime capability probing, Balanced search, Phase 6, and Phase 10 gates remain open.
 **Date:** 2026-08-13
 **Primary owner:** Luna, executed phase-by-phase with one focused verifier after each hard gate.
 **Target release:** 2.0.0 for the bounded llama.cpp Calibration v1 scope below; advanced stages remain post-2.0 follow-ups.
@@ -729,6 +729,8 @@ The verifier must sign off that result selection is measured, bounded, reproduci
 ### Phase 5 — Preset Editor calibration UX and transactional apply
 
 **Goal:** Ship the primary user flow with results review and safe preset creation/update.
+
+**Current evidence (2026-08-13):** The dedicated Calibration frontend module, llama.cpp-only Preset Editor action, preflight/start/poll/receipt flow, candidate throughput rendering, authenticated derived-preset apply path, light-theme/reduced-motion CSS, and generated asset registration are implemented. `core/calibration.spec.js` passes against the release-built app; the full Rust suite (1,249 passed, 13 ignored), clippy, JavaScript validation/lint, release build, formatting, and diff checks are clean. This is not a Phase 5 sign-off: full result-review, update-conflict, rollback, post-apply validation, screenshot, and human-acceptance gates remain open.
 
 #### Tasks
 

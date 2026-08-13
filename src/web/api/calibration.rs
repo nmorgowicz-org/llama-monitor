@@ -23,11 +23,42 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .or(api_get(config.clone()).map(box_reply))
         .unify()
+        .or(api_receipt(config.clone()).map(box_reply))
+        .unify()
         .or(api_apply(state.clone(), config.clone()).map(box_reply))
         .unify()
         .or(api_cancel(config).map(box_reply))
         .unify()
         .boxed()
+}
+
+fn api_receipt(
+    config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "calibrations" / String / "receipt")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(config))
+        .and_then(move |id: String, auth: Option<String>, cfg: Arc<AppConfig>| {
+            if !check_api_token(&auth, &cfg) {
+                return futures_util::future::ready(Ok(unauthorized_api_token()));
+            }
+            let response = match executor::get_receipt(&cfg, &id) {
+                Ok(Some(receipt)) => warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({"ok": true, "receipt": receipt})),
+                    warp::http::StatusCode::OK,
+                ),
+                Ok(None) => warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({"ok": false, "error": "calibration receipt not found"})),
+                    warp::http::StatusCode::NOT_FOUND,
+                ),
+                Err(error) => warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({"ok": false, "error": error.to_string()})),
+                    warp::http::StatusCode::BAD_REQUEST,
+                ),
+            };
+            futures_util::future::ready(Ok::<Box<dyn warp::Reply>, warp::Rejection>(Box::new(response)))
+        })
 }
 
 fn api_apply(

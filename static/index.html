@@ -32,6 +32,7 @@
     <link rel="stylesheet" href="/css/spawn-wizard-theme.css">
     <link rel="stylesheet" href="/css/spawn-wizard-pro.css">
     <link rel="stylesheet" href="/css/tune-panel.css">
+    <link rel="stylesheet" href="/css/calibration.css">
     <link rel="stylesheet" href="/css/evidence-drawer.css">
     <link rel="stylesheet" href="/css/modal-sizing.css">
 <!-- Self-hosted vendor scripts (no CDN) -->
@@ -3574,9 +3575,30 @@
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                     Duplicate
                 </button>
+                <button type="button" class="btn btn-modal-save" id="preset-modal-calibrate" title="Measure bounded llama.cpp alternatives for this preset">Calibrate</button>
                 <button type="submit" class="btn btn-modal-save" id="btn-modal-save">Save</button>
             </div>
         </form>
+    </div>
+</div>
+
+<div class="modal-overlay" id="calibration-modal" role="dialog" aria-modal="true" aria-labelledby="calibration-modal-title" aria-hidden="true" inert>
+    <div class="modal calibration-modal-shell">
+        <div class="modal-header">
+            <h2 id="calibration-modal-title">Calibrate preset</h2>
+            <button type="button" class="modal-close" id="calibration-modal-close" aria-label="Close calibration">×</button>
+        </div>
+        <div class="modal-body calibration-modal-body">
+            <p class="calibration-description" id="calibration-modal-description">Measure a bounded set of llama.cpp alternatives on this hardware. Your preset and active session stay unchanged.</p>
+            <div class="calibration-status" id="calibration-status" role="status" aria-live="polite">Preparing preflight…</div>
+            <div class="calibration-candidates" id="calibration-candidates" hidden></div>
+            <div class="calibration-error" id="calibration-error" role="alert" hidden></div>
+        </div>
+        <div class="modal-footer calibration-modal-footer">
+            <button type="button" class="btn btn-modal-cancel" id="calibration-cancel">Cancel</button>
+            <button type="button" class="btn btn-modal-save" id="calibration-start" disabled>Start Quick calibration</button>
+            <button type="button" class="btn btn-modal-save" id="calibration-apply" disabled>Create derived preset</button>
+        </div>
     </div>
 </div>
 

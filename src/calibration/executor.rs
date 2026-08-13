@@ -265,6 +265,20 @@ pub fn get(config: &AppConfig, id: &str) -> Result<Option<CalibrationJobSnapshot
     Ok(Some(snapshot))
 }
 
+pub fn get_receipt(config: &AppConfig, id: &str) -> Result<Option<CalibrationReceipt>> {
+    let path = config
+        .app_paths
+        .calibration_receipts_dir()
+        .join(format!("{id}.json"));
+    if !path.exists() {
+        return Ok(None);
+    }
+    let encoded = fs::read(path)?;
+    Ok(Some(
+        serde_json::from_slice(&encoded).context("Calibration receipt is invalid")?,
+    ))
+}
+
 pub fn cancel(config: &AppConfig, id: &str) -> Result<Option<CalibrationJobSnapshot>> {
     let runtime = JOBS
         .lock()

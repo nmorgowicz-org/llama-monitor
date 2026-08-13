@@ -24,6 +24,7 @@ pub const COMPACT_HTML: &str = include_str!("../../static/compact.html");
 pub const CSS_AGENT_MODAL: &str = include_str!("../../static/css/agent-modal.css");
 pub const CSS_AUTH: &str = include_str!("../../static/css/auth.css");
 pub const CSS_BASE: &str = include_str!("../../static/css/base.css");
+pub const CSS_CALIBRATION: &str = include_str!("../../static/css/calibration.css");
 pub const CSS_CARDS_HARDWARE: &str = include_str!("../../static/css/cards-hardware.css");
 pub const CSS_CARDS_INFERENCE: &str = include_str!("../../static/css/cards-inference.css");
 pub const CSS_CHAT_GUIDED_GENERATION: &str =
@@ -79,6 +80,7 @@ pub const FEATURES_APP_HOME_MIGRATION_JS: &str =
 pub const FEATURES_ATTACH_DETACH_JS: &str =
     include_str!("../../static/js/features/attach-detach.js");
 pub const FEATURES_AUTH_JS: &str = include_str!("../../static/js/features/auth.js");
+pub const FEATURES_CALIBRATION_JS: &str = include_str!("../../static/js/features/calibration.js");
 pub const FEATURES_CHAT_FOCUS_MODE_JS: &str =
     include_str!("../../static/js/features/chat-focus-mode.js");
 pub const FEATURES_CHAT_HISTORY_QA_JS: &str =
