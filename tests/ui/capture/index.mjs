@@ -5,7 +5,7 @@ import {
     DEFAULT_VIEWPORT, RUNNING_PORT, setArtifactCategory, setArtifactRuntime,
 } from './harness/paths.mjs';
 import { seedConfig, findAvailablePort, spawnLlamaMonitor, cleanupServer, cleanupTempHome } from './harness/server.mjs';
-import { seedRapidMlxCapturePreset, seedNestedMlxFixture, seedCanonicalMlxFixture, seedModelsDirFixture } from './harness/fixtures.mjs';
+import { seedRapidMlxCapturePreset, seedNestedMlxFixture, seedCanonicalMlxFixture, seedModelsDirFixture, seedCalibrationCapturePreset } from './harness/fixtures.mjs';
 import { launchBrowser } from './harness/browser.mjs';
 import { cleanupFrames } from './harness/shot.mjs';
 import { beginCaptureReceipt, finishCaptureReceipt, setCaptureDiagnostics } from './harness/receipt.mjs';
@@ -25,6 +25,7 @@ import scenarioModelDiscovery from './scenarios/models/model-discovery.mjs';
 import scenarioFilebrowser from './scenarios/models/filebrowser.mjs';
 import scenarioModelBrowser from './scenarios/models/model-browser.mjs';
 import scenarioPresetEditor from './scenarios/presets/preset-editor.mjs';
+import scenarioCalibration from './scenarios/presets/calibration.mjs';
 import scenarioRapidPreset from './scenarios/presets/rapid-preset.mjs';
 import scenarioEvidenceDrawer from './scenarios/presets/evidence-drawer.mjs';
 import scenarioCommunitySources from './scenarios/presets/community-sources.mjs';
@@ -117,6 +118,7 @@ Scenarios:
     models-v2        Models modal: typed inventory, Import Lab, and HF download panel
     model-discovery  HF Download tab: scope selector, sort, category/qualification badges (real HF data)
     preset-editor    Preset editor: model/context, GPU, and advanced tabs
+    calibration      Opt-in Calibration modal states using a real local GGUF for preflight
     rapid-preset     Rapid-MLX welcome cards and preset editor (legacy and typed sources)
     evidence-drawer  Shared decision evidence drawer: dark, expanded, light, and narrow reduced-motion
     community-sources Model Manager source catalog: list and editor in dark/light/narrow states
@@ -185,8 +187,13 @@ Examples:
    RUNNING_PORT=8080 node tests/ui/capture.mjs --scenario gifs --gpu-only
    SCREENSHOT_PORT=8910 node tests/ui/capture.mjs --scenario rapid-mlx-live
 
-Note: RUNNING_PORT connects to an already-running llama-monitor (e.g. your production instance
+  Note: RUNNING_PORT connects to an already-running llama-monitor (e.g. your production instance
 with a remote agent reporting GPU data). No binary is spawned; no temp config is seeded.
+
+Calibration capture is opt-in and requires `CALIBRATION_CAPTURE_MODEL=<local GGUF path>`;
+optionally set `CALIBRATION_CAPTURE_MODELS_DIR`, `CALIBRATION_CAPTURE_LLAMA_SERVER`, or
+`LLAMA_MONITOR_CAPTURE_CONFIG_DIR`. It performs real preflight only; benchmark lifecycle
+responses are intercepted for stable screenshots.
 `);
 }
 
@@ -206,6 +213,13 @@ export const SCENARIOS = {
     'models-v2': { run: scenarioModelsV2, setup: () => ({ extraArgs: seedModelsDirFixture() }), category: 'models', runtime: 'neutral' },
     'model-discovery': { run: scenarioModelDiscovery, category: 'models', runtime: 'neutral' },
     'preset-editor': { run: scenarioPresetEditor, category: 'presets', runtime: 'neutral' },
+    'calibration': {
+        run: scenarioCalibration,
+        setup: () => ({ extraArgs: seedCalibrationCapturePreset() }),
+        category: 'presets',
+        runtime: 'llamacpp-calibration-local',
+        requiresCalibrationModel: true,
+    },
     'settings': { run: scenarioSettings, category: 'config', runtime: 'neutral' },
     'appearance-palette': { run: scenarioAppearancePalette, category: 'config', runtime: 'neutral' },
     'tls': { run: scenarioTls, category: 'config', runtime: 'neutral' },
@@ -382,6 +396,9 @@ export const SCENARIOS = {
 export function capturePlatformSkipReason(scenario, host = { platform: process.platform, arch: process.arch }) {
     if (scenario?.requiresRapidMlx && (host.platform !== 'darwin' || host.arch !== 'arm64')) {
         return `requires Apple Silicon macOS (host=${host.platform}/${host.arch})`;
+    }
+    if (scenario?.requiresCalibrationModel && !process.env.CALIBRATION_CAPTURE_MODEL) {
+        return 'requires explicit CALIBRATION_CAPTURE_MODEL (opt-in; no benchmark is run by this scenario)';
     }
     return null;
 }

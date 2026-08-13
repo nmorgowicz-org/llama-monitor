@@ -12,9 +12,20 @@ export const ROOT_DIR = join(UI_DIR, '../..');
 export const ARTIFACTS_DIR = join(ROOT_DIR, 'docs/screenshots/artifacts');
 export const SCREENSHOTS_DIR = join(ROOT_DIR, 'docs/screenshots');
 export const FRAME_DIR = join(UI_DIR, 'frames');
-export const REAL_APP_CONFIG_DIR = process.platform === 'win32'
-    ? join(process.env.APPDATA || join(os.homedir(), 'AppData', 'Roaming'), 'llama-monitor')
-    : join(process.env.HOME || os.homedir(), '.config', 'llama-monitor');
+function populatedDirectory(path) {
+    try { return fs.statSync(path).isDirectory() && fs.readdirSync(path).length > 0; } catch { return false; }
+}
+
+const configuredCaptureRoot = process.env.LLAMA_MONITOR_CAPTURE_CONFIG_DIR;
+const configParent = process.platform === 'win32'
+    ? (process.env.APPDATA || join(os.homedir(), 'AppData', 'Roaming'))
+    : join(process.env.HOME || os.homedir(), '.config');
+const canonicalCaptureRoot = join(configParent, 'local-llm-foundry');
+const legacyCaptureRoot = join(configParent, 'llama-monitor');
+// Follow the same cutover rule as AppPaths: an explicit override wins, then a
+// populated canonical root, then the populated legacy root during migration.
+export const REAL_APP_CONFIG_DIR = configuredCaptureRoot
+    || (populatedDirectory(canonicalCaptureRoot) ? canonicalCaptureRoot : legacyCaptureRoot);
 export const TEMP_HOME = fs.mkdtempSync(join(os.tmpdir(), 'llama-monitor-capture-'));
 export const TEMP_CONFIG_HOME = join(TEMP_HOME, '.config');
 export const TEMP_APP_CONFIG_DIR = join(TEMP_CONFIG_HOME, 'llama-monitor');

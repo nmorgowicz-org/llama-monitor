@@ -2,7 +2,7 @@
 // Extracted from tests/ui/capture.mjs (Phase A1/A2).
 import fs from 'fs';
 import { join } from 'path';
-import { TEMP_APP_CONFIG_DIR } from './paths.mjs';
+import { REAL_APP_CONFIG_DIR, TEMP_APP_CONFIG_DIR } from './paths.mjs';
 
 export function seedRapidMlxCapturePreset() {
     const preset = [{
@@ -124,4 +124,29 @@ export function seedModelsDirFixture() {
     ];
     for (const f of fakeFiles) fs.writeFileSync(join(modelsDir, f), '');
     return ['--models-dir', modelsDir];
+}
+
+export function seedCalibrationCapturePreset() {
+    const modelPath = process.env.CALIBRATION_CAPTURE_MODEL;
+    if (!modelPath) {
+        throw new Error('CALIBRATION_CAPTURE_MODEL is required for the opt-in calibration capture');
+    }
+    const modelDir = process.env.CALIBRATION_CAPTURE_MODELS_DIR || join(modelPath, '..');
+    const serverPath = process.env.CALIBRATION_CAPTURE_LLAMA_SERVER
+        || join(REAL_APP_CONFIG_DIR, 'bin', 'llama-server');
+    if (!fs.existsSync(modelPath)) throw new Error(`Calibration capture model does not exist: ${modelPath}`);
+    if (!fs.existsSync(serverPath)) throw new Error(`Calibration capture llama-server does not exist: ${serverPath}`);
+    fs.mkdirSync(TEMP_APP_CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(join(TEMP_APP_CONFIG_DIR, 'presets.json'), JSON.stringify([{
+        id: 'calibration-capture-source',
+        name: 'Calibration capture source',
+        backend: 'llama_cpp',
+        model_path: modelPath,
+        context_size: 8192,
+        batch_size: 2048,
+        ubatch_size: 512,
+        parallel_slots: 1,
+        port: 8001,
+    }], null, 2));
+    return ['--models-dir', modelDir, '--llama-server-path', serverPath];
 }
