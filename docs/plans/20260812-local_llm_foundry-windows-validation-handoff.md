@@ -50,6 +50,13 @@ useful for the non-Rapid scenarios without spending minutes on impossible
 browser timeouts. The Playwright suite deliberately keeps its mocked Rapid UI
 tests cross-platform; only executable/runtime evidence is platform-gated.
 
+The first Windows `config`/`core` artifact batch was discovered to have
+inherited the real `%APPDATA%` state (for example, an attached server and
+recent model cards), so it is **not** parity evidence. The harness now passes
+an explicit temporary `--config-dir` and isolated Windows profile variables;
+recapture those groups after the updated harness reaches the Windows
+checkout. Do not compare or promote the original batch.
+
 For the final parity pass, capture the complete Rapid-MLX group on macOS and
 compare only the shared, non-runtime surfaces across Windows and macOS. Do not
 add a test-only platform override merely to manufacture Windows Rapid runtime

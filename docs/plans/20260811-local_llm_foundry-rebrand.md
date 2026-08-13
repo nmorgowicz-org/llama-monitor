@@ -88,6 +88,12 @@ starting the app on non-Apple-Silicon hosts. Playwright's mocked Rapid UI tests
 remain cross-platform; only local executable/runtime screenshot evidence is
 gated.
 
+The initial Windows `config`/`core` artifact batch is excluded from visual
+parity because it inherited the real Windows application-home state. The
+capture harness now supplies an explicit temporary config root and isolated
+Windows profile variables; those groups must be recaptured before visual
+acceptance.
+
 ### Phase closure blockers
 
 These are the specific reasons an earlier phase remains open; they are

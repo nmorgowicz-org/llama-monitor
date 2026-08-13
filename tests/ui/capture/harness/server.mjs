@@ -4,7 +4,7 @@ import fs from 'fs';
 import { join } from 'path';
 import { spawn } from 'child_process';
 import net from 'net';
-import { BINARY_PATH, DEFAULT_PORT, REAL_APP_CONFIG_DIR, ROOT_DIR, TEMP_APP_CONFIG_DIR, TEMP_CONFIG_HOME, TEMP_HOME, sleep } from './paths.mjs';
+import { BINARY_PATH, DEFAULT_PORT, REAL_APP_CONFIG_DIR, ROOT_DIR, TEMP_APP_CONFIG_DIR, TEMP_CONFIG_HOME, TEMP_HOME, TEMP_WINDOWS_APPDATA, TEMP_WINDOWS_LOCALAPPDATA, sleep } from './paths.mjs';
 
 export function seedConfig() {
     // Copy encryption-key first so encrypted values in ui-settings.json (e.g. remote_agent_token)
@@ -73,12 +73,15 @@ export async function waitForHttp(url, timeout = 30000) {
 }
 
 export async function spawnLlamaMonitor(port, extraArgs = []) {
-    const proc = spawn(BINARY_PATH, ['--port', String(port), '--headless', ...extraArgs], {
+    const proc = spawn(BINARY_PATH, ['--config-dir', TEMP_APP_CONFIG_DIR, '--port', String(port), '--headless', ...extraArgs], {
         stdio: ['ignore', 'pipe', 'pipe'],
         env: {
             ...process.env,
             HOME: TEMP_HOME,
             XDG_CONFIG_HOME: TEMP_CONFIG_HOME,
+            APPDATA: TEMP_WINDOWS_APPDATA,
+            LOCALAPPDATA: TEMP_WINDOWS_LOCALAPPDATA,
+            USERPROFILE: TEMP_HOME,
             // Suppress llama-monitor self-update checks during capture so the
             // GitHub rate limit is not consumed before the llama-updater scenario
             // needs it to fetch real llama.cpp release notes.
