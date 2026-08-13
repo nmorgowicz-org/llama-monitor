@@ -33,7 +33,8 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{Notify, Semaphore};
 
-const METHOD_VERSION: &str = "calibration-v1-single-trial";
+const METHOD_VERSION_QUICK: &str = "calibration-v1-quick-single-trial";
+const METHOD_VERSION_BALANCED: &str = "calibration-v1-balanced-bounded-search";
 const CONFIRMATION: &str = "CALIBRATE";
 const MAX_DIAGNOSTICS: usize = 24;
 
@@ -181,7 +182,8 @@ pub fn preflight(
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "llama-bench".into()),
-        planned_trials: candidate_ids.len() as u32,
+        planned_trials: candidate_ids.len() as u32
+            + u32::from(budget == CalibrationBudget::Balanced) * 2,
         candidate_ids,
         requires_server_stop: true,
         supported_budget: match budget {
@@ -201,9 +203,7 @@ pub fn start(
 ) -> Result<CalibrationJobSnapshot> {
     match request.budget {
         CalibrationBudget::Quick => {}
-        CalibrationBudget::Balanced => bail!(
-            "Balanced Calibration planning is available, but executor repetitions and pick verification are still gated"
-        ),
+        CalibrationBudget::Balanced => {}
         CalibrationBudget::Thorough => {
             bail!("Thorough Calibration is not available in the bounded 2.0 release")
         }
@@ -497,6 +497,70 @@ async fn run_job(
         });
     }
 
+    if budget == CalibrationBudget::Balanced {
+        let verification_candidates = select_verification_candidates(&candidate_results);
+        for candidate in verification_candidates {
+            if runtime.cancel.load(Ordering::Acquire) {
+                let _ = finish_cancelled(&runtime);
+                return;
+            }
+            let trial_id = format!("{}-verification", candidate.id);
+            let journal_result = append_event(
+                &runtime.journal_path,
+                &JournalEvent::new(JournalEventKind::TrialPlanned, Some(trial_id.clone())),
+            )
+            .and_then(|_| {
+                append_event(
+                    &runtime.journal_path,
+                    &JournalEvent::new(JournalEventKind::TrialStarted, Some(trial_id.clone())),
+                )
+            });
+            if let Err(error) = journal_result {
+                let _ = fail_job(
+                    &runtime,
+                    &format!("Calibration verification journal failed: {error}"),
+                );
+                return;
+            }
+            let mut candidate_preset = preset.clone();
+            apply_patch_to_preset(&mut candidate_preset, &candidate.typed_patch);
+            let measurement = run_candidate_measurement(
+                &config,
+                &candidate_preset,
+                &workload,
+                &model_path,
+                &bench_path,
+                &runtime,
+                &trial_id,
+            )
+            .await;
+            let Some(measurement) = measurement else {
+                let _ = finish_cancelled(&runtime);
+                return;
+            };
+            candidate_results.push(CalibrationCandidateResult {
+                candidate: CalibrationCandidate {
+                    id: trial_id.clone(),
+                    ..candidate
+                },
+                measurement,
+            });
+            if let Err(error) = append_event(
+                &runtime.journal_path,
+                &JournalEvent::new(JournalEventKind::TrialFinished, Some(trial_id)),
+            ) {
+                let _ = fail_job(
+                    &runtime,
+                    &format!("Calibration verification journal failed: {error}"),
+                );
+                return;
+            }
+            let _ = update_snapshot(&runtime, |snapshot| {
+                snapshot.completed_trials = snapshot.completed_trials.saturating_add(1);
+            });
+        }
+    }
+
     let completed_trials = candidate_results.len() as u32;
     let selected_candidate = select_winner(&candidate_results);
     let measurement = candidate_results
@@ -506,7 +570,12 @@ async fn run_job(
         .unwrap_or_default();
     let receipt = CalibrationReceipt {
         schema_version: super::CALIBRATION_SCHEMA_VERSION,
-        method_version: METHOD_VERSION.into(),
+        method_version: if budget == CalibrationBudget::Balanced {
+            METHOD_VERSION_BALANCED
+        } else {
+            METHOD_VERSION_QUICK
+        }
+        .into(),
         job_id: id.clone(),
         fingerprint: CalibrationFingerprint {
             baseline_config_hash: fingerprint.clone(),
@@ -924,6 +993,68 @@ fn select_verification_candidates(
         .take(super::candidates::BALANCED_MAX_VERIFICATION_CANDIDATES)
         .map(|result| result.candidate.clone())
         .collect()
+}
+
+async fn run_candidate_measurement(
+    config: &AppConfig,
+    candidate_preset: &ModelPreset,
+    workload: &super::CalibrationWorkload,
+    model_path: &Path,
+    bench_path: &Path,
+    runtime: &RuntimeJob,
+    trial_id: &str,
+) -> Option<CalibrationMeasurement> {
+    let ngl = candidate_preset.gpu_layers.unwrap_or(99);
+    let flash_attn = matches!(candidate_preset.flash_attn.trim(), "on" | "1" | "true");
+    let ctk = non_empty_or(&candidate_preset.ctk, "q8_0");
+    let ctv = non_empty_or(&candidate_preset.ctv, "q8_0");
+    let batch_size = if candidate_preset.batch_size == 0 {
+        2048
+    } else {
+        candidate_preset.batch_size
+    };
+    let ubatch_size = if candidate_preset.ubatch_size == 0 {
+        512
+    } else {
+        candidate_preset.ubatch_size
+    };
+    let depths = vec![workload.minimum_context.max(1)];
+    let model_path_string = model_path.to_string_lossy().into_owned();
+    let bench = run_sweep_with_tokens(
+        bench_path,
+        &config.llama_server_cwd,
+        &model_path_string,
+        ngl,
+        flash_attn,
+        &ctk,
+        &ctv,
+        batch_size,
+        ubatch_size,
+        &depths,
+        candidate_preset.n_cpu_moe,
+        workload.prompt_tokens,
+        workload.generation_tokens,
+    );
+    let result = tokio::select! {
+        result = bench => Some(result),
+        _ = runtime.cancel_notify.notified() => None,
+    }?;
+    if runtime.cancel.load(Ordering::Acquire) {
+        return None;
+    }
+    Some(match result {
+        Ok(points) => {
+            let mut measurement = measurement_from_points(points);
+            measurement.trial_id = trial_id.into();
+            measurement
+        }
+        Err(error) => CalibrationMeasurement {
+            trial_id: trial_id.into(),
+            status: Some(TrialStatus::Error),
+            bounded_diagnostics: vec![sanitize_error(&error)],
+            ..Default::default()
+        },
+    })
 }
 
 fn median(values: &[f64]) -> f64 {

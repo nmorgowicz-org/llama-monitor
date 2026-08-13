@@ -41,6 +41,8 @@ The tests cover stable IDs/order, L9/L25 selection, budget fail-closed
 behavior, `ubatch <= batch`, Rapid-MLX rejection, and capability-gated flash
 attention. Executor/preflight wiring remains a subsequent slice.
 
+Balanced executor wiring now uses the shared measurement and cancellation-safe path; real-runtime receipts and analysis/noise/Pareto reporting remain open.
+
 ## Gate result
 
 **Pass — deterministic Balanced planner and preflight foundation.** The Phase
