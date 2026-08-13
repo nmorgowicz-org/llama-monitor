@@ -1,16 +1,17 @@
 # Local LLM Foundry 2.0 — Native Windows Validation Handoff
 
-Status: native Windows Rust/JS validation completed 2026-08-12; native UI gate is blocked by Portmaster loopback policy
+Status: native Windows Rust/JS/UI validation completed 2026-08-12; remaining markers are application-home, tray/WebView2, packaging, and fresh CI evidence
 
 The Windows checkout now has the portability and test-fixture fixes required for
-the native MSVC build. Commit `f8dce76` is clean and validated with Rust 1.97.1:
+the native MSVC build. Commit `3069a1b` is clean and validated with Rust 1.97.1:
 native clippy, the full Rust suite, release build, GNU cross-target check and
 clippy, JavaScript validation, lint, rebrand validation, and release-contract
-validation all pass. Native Playwright starts the release server but Chromium
-is denied loopback access by Portmaster (`ERR_NETWORK_ACCESS_DENIED`); allow
-the Playwright Chromium executable or repository loopback traffic, then rerun
-the UI suite before closing the Windows gate. WSL2 release preflight remains a
-separate optional environment marker.
+validation all pass. After allowing the pinned Playwright Chromium executable
+through Portmaster, the complete release-built native UI suite passed (270
+passed, 5 intentional skips, 0 failures). WSL2 release preflight remains a
+separate environment marker, and the disposable application-home, tray/
+WebView2, sensor bridge, updater, remote-agent, and package checks still need
+their explicit receipts before the Windows phase is fully closed.
 
 This document is the operational handoff for a fresh Codex session running on
 the Windows development machine. The authoritative implementation and release
@@ -23,7 +24,7 @@ return markers needed to close Phases 11–14.
 
 - Repository: `nmorgowicz-org/local-llm-foundry`
 - Local checkout branch: `feat/rapid-mlx-integration`
-- Current validated commit: `f8dce76`; verify with `git log -1` before testing.
+- Current validated commit: `3069a1b`; verify with `git log -1` before testing.
 - Pull request: #314
 - Product: Local LLM Foundry 2.0
 - Canonical Windows application home: `%APPDATA%\\local-llm-foundry\\`
@@ -231,8 +232,9 @@ Native Windows work can close its markers only when all of these are true:
 - Native executable, tray/WebView2, sensor bridge, updater, remote-agent, and
   package checks have raw receipts.
 - The mandatory Rust/JS checks and the complete release-built UI suite are
-  green on the current commit. The UI suite remains open until Portmaster
-  allows Chromium loopback traffic and the suite completes.
+  green on the current commit (270 passed, 5 intentional skips). The remaining
+  Windows closure markers are the native runtime/package matrix and a fresh CI
+  run on the current commit.
 - A fresh CI run after the fix is green; the transient failure from run
   `31627911658` is not merely hidden by retries.
 - Phase 12 evidence is complete and the plan status table is updated before

@@ -22,16 +22,16 @@
 
 ## Final status
 
-The native Rust/JavaScript validation suite is green. Native Playwright UI
-validation is still blocked by Portmaster: Chromium receives
-`ERR_NETWORK_ACCESS_DENIED` when it navigates to the locally served app, even
-though the release server starts successfully on loopback. The Windows user
-must allow the Playwright Chromium executable (or the repository's local
-loopback traffic) in Portmaster before rerunning the UI suite.
+The native Rust/JavaScript validation suite is green. After allowing the
+Playwright Chromium executable through Portmaster, the complete release-built
+Windows Playwright suite passed: 270 passed, 5 intentional skips, 0 failures
+(Playwright `.last-run.json` status `passed`).
 
 ## Environment blockers
 
 - The GNU cross-target check now passes with the current dependency graph.
+- Portmaster initially blocked Chromium loopback access; the policy was
+  corrected and the full native UI suite subsequently passed.
 - Release preflight could not start WSL2 because Virtual Machine Platform is not
   enabled. Re-run from Git Bash/WSL after enabling that Windows feature.
 

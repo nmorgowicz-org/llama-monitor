@@ -61,15 +61,15 @@ required before Phase 11 or the release candidate is marked green.
 
 ### Native Windows qualification update (2026-08-12)
 
-Windows commit `f8dce76` is clean and now passes Rust 1.97.1 native MSVC
+Windows commit `3069a1b` is clean and now passes Rust 1.97.1 native MSVC
 clippy, the full Rust suite (5 intentional ignores), release build, GNU
 cross-target check and clippy, `cargo fmt -- --check`, JavaScript validation,
 lint, rebrand validation, and release-contract validation. The release server
-also starts successfully on Windows. The native Playwright suite is not yet a
-pass: Chromium is currently denied access to the local server by Portmaster
-(`ERR_NETWORK_ACCESS_DENIED`). Allow the pinned Playwright Chromium executable
-or repository loopback traffic in Portmaster, then rerun the full suite from
-the Windows handoff before closing Phases 12–14. The receipt is tracked in
+also starts successfully on Windows. Native Playwright now passes after
+allowing Chromium loopback traffic in Portmaster: 270 passed, 5 intentional
+skips, 0 failures. The remaining Windows return markers are the disposable
+application-home, tray/WebView2, sensor bridge, updater, remote-agent,
+package, and fresh-CI receipts. The receipt is tracked in
 `docs/plans/evidence/20260811-local-llm-foundry/phase-12/windows/`.
 
 ### Phase closure blockers
