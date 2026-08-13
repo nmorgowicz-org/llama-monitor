@@ -126,8 +126,8 @@ pub fn quick_candidates(
 }
 
 /// Build the deterministic Balanced orthogonal-array plan without launching
-/// any process. The current v1 surface has four core factors (L9); a verified
-/// flash-attention capability adds a fifth factor (L25).
+/// any process. Four numeric core factors use L9 by default; a verified
+/// flash-attention runtime uses L25 while flash remains a separate control.
 pub fn balanced_plan(
     preset: &ModelPreset,
     workload: &CalibrationWorkload,
@@ -135,10 +135,10 @@ pub fn balanced_plan(
 ) -> Result<BalancedPlan> {
     validate_common_inputs(preset, workload)?;
     let specs = factor_catalog(preset, workload, capabilities)?;
-    let array = if specs.len() <= OrthogonalArray::L9.max_columns() {
-        OrthogonalArray::L9
-    } else {
+    let array = if capability_has(capabilities, "-fa", "--flash-attn") {
         OrthogonalArray::L25
+    } else {
+        OrthogonalArray::L9
     };
     let final_rows = array.rows();
     validate_balanced_budget(0, final_rows, BALANCED_MAX_VERIFICATION_CANDIDATES)?;
@@ -174,6 +174,20 @@ pub fn balanced_plan(
             ),
             patch,
             evidence,
+        )?);
+    }
+    if capability_has(capabilities, "-fa", "--flash-attn")
+        && !matches!(preset.flash_attn.trim(), "on" | "1" | "true")
+    {
+        candidates.push(materialize_candidate(
+            preset,
+            workload,
+            "flash-attention".into(),
+            LlamaCppCalibrationPatch {
+                flash_attn: Some(true),
+                ..Default::default()
+            },
+            vec!["llama-server help advertises flash attention control".into()],
         )?);
     }
     Ok(BalancedPlan {
@@ -215,7 +229,7 @@ fn validate_common_inputs(preset: &ModelPreset, workload: &CalibrationWorkload) 
 fn factor_catalog(
     preset: &ModelPreset,
     workload: &CalibrationWorkload,
-    capabilities: Option<&CapabilitySnapshot>,
+    _capabilities: Option<&CapabilitySnapshot>,
 ) -> Result<Vec<FactorSpec>> {
     let batch_levels = numeric_u32_levels(effective_batch(preset.batch_size), |value| {
         LlamaCppCalibrationPatch {
@@ -248,7 +262,7 @@ fn factor_catalog(
         ..Default::default()
     });
 
-    let mut specs = vec![
+    let specs = vec![
         FactorSpec {
             factor: BalancedFactor::ContextSize,
             levels: context_levels,
@@ -266,23 +280,6 @@ fn factor_catalog(
             levels: thread_levels,
         },
     ];
-    if capability_has(capabilities, "-fa", "--flash-attn")
-        && !matches!(preset.flash_attn.trim(), "on" | "1" | "true")
-    {
-        specs.push(FactorSpec {
-            factor: BalancedFactor::FlashAttention,
-            levels: vec![
-                LlamaCppCalibrationPatch {
-                    flash_attn: Some(false),
-                    ..Default::default()
-                },
-                LlamaCppCalibrationPatch {
-                    flash_attn: Some(true),
-                    ..Default::default()
-                },
-            ],
-        });
-    }
     Ok(specs)
 }
 
@@ -290,9 +287,17 @@ fn numeric_u32_levels<F>(baseline: u32, make_patch: F) -> Vec<LlamaCppCalibratio
 where
     F: Fn(u32) -> LlamaCppCalibrationPatch,
 {
-    let low = (baseline / 2).max(1);
-    let high = baseline.saturating_mul(2).max(low);
-    vec![make_patch(low), make_patch(baseline), make_patch(high)]
+    let low = (baseline / 4).max(1);
+    let half = (baseline / 2).max(low);
+    let high = baseline.saturating_mul(2).max(baseline);
+    let one_half = baseline.saturating_add(baseline / 2).max(baseline);
+    vec![
+        make_patch(low),
+        make_patch(half),
+        make_patch(baseline),
+        make_patch(one_half),
+        make_patch(high),
+    ]
 }
 
 fn numeric_u32_levels_bounded<F>(
@@ -304,10 +309,17 @@ where
     F: Fn(u32) -> LlamaCppCalibrationPatch,
 {
     let high = baseline.saturating_mul(2).min(upper_bound).max(1);
-    let low = (baseline / 2).max(1).min(high);
+    let low = (baseline / 4).max(1).min(high);
+    let half = (baseline / 2).max(low).min(high);
+    let one_half = baseline
+        .saturating_add(baseline / 2)
+        .min(high)
+        .max(baseline.min(high));
     vec![
         make_patch(low),
+        make_patch(half),
         make_patch(baseline.min(upper_bound)),
+        make_patch(one_half),
         make_patch(high),
     ]
 }
@@ -322,8 +334,17 @@ where
 {
     let baseline = baseline.max(minimum);
     let low = minimum.min(baseline);
+    let quarter = low.saturating_add(baseline.saturating_sub(low) / 4);
+    let half = low.saturating_add(baseline.saturating_sub(low) / 2);
+    let one_half = baseline.saturating_add(baseline.saturating_sub(low) / 2);
     let high = baseline.saturating_mul(2).clamp(baseline, 131_072);
-    vec![make_patch(low), make_patch(baseline), make_patch(high)]
+    vec![
+        make_patch(low),
+        make_patch(quarter),
+        make_patch(half),
+        make_patch(one_half.min(high)),
+        make_patch(high),
+    ]
 }
 
 fn numeric_i32_levels<F>(baseline: Option<i32>, make_patch: F) -> Vec<LlamaCppCalibrationPatch>
@@ -331,10 +352,18 @@ where
     F: Fn(i32) -> LlamaCppCalibrationPatch,
 {
     let effective = baseline.unwrap_or(2).max(1);
-    let low = (effective / 2).max(1);
-    let high = effective.saturating_mul(2).max(low);
+    let low = (effective / 4).max(1);
+    let half = (effective / 2).max(low);
+    let high = effective.saturating_mul(2).max(effective);
+    let one_half = effective.saturating_add(effective / 2).max(effective);
     let middle = baseline.map_or_else(LlamaCppCalibrationPatch::default, &make_patch);
-    vec![make_patch(low), middle, make_patch(high)]
+    vec![
+        make_patch(low),
+        make_patch(half),
+        middle,
+        make_patch(one_half),
+        make_patch(high),
+    ]
 }
 
 fn merge_patch(target: &mut LlamaCppCalibrationPatch, source: &LlamaCppCalibrationPatch) {
@@ -513,6 +542,26 @@ mod tests {
         assert_eq!(plan.array, OrthogonalArray::L9);
         assert!(
             plan.candidates
+                .iter()
+                .all(|candidate| candidate.typed_patch.flash_attn.is_none())
+        );
+    }
+
+    #[test]
+    fn balanced_flash_is_a_separate_control_not_a_binary_oa_factor() {
+        let plan = balanced_plan(
+            &ModelPreset::default(),
+            &CalibrationWorkload::default(),
+            Some(&snapshot_with_flash()),
+        )
+        .expect("balanced plan");
+        assert_eq!(plan.array, OrthogonalArray::L25);
+        assert_eq!(
+            plan.candidates.last().expect("flash control").id,
+            "flash-attention"
+        );
+        assert!(
+            plan.candidates[..plan.candidates.len() - 1]
                 .iter()
                 .all(|candidate| candidate.typed_patch.flash_attn.is_none())
         );
