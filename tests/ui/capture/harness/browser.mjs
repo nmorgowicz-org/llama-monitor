@@ -60,11 +60,46 @@ export async function switchTab(page, tabName) {
 
 export async function gotoApp(page, baseUrl, waitUntil = 'networkidle0') {
     await page.goto(baseUrl, { waitUntil });
+    await assertDeterministicFonts(page);
     // See the scoped CSS rule in spawn-wizard.css. This marker prevents
     // Chromium's capture-only :focus-visible heuristic from outlining the
     // entire programmatically focused wizard step.
     await page.evaluate(() => { document.documentElement.dataset.screenshotCapture = 'true'; });
     await sleep(1500);
+}
+
+export async function assertDeterministicFonts(page) {
+    const diagnostics = await page.evaluate(async () => {
+        const faces = [
+            ['Inter', 400],
+            ['Inter', 500],
+            ['Inter', 600],
+            ['Inter', 700],
+            ['Inter', 800],
+            ['Fira Code', 400],
+            ['Fira Code', 500],
+            ['Fira Code', 600],
+        ];
+        await Promise.all(faces.map(([family, weight]) => document.fonts.load(`${weight} 16px "${family}"`)));
+        await document.fonts.ready;
+        const missing = faces.filter(([family, weight]) => !document.fonts.check(`${weight} 16px "${family}"`));
+        const externalFontRequests = performance.getEntriesByType('resource')
+            .map(entry => entry.name)
+            .filter(url => /fonts\.(googleapis|gstatic)\.com/i.test(url));
+        const root = getComputedStyle(document.documentElement);
+        const body = getComputedStyle(document.body);
+        return {
+            status: document.fonts.status,
+            missing,
+            externalFontRequests,
+            rootFontSize: root.fontSize,
+            bodyFontFamily: body.fontFamily,
+        };
+    });
+    if (diagnostics.status !== 'loaded' || diagnostics.missing.length || diagnostics.externalFontRequests.length) {
+        throw new Error(`Deterministic font contract failed: ${JSON.stringify(diagnostics)}`);
+    }
+    return diagnostics;
 }
 
 export async function loadAppDocument(page, baseUrl) {
@@ -76,6 +111,7 @@ export async function loadAppDocument(page, baseUrl) {
 
     const hasAppShell = await page.$('#page-server') !== null;
     if (hasAppShell) {
+        await assertDeterministicFonts(page);
         await page.evaluate(() => { document.documentElement.dataset.screenshotCapture = 'true'; });
         await sleep(1500);
         return;
@@ -95,6 +131,7 @@ export async function loadAppDocument(page, baseUrl) {
         document.getElementById('auth-shell')?.classList.add('hidden');
         document.body.classList.remove('auth-required');
     });
+    await assertDeterministicFonts(page);
     await sleep(1500);
 }
 

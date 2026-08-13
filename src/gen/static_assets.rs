@@ -44,6 +44,24 @@ pub const CSS_SPAWN_WIZARD_PRO: &str = include_str!("../../static/css/spawn-wiza
 pub const CSS_SPAWN_WIZARD_THEME: &str = include_str!("../../static/css/spawn-wizard-theme.css");
 pub const CSS_TOKENS: &str = include_str!("../../static/css/tokens.css");
 pub const CSS_TUNE_PANEL: &str = include_str!("../../static/css/tune-panel.css");
+pub const LICENSE_FIRA_CODE_TXT: &str = include_str!("../../static/fonts/LICENSE-Fira-Code.txt");
+pub const LICENSE_INTER_TXT: &str = include_str!("../../static/fonts/LICENSE-Inter.txt");
+pub const README_MD: &str = include_str!("../../static/fonts/README.md");
+pub static FIRACODE_MEDIUM_WOFF2: &[u8] =
+    include_bytes!("../../static/fonts/fira-code/FiraCode-Medium.woff2");
+pub static FIRACODE_REGULAR_WOFF2: &[u8] =
+    include_bytes!("../../static/fonts/fira-code/FiraCode-Regular.woff2");
+pub static FIRACODE_SEMIBOLD_WOFF2: &[u8] =
+    include_bytes!("../../static/fonts/fira-code/FiraCode-SemiBold.woff2");
+pub static INTER_BOLD_WOFF2: &[u8] = include_bytes!("../../static/fonts/inter/Inter-Bold.woff2");
+pub static INTER_EXTRABOLD_WOFF2: &[u8] =
+    include_bytes!("../../static/fonts/inter/Inter-ExtraBold.woff2");
+pub static INTER_MEDIUM_WOFF2: &[u8] =
+    include_bytes!("../../static/fonts/inter/Inter-Medium.woff2");
+pub static INTER_REGULAR_WOFF2: &[u8] =
+    include_bytes!("../../static/fonts/inter/Inter-Regular.woff2");
+pub static INTER_SEMIBOLD_WOFF2: &[u8] =
+    include_bytes!("../../static/fonts/inter/Inter-SemiBold.woff2");
 pub const ICON_SVG: &str = include_str!("../../static/icon.svg");
 pub const INDEX_HTML: &str = include_str!("../../static/index.html");
 pub const BOOTSTRAP_JS: &str = include_str!("../../static/js/bootstrap.js");

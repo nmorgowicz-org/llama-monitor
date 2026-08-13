@@ -94,7 +94,7 @@ fn collect_files(base: &Path, prefix: &str, files: &mut Vec<(String, String, Str
                 "html"
             } else if matches!(
                 path.extension().and_then(|extension| extension.to_str()),
-                Some("png" | "ico" | "webp" | "jpg" | "jpeg" | "gif" | "icns")
+                Some("png" | "ico" | "webp" | "jpg" | "jpeg" | "gif" | "icns" | "woff" | "woff2")
             ) {
                 "binary"
             } else {
@@ -366,6 +366,10 @@ fn content_type_for(path: &str) -> &'static str {
         "image/png"
     } else if path.ends_with(".ico") {
         "image/x-icon"
+    } else if path.ends_with(".woff") {
+        "font/woff"
+    } else if path.ends_with(".woff2") {
+        "font/woff2"
     } else {
         "application/octet-stream"
     }

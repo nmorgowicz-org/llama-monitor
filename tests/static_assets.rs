@@ -15,6 +15,20 @@ async fn binary_brand_assets_are_served_as_bytes_with_mime() {
 }
 
 #[tokio::test]
+async fn bundled_fonts_are_served_as_bytes_with_font_mime() {
+    let routes = static_routes();
+    let response = warp::test::request()
+        .path("/fonts/inter/Inter-Regular.woff2")
+        .reply(&routes)
+        .await;
+
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.headers()["content-type"], "font/woff2");
+    assert_eq!(response.body(), static_assets::INTER_REGULAR_WOFF2);
+    assert!(!response.body().is_empty());
+}
+
+#[tokio::test]
 async fn manifest_and_maskable_brand_assets_are_registered() {
     let routes = static_routes();
     let manifest = warp::test::request()

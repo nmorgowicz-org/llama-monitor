@@ -171,23 +171,18 @@ pub fn build_routes(
     let non_index = protected.or(public_api).or(static_files);
 
     // Apply HTTP security headers to non-index routes
-    // Scripts/styles/fonts from external CDNs are loaded only from index.html
-    // using SRI (integrity attributes) and are not needed on API/asset routes;
+    // Scripts/styles/fonts from external CDNs are not needed on API/asset routes;
     // so we keep this global policy conservative:
     // - script-src: 'self' only (no floating CDN allowlist).
-    // - style-src: allow Google Fonts + jsDelivr for highlight.js theme used on the SPA shell.
-    // - font-src: Google Fonts.
+    // - style-src: allow jsDelivr for the highlight.js theme used on the SPA shell.
+    // - font-src: self-hosted application fonts only.
     // Index route defines its own per-request CSP with nonce + strict-dynamic.
     let csp = ContentSecurityPolicy::new()
         .default_src(vec!["'self'", "data:"])
         .connect_src(vec!["'self'", "https:", "wss:"])
         .script_src(vec!["'self'"])
-        .style_src(vec![
-            "'self'",
-            "https://fonts.googleapis.com",
-            "https://cdn.jsdelivr.net",
-        ])
-        .font_src(vec!["'self'", "https://fonts.gstatic.com"])
+        .style_src(vec!["'self'", "https://cdn.jsdelivr.net"])
+        .font_src(vec!["'self'"])
         .img_src(vec!["'self'", "data:", "https:"])
         .frame_src(vec!["'self'"]);
     let helmet: HelmetFilter = Helmet::new().add(csp).try_into().unwrap();
@@ -324,8 +319,8 @@ fn compact_route(
             "default-src 'self' data:; \
              connect-src 'self' https: wss:; \
              script-src 'self' 'nonce-{}'; \
-             style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
-             font-src 'self' https://fonts.gstatic.com; \
+             style-src 'self' 'unsafe-inline'; \
+             font-src 'self'; \
              img-src 'self' data:; \
              frame-src 'self'",
             nonce
@@ -360,18 +355,16 @@ fn index_route(
     // - /compact is excluded and handled separately.
 
     // Helper: generate index.html with version, platform, and CSP nonce.
-    let serve_index =
-        warp::header::optional::<String>("Authorization")
-            .and(warp::header::optional::<String>("cookie"))
-            .and_then(move |auth_header: Option<String>, cookie_header: Option<String>| {
+    let serve_index = warp::header::optional::<String>("Authorization")
+        .and(warp::header::optional::<String>("cookie"))
+        .and_then(
+            move |auth_header: Option<String>, cookie_header: Option<String>| {
                 let auth_manager = auth_manager.clone();
                 async move {
                     if auth_manager.has_basic()
                         && !auth_manager.has_form()
-                        && !auth_manager.authenticate_request(
-                            auth_header.as_deref(),
-                            cookie_header.as_deref(),
-                        )
+                        && !auth_manager
+                            .authenticate_request(auth_header.as_deref(), cookie_header.as_deref())
                     {
                         return Err(warp::reject::custom(AuthReject {
                             challenge_basic: true,
@@ -397,8 +390,8 @@ fn index_route(
                         "default-src 'self' data:; \
                          connect-src 'self' https: wss:; \
                          script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; \
-                         style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; \
-                         font-src 'self' https://fonts.gstatic.com; \
+                         style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; \
+                         font-src 'self'; \
                          img-src 'self' data: https:; \
                          frame-src 'self'"
                     );
@@ -409,7 +402,8 @@ fn index_route(
                         csp,
                     ))
                 }
-            });
+            },
+        );
 
     let root = warp::path::end().and(serve_index.clone());
 

@@ -1,7 +1,7 @@
 # Text hierarchy + font consistency pass
 
 **Date:** 2026-06-23 (source-audited 2026-08-13)
-**Status:** 2.0 critical subset proposed; implementation not started
+**Status:** 2.0 critical subset in progress; cross-platform/font-scale gates open
 **Author:** design/UX pass following the architecture-label PR (`feat/arch-labels-and-ux-fixes`)
 
 ## 2.0 decision and scope
@@ -29,6 +29,22 @@ The complete px-to-rem migration (B2b) and neutral hierarchy rollout (Part A)
 remain phased work. Pull a surface into the 2.0 subset when the visual gate or
 font-scale check finds a real defect; do not hold 2.0 merely to mechanically
 replace every intentional pixel value.
+
+### Implementation checkpoint (2026-08-13)
+
+The first implementation slice is now in progress:
+
+- Inter 4.1 and Fira Code 6.2 static WOFF2 weights are bundled under
+  `static/fonts/` with their upstream SIL Open Font License 1.1 notices.
+- Google Fonts imports/links and CSP allowances were removed; the generated
+  asset routes serve local WOFF2 files with `font/woff2`.
+- The root CSS baseline is explicitly `16px`.
+- Capture navigation now waits for the required local faces and fails closed on
+  missing faces or Google Fonts resource requests.
+
+The implementation is not phase-complete until the Windows release-built
+capture, offline/no-external-request check, and `0.9`/`1.0`/`1.2` font-scale
+matrix pass on the same commit.
 
 Evidence and pair classifications belong in
 `docs/plans/evidence/20260811-local-llm-foundry/phase-13/windows-macos-visual-parity-ledger.md`.

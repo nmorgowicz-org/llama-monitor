@@ -171,7 +171,7 @@ These decisions are authoritative unless Nick explicitly changes them:
 | Backend terminology | Keep `llama.cpp`, `llama-server`, `llama` modules, GGUF, MLX, and Rapid-MLX where they describe technology rather than the old product |
 | Historical records | Do not rewrite old release notes, benchmark receipts, or historical plans as if they used the new name; label them historical when needed |
 | Runtime compatibility window | Accept supported legacy runtime names for all of 2.x; removal is no earlier than 3.0 |
-| 2.0 public cutover | One coordinated big-bang launch; no public 2.0 announcement until rebrand, migration, updater, repository, and release gates pass |
+| 2.0 release/share cutover | One coordinated big-bang release; share the update with the small friend/tester group after rebrand, migration, updater, repository, and release gates pass |
 | Cleanup policy | No automatic deletion of the old application root or external models |
 | Logo production policy | The generated PNG is direction artwork, not a shippable master; redraw it as deterministic SVG |
 
@@ -1635,12 +1635,13 @@ Stop on stale assets, wrong build, missing manifest, unexpected output, old
 brand, poor small-size rendering, light-theme mismatch, or native icon failure.
 Fix and recapture; never edit screenshots.
 
-### Phase 14 — 2.0 cutover, bridge-release proof, and announcement
+### Phase 14 — 2.0 cutover, bridge-release proof, and release handoff
 
 **Objective**
 
-Publish 2.0 safely, prove real 1.x upgrade and migration behavior, and announce
-only after release artifacts are complete.
+Publish 2.0 safely, prove real 1.x upgrade and migration behavior, and prepare
+the update handoff for the project owner’s friends/testers. There is no formal
+public announcement, launch campaign, or announcement-approval gate.
 
 **Prerequisites and serialization**
 
@@ -1665,9 +1666,10 @@ only after release artifacts are complete.
    migration state; proves restarted 2.0 health and receipt.
 9. Run fresh 2.0 install and old-root migration probes on native platforms.
 10. Verify old/new repository, release, API, and git URLs once more.
-11. Keep the release unannounced until all probes pass. The workflow’s
-    publish-before-assets window is not acceptable proof of readiness.
-12. Announce 2.0, publish the upgrade guide, and update external integrations.
+11. Keep the friend/tester update handoff pending until all probes pass. The
+    workflow’s publish-before-assets window is not acceptable proof of readiness.
+12. Share the 2.0 update with the intended friends/testers, publish the upgrade
+    guide, and update any external integrations that are actually in use.
 13. Monitor issues/update failures/migration failures and retain rollback
     authority through the acceptance window.
 
@@ -1675,19 +1677,20 @@ only after release artifacts are complete.
 
 - `release-contract.json`, downloaded asset manifest, hashes, archive listings,
   v1.8.1 probe logs, fresh/migration receipts, URLs, workflow runs, final
-  screenshot manifest, and announcement approval.
+  screenshot manifest, and release-handoff record.
 
 **Pass gate**
 
-2.0 is publicly available with complete dual assets, real old-client update and
-old-root migration proof, correct repository identity, and no unresolved
-release-blocking defect.
+2.0 is available with complete dual assets, real old-client update and old-root
+migration proof, correct repository identity, and no unresolved release-blocking
+defect; the owner can safely share the update with the intended testers.
 
 **Stop/rollback**
 
-- Before announcement: mark release prerelease/draft if safely supported,
-  unpublish only with Nick authorization, fix forward, and preserve artifacts.
-- After announcement: prefer a fast 2.0.1 fix with both asset families.
+- Before the friend/tester handoff: mark release prerelease/draft if safely
+  supported, unpublish only with Nick authorization, fix forward, and preserve
+  artifacts.
+- After the handoff: prefer a fast 2.0.1 fix with both asset families.
 - Repository reversal, tag deletion, or release deletion are destructive and
   require Nick’s explicit direction.
 - Data migration rollback follows receipts; never instruct users to copy live
@@ -2032,7 +2035,7 @@ documentation-referenced images to flat `docs/screenshots/`.
 | Old clients cannot update | Legacy assets through 2.0.x latest releases and a gated 2.1.0 cutover | Frozen parser and real v1.8.1 probes | Fix-forward release with both families before 2.1.0 | Phases 11, 14 |
 | Checksum unavailable | Preserve checksum asset in release model | Focused parser/retrieval test | Block self-update/release | Phase 9 |
 | Wrong major version | Breaking PR contract and release-PR gate | Inspect generated 2.0.0 PR | Do not merge; use supported override | Phases 11, 14 |
-| Release visible before assets | No announcement until artifact probes | GitHub asset/checksum manifest | Mark prerelease/draft if authorized; fix forward | Phase 14 |
+| Release visible before assets | Do not share the update until artifact probes | GitHub asset/checksum manifest | Mark prerelease/draft if authorized; fix forward | Phase 14 |
 | Repository integration loss | Pre-rename external inventory/freeze | Post-rename live checks | Authorized rename reversal before release | Phase 11 |
 | Runner label outage | Keep old labels until replacements exist | Queue/runs-on verification | Restore old labels | Phase 11 |
 | Browser preference loss | Freeze storage keys in 2.x | Full preference round-trip | Revert UI write changes | Phase 8 |
@@ -2086,7 +2089,8 @@ phase gate closes. Do not create one giant “rebrand” commit.
 - Nick performs the repository rename at the Phase 11 stop point.
 - Merge implementation only after post-rename validation.
 - Merge release-please only if the generated release is exactly 2.0.0.
-- Do not announce until Phase 14’s real artifact/update/migration probes pass.
+- Do not share the update with the intended testers until Phase 14’s real
+  artifact/update/migration probes pass.
 
 ## 16. Compatibility and deprecation timeline
 
