@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 pub mod jobs;
 pub mod paths;
 
+pub mod analysis;
 pub mod candidates;
 pub mod design;
 pub mod executor;
@@ -197,6 +198,8 @@ pub struct CalibrationReceipt {
     pub measurement: CalibrationMeasurement,
     pub budget: CalibrationBudget,
     pub candidate_results: Vec<CalibrationCandidateResult>,
+    #[serde(default)]
+    pub analysis: analysis::CalibrationAnalysis,
     pub selected_candidate: Option<String>,
     pub preset_id: String,
     pub preset_fingerprint: String,

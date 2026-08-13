@@ -568,6 +568,7 @@ async fn run_job(
         .find(|result| result.candidate.id == "baseline")
         .map(|result| result.measurement.clone())
         .unwrap_or_default();
+    let analysis = super::analysis::analyze(&candidate_results);
     let receipt = CalibrationReceipt {
         schema_version: super::CALIBRATION_SCHEMA_VERSION,
         method_version: if budget == CalibrationBudget::Balanced {
@@ -585,6 +586,7 @@ async fn run_job(
         measurement,
         budget,
         candidate_results,
+        analysis,
         selected_candidate,
         preset_id: preset.id.clone(),
         preset_fingerprint: fingerprint.clone(),

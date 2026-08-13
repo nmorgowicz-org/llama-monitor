@@ -1,0 +1,202 @@
+//! Pure analysis of measured Calibration rows.
+//!
+//! This module never launches a process and never treats predicted values as
+//! measurements. Invalid rows are excluded from winners and Pareto results.
+
+use super::{CalibrationCandidateResult, TrialStatus};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CandidateAnalysis {
+    pub candidate_id: String,
+    pub status: Option<TrialStatus>,
+    pub median_pp_tps: f64,
+    pub median_tg_tps: f64,
+    pub median_effective_tps: f64,
+    pub spread_tg_tps: f64,
+    pub baseline_delta_tg_tps: Option<f64>,
+    pub context_size: Option<u64>,
+    pub pareto: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CalibrationAnalysis {
+    pub candidates: Vec<CandidateAnalysis>,
+    pub pareto_candidate_ids: Vec<String>,
+    pub fastest_candidate: Option<String>,
+    pub balanced_candidate: Option<String>,
+    pub max_context_candidate: Option<String>,
+}
+
+pub fn analyze(results: &[CalibrationCandidateResult]) -> CalibrationAnalysis {
+    let baseline = results
+        .iter()
+        .find(|result| result.candidate.id == "baseline" && valid(&result.measurement));
+    let baseline_tg = baseline.map(|result| median(&result.measurement.tg_tps_samples));
+    let mut candidates = results
+        .iter()
+        .map(|result| CandidateAnalysis {
+            candidate_id: result.candidate.id.clone(),
+            status: result.measurement.status,
+            median_pp_tps: median(&result.measurement.pp_tps_samples),
+            median_tg_tps: median(&result.measurement.tg_tps_samples),
+            median_effective_tps: median(&result.measurement.effective_tps_samples),
+            spread_tg_tps: relative_spread(&result.measurement.tg_tps_samples),
+            baseline_delta_tg_tps: baseline_tg
+                .map(|value| median(&result.measurement.tg_tps_samples) - value),
+            context_size: result.candidate.typed_patch.context_size,
+            pareto: false,
+        })
+        .collect::<Vec<_>>();
+
+    let pareto_ids = pareto_frontier(&candidates);
+    for candidate in &mut candidates {
+        candidate.pareto = pareto_ids.iter().any(|id| id == &candidate.candidate_id);
+    }
+    let fastest = best_by(&candidates, |candidate| candidate.median_tg_tps);
+    let balanced = best_by(&candidates, |candidate| candidate.median_effective_tps);
+    let max_context = candidates
+        .iter()
+        .filter(|candidate| valid_analysis(candidate) && candidate.context_size.is_some())
+        .max_by(|left, right| {
+            left.context_size
+                .cmp(&right.context_size)
+                .then_with(|| {
+                    left.median_effective_tps
+                        .total_cmp(&right.median_effective_tps)
+                })
+                .then_with(|| right.candidate_id.cmp(&left.candidate_id))
+        })
+        .map(|candidate| candidate.candidate_id.clone());
+
+    CalibrationAnalysis {
+        candidates,
+        pareto_candidate_ids: pareto_ids,
+        fastest_candidate: fastest,
+        balanced_candidate: balanced,
+        max_context_candidate: max_context,
+    }
+}
+
+fn pareto_frontier(candidates: &[CandidateAnalysis]) -> Vec<String> {
+    candidates
+        .iter()
+        .filter(|candidate| valid_analysis(candidate))
+        .filter(|candidate| {
+            !candidates.iter().any(|other| {
+                valid_analysis(other)
+                    && other.candidate_id != candidate.candidate_id
+                    && other.median_effective_tps >= candidate.median_effective_tps
+                    && other.context_size.unwrap_or(0) >= candidate.context_size.unwrap_or(0)
+                    && (other.median_effective_tps > candidate.median_effective_tps
+                        || other.context_size.unwrap_or(0) > candidate.context_size.unwrap_or(0))
+            })
+        })
+        .map(|candidate| candidate.candidate_id.clone())
+        .collect()
+}
+
+fn best_by<F>(candidates: &[CandidateAnalysis], score: F) -> Option<String>
+where
+    F: Fn(&CandidateAnalysis) -> f64,
+{
+    candidates
+        .iter()
+        .filter(|candidate| valid_analysis(candidate))
+        .max_by(|left, right| {
+            score(left)
+                .total_cmp(&score(right))
+                .then_with(|| right.candidate_id.cmp(&left.candidate_id))
+        })
+        .map(|candidate| candidate.candidate_id.clone())
+}
+
+fn valid(result: &super::CalibrationMeasurement) -> bool {
+    result.status == Some(TrialStatus::Ok)
+        && result
+            .tg_tps_samples
+            .iter()
+            .any(|v| v.is_finite() && *v > 0.0)
+}
+
+fn valid_analysis(candidate: &CandidateAnalysis) -> bool {
+    candidate.status == Some(TrialStatus::Ok)
+        && candidate.median_tg_tps.is_finite()
+        && candidate.median_tg_tps > 0.0
+}
+
+fn median(values: &[f64]) -> f64 {
+    let mut sorted = values
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .collect::<Vec<_>>();
+    if sorted.is_empty() {
+        return 0.0;
+    }
+    sorted.sort_by(f64::total_cmp);
+    sorted[sorted.len() / 2]
+}
+
+fn relative_spread(values: &[f64]) -> f64 {
+    let center = median(values);
+    if center <= 0.0 {
+        return 0.0;
+    }
+    let deviations = values
+        .iter()
+        .filter(|value| value.is_finite() && **value > 0.0)
+        .map(|value| (*value - center).abs())
+        .collect::<Vec<_>>();
+    median(&deviations) / center
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::calibration::LlamaCppCalibrationPatch;
+
+    fn row(
+        id: &str,
+        tg: &[f64],
+        effective: &[f64],
+        context: Option<u64>,
+    ) -> CalibrationCandidateResult {
+        CalibrationCandidateResult {
+            candidate: crate::calibration::CalibrationCandidate {
+                id: id.into(),
+                typed_patch: LlamaCppCalibrationPatch {
+                    context_size: context,
+                    ..Default::default()
+                },
+                capability_evidence: Vec::new(),
+                predicted_memory_bytes: None,
+            },
+            measurement: crate::calibration::CalibrationMeasurement {
+                trial_id: id.into(),
+                status: Some(TrialStatus::Ok),
+                tg_tps_samples: tg.into(),
+                effective_tps_samples: effective.into(),
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn labels_deltas_and_pareto_are_measured_and_deterministic() {
+        let analysis = analyze(&[
+            row("baseline", &[10.0, 12.0], &[8.0], Some(4096)),
+            row("fast", &[20.0, 21.0], &[15.0], Some(4096)),
+            row("context", &[14.0, 15.0], &[11.0], Some(8192)),
+            row("bad", &[f64::NAN], &[f64::NAN], Some(65536)),
+        ]);
+        assert_eq!(analysis.fastest_candidate.as_deref(), Some("fast"));
+        assert_eq!(analysis.balanced_candidate.as_deref(), Some("fast"));
+        assert_eq!(analysis.max_context_candidate.as_deref(), Some("context"));
+        assert_eq!(analysis.pareto_candidate_ids, ["fast", "context"]);
+        assert_eq!(analysis.candidates[1].baseline_delta_tg_tps, Some(9.0));
+        assert!(!analysis.candidates[3].pareto);
+    }
+}
