@@ -71,9 +71,15 @@ pub struct ApplyCalibrationRequest {
     #[serde(default = "default_create_derived")]
     pub create_derived: bool,
     pub exact_confirmation: Option<String>,
+    #[serde(default = "default_validate_after_apply")]
+    pub validate_after_apply: bool,
 }
 
 fn default_create_derived() -> bool {
+    true
+}
+
+fn default_validate_after_apply() -> bool {
     true
 }
 
@@ -84,6 +90,7 @@ pub struct ApplyCalibrationResult {
     pub candidate_id: String,
     pub before_fingerprint: String,
     pub after_fingerprint: String,
+    pub validation: String,
 }
 
 pub fn confirmation_phrase() -> &'static str {
@@ -585,7 +592,130 @@ pub fn apply(
         candidate_id,
         before_fingerprint: before,
         after_fingerprint: after,
+        validation: "not_run".into(),
     })
+}
+
+/// Apply a measured candidate, then run one bounded real llama-bench check. If
+/// the check is not valid, restore the exact prior source preset (or remove the
+/// derived preset) before returning an error. The active inference session is
+/// never touched by this validation.
+pub async fn apply_with_validation(
+    config: &AppConfig,
+    state: &AppState,
+    job_id: &str,
+    request: ApplyCalibrationRequest,
+) -> Result<ApplyCalibrationResult> {
+    let source_id = if request.target_preset_id.is_empty() {
+        get_receipt(config, job_id)?
+            .ok_or_else(|| anyhow!("Calibration receipt not found"))?
+            .preset_id
+    } else {
+        request.target_preset_id.clone()
+    };
+    let before = find_preset(state, &source_id)?;
+    let derived = request.create_derived;
+    let mut result = apply(config, state, job_id, request.clone())?;
+    if !request.validate_after_apply {
+        return Ok(result);
+    }
+
+    let applied = find_preset(state, &result.preset_id)?;
+    let receipt = get_receipt(config, job_id)?
+        .ok_or_else(|| anyhow!("Calibration receipt not found after apply"))?;
+    let workload = receipt.fingerprint.workload;
+    let model_path = resolve_model_path(config, &applied.model_path)?;
+    let bench_path = llama_bench_path(&config.llama_server_path);
+    let ngl = applied.gpu_layers.unwrap_or(99);
+    let flash_attn = matches!(applied.flash_attn.trim(), "on" | "1" | "true");
+    let ctk = non_empty_or(&applied.ctk, "q8_0");
+    let ctv = non_empty_or(&applied.ctv, "q8_0");
+    let batch_size = if applied.batch_size == 0 {
+        2048
+    } else {
+        applied.batch_size
+    };
+    let ubatch_size = if applied.ubatch_size == 0 {
+        512
+    } else {
+        applied.ubatch_size
+    };
+    let depth = workload.minimum_context.clamp(1, 4096);
+    let measurement = match run_sweep_with_tokens(
+        &bench_path,
+        &config.llama_server_cwd,
+        &model_path.to_string_lossy(),
+        ngl,
+        flash_attn,
+        &ctk,
+        &ctv,
+        batch_size,
+        ubatch_size,
+        &[depth],
+        applied.n_cpu_moe,
+        workload.prompt_tokens.min(512),
+        workload.generation_tokens.min(256),
+    )
+    .await
+    {
+        Ok(points) => measurement_from_points(points),
+        Err(error) => CalibrationMeasurement {
+            trial_id: result.candidate_id.clone(),
+            status: Some(TrialStatus::Error),
+            bounded_diagnostics: vec![sanitize_error(&error)],
+            ..Default::default()
+        },
+    };
+    let validation = if measurement.status == Some(TrialStatus::Ok) {
+        "passed"
+    } else {
+        "failed_rolled_back"
+    };
+    update_apply_validation(config, job_id, validation)?;
+    if validation != "passed" {
+        rollback_immediate(config, state, &result.preset_id, derived, &before)?;
+        bail!("Post-apply Calibration validation failed; the preset was rolled back")
+    }
+    result.validation = validation.into();
+    Ok(result)
+}
+
+fn update_apply_validation(config: &AppConfig, job_id: &str, validation: &str) -> Result<()> {
+    let path = config
+        .app_paths
+        .calibration_receipts_dir()
+        .join(format!("{job_id}.json"));
+    let bytes = fs::read(&path)?;
+    let mut receipt: CalibrationReceipt = serde_json::from_slice(&bytes)?;
+    if let Some(record) = receipt.apply_history.last_mut() {
+        record.validation = validation.into();
+    }
+    write_receipt(&path, &receipt)
+}
+
+fn rollback_immediate(
+    config: &AppConfig,
+    state: &AppState,
+    applied_id: &str,
+    derived: bool,
+    before: &ModelPreset,
+) -> Result<()> {
+    let mut presets = state
+        .presets
+        .lock()
+        .map_err(|_| anyhow!("Preset store unavailable"))?
+        .clone();
+    if derived {
+        presets.retain(|preset| preset.id != applied_id);
+    } else if let Some(slot) = presets.iter_mut().find(|preset| preset.id == applied_id) {
+        *slot = before.clone();
+    } else {
+        bail!("Applied preset disappeared during validation")
+    }
+    presets::save_presets(&config.presets_file, &presets)
+        .context("persist Calibration rollback")?;
+    *state.presets.lock().unwrap() = presets;
+    Ok(())
 }
 
 fn select_winner(results: &[CalibrationCandidateResult]) -> Option<String> {

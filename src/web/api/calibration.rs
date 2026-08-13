@@ -65,6 +65,7 @@ fn api_apply(
     state: AppState,
     config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let apply_state = state.clone();
     warp::path!("api" / "calibrations" / String / "apply")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
@@ -75,24 +76,29 @@ fn api_apply(
                   auth: Option<String>,
                   request: ApplyCalibrationRequest,
                   cfg: Arc<AppConfig>| {
-                if !check_db_admin_token(&auth, &cfg) {
-                    return futures_util::future::ready(Ok(unauthorized_db_admin_token()));
-                }
-                let response = match executor::apply(&cfg, &state, &id, request) {
-                    Ok(result) => warp::reply::with_status(
-                        warp::reply::json(&serde_json::json!({"ok": true, "apply": result})),
-                        warp::http::StatusCode::OK,
-                    ),
-                    Err(error) => warp::reply::with_status(
-                        warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": error.to_string()}),
+                let state = apply_state.clone();
+                async move {
+                    if !check_db_admin_token(&auth, &cfg) {
+                        return Ok::<Box<dyn warp::Reply>, warp::Rejection>(Box::new(
+                            unauthorized_db_admin_token(),
+                        ));
+                    }
+                    let response = match executor::apply_with_validation(&cfg, &state, &id, request)
+                        .await
+                    {
+                        Ok(result) => warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({"ok": true, "apply": result})),
+                            warp::http::StatusCode::OK,
                         ),
-                        warp::http::StatusCode::BAD_REQUEST,
-                    ),
-                };
-                futures_util::future::ready(Ok::<Box<dyn warp::Reply>, warp::Rejection>(Box::new(
-                    response,
-                )))
+                        Err(error) => warp::reply::with_status(
+                            warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": error.to_string()}),
+                            ),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ),
+                    };
+                    Ok::<Box<dyn warp::Reply>, warp::Rejection>(Box::new(response))
+                }
             },
         )
 }
