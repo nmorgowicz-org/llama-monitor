@@ -94,6 +94,9 @@ capture harness now supplies an explicit temporary config root and isolated
 Windows profile variables; those groups must be recaptured before visual
 acceptance.
 
+The detailed pair manifest and review order live in
+`docs/plans/evidence/20260811-local-llm-foundry/phase-13/windows-macos-visual-parity-ledger.md`.
+
 ### Phase closure blockers
 
 These are the specific reasons an earlier phase remains open; they are

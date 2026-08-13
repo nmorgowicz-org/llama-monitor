@@ -64,6 +64,10 @@ receipts; if cross-platform Rapid UI coverage becomes a release requirement,
 introduce an explicit fixture-mode contract and keep it separate from live
 runtime scenarios.
 
+Use the parity ledger at
+`docs/plans/evidence/20260811-local-llm-foundry/phase-13/windows-macos-visual-parity-ledger.md`
+for the pair manifest, high-impact review order, and acceptance classifications.
+
 ## Starting context
 
 - Repository: `nmorgowicz-org/local-llm-foundry`
