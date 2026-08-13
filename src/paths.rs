@@ -131,6 +131,22 @@ impl AppPaths {
         self.root.join("logs")
     }
 
+    pub fn calibrations_dir(&self) -> PathBuf {
+        self.root.join("calibrations")
+    }
+
+    pub fn calibration_index_file(&self) -> PathBuf {
+        self.calibrations_dir().join("index.json")
+    }
+
+    pub fn calibration_jobs_dir(&self) -> PathBuf {
+        self.calibrations_dir().join("jobs")
+    }
+
+    pub fn calibration_receipts_dir(&self) -> PathBuf {
+        self.calibrations_dir().join("receipts")
+    }
+
     pub fn presets_file(&self) -> PathBuf {
         self.config_file("presets.json")
     }

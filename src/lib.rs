@@ -3,6 +3,7 @@
 pub mod acme;
 pub mod agent;
 pub mod app_migration;
+pub mod calibration;
 pub mod certs;
 pub mod chat_storage;
 pub mod cli;
