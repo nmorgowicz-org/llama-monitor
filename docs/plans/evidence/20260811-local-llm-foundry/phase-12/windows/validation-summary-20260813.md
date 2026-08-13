@@ -28,6 +28,7 @@
 - Font-scale probe reported root/body sizes of `14.4px`, `16px`, and `19.2px`
   for `0.9`, `1.0`, and `1.2` respectively. Responsive clamp headings remain
   viewport-bounded as documented in the font plan.
+- Focused native Windows Playwright font-scale test passed (`1 passed`).
 
 ## Still open
 
