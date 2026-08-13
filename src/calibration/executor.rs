@@ -898,6 +898,34 @@ fn select_winner(results: &[CalibrationCandidateResult]) -> Option<String> {
         .map(|result| result.candidate.id.clone())
 }
 
+/// Select the measured Balanced candidates that are eligible for a second,
+/// independent verification pass. Baseline is excluded because it is the
+/// control; only successful finite decode measurements can consume the two
+/// verification slots. Ordering is deterministic for equal medians.
+#[allow(dead_code)]
+fn select_verification_candidates(
+    results: &[CalibrationCandidateResult],
+) -> Vec<CalibrationCandidate> {
+    let mut eligible = results
+        .iter()
+        .filter(|result| {
+            result.candidate.id != "baseline"
+                && result.measurement.status == Some(TrialStatus::Ok)
+                && !median(&result.measurement.tg_tps_samples).is_nan()
+        })
+        .collect::<Vec<_>>();
+    eligible.sort_by(|left, right| {
+        median(&right.measurement.tg_tps_samples)
+            .total_cmp(&median(&left.measurement.tg_tps_samples))
+            .then_with(|| left.candidate.id.cmp(&right.candidate.id))
+    });
+    eligible
+        .into_iter()
+        .take(super::candidates::BALANCED_MAX_VERIFICATION_CANDIDATES)
+        .map(|result| result.candidate.clone())
+        .collect()
+}
+
 fn median(values: &[f64]) -> f64 {
     if values.is_empty() {
         return 0.0;
@@ -1153,6 +1181,36 @@ mod tests {
             tg_tps: 0.0,
         }]);
         assert_eq!(measurement.status, Some(TrialStatus::Implausible));
+    }
+
+    #[test]
+    fn verification_selection_is_bounded_and_deterministic() {
+        let candidate = |id: &str, tg: f64| CalibrationCandidateResult {
+            candidate: CalibrationCandidate {
+                id: id.into(),
+                typed_patch: LlamaCppCalibrationPatch::default(),
+                capability_evidence: Vec::new(),
+                predicted_memory_bytes: None,
+            },
+            measurement: CalibrationMeasurement {
+                status: Some(TrialStatus::Ok),
+                tg_tps_samples: vec![tg],
+                ..Default::default()
+            },
+        };
+        let selected = select_verification_candidates(&[
+            candidate("baseline", 100.0),
+            candidate("b", 120.0),
+            candidate("a", 120.0),
+            candidate("c", 130.0),
+        ]);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|candidate| candidate.id.as_str())
+                .collect::<Vec<_>>(),
+            ["c", "a"]
+        );
     }
 
     #[test]

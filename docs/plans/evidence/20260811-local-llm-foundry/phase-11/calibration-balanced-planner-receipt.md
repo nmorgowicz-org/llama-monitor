@@ -32,7 +32,7 @@ pick verification are complete.
 ```text
 cargo fmt                         PASS
 cargo clippy -- -D warnings      PASS
-cargo test calibration:: --lib    PASS — 20 tests
+cargo test calibration:: --lib    PASS — 22 tests
 cargo check                       PASS
 git diff --check                  PASS
 ```
