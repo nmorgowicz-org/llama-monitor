@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 
 pub mod jobs;
 
+pub mod executor;
+
 pub const CALIBRATION_SCHEMA_VERSION: u32 = 1;
 pub const CALIBRATION_FACTOR_CATALOG_VERSION: u32 = 1;
 
@@ -156,6 +158,31 @@ pub struct StartCalibrationRequest {
     pub max_context: Option<u64>,
     pub allow_stop_active_server: bool,
     pub exact_confirmation: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct LlamaCppCalibrationPatch {
+    pub gpu_layers: Option<i32>,
+    pub context_size: Option<u64>,
+    pub threads: Option<i32>,
+    pub threads_batch: Option<i32>,
+    pub ctk: Option<String>,
+    pub ctv: Option<String>,
+    pub batch_size: Option<u32>,
+    pub ubatch_size: Option<u32>,
+    pub flash_attn: Option<bool>,
+    pub n_cpu_moe: Option<i32>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CalibrationReceipt {
+    pub schema_version: u32,
+    pub method_version: String,
+    pub job_id: String,
+    pub fingerprint: CalibrationFingerprint,
+    pub measurement: CalibrationMeasurement,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

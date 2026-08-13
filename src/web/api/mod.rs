@@ -6,6 +6,7 @@ mod app_home_migration;
 mod auth;
 mod benchmark;
 mod browse;
+mod calibration;
 mod chat;
 pub(crate) mod system_tools;
 #[cfg(test)]
@@ -85,6 +86,7 @@ pub fn api_routes(
     let spawn_wizard_routes = spawn_wizard::routes(ctx.clone());
     let vram_routes = vram::routes(ctx.clone());
     let benchmark_routes = benchmark::routes(ctx.clone());
+    let calibration_routes = calibration::routes(ctx.clone());
     let hf_routes = hf::routes(ctx.clone());
     let system_tools_routes = system_tools::routes(ctx.clone());
 
@@ -109,6 +111,7 @@ pub fn api_routes(
         .or(spawn_wizard_routes)
         .or(vram_routes)
         .or(benchmark_routes)
+        .or(calibration_routes)
         .or(hf_routes)
         .or(system_tools_routes)
         .or(sleep::routes(ctx.clone()))

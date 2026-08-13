@@ -1,6 +1,6 @@
 # Hardware-native llama.cpp calibration inspired by `llama-optimize`
 
-**State:** Approved as a bounded Local LLM Foundry 2.0.0 release requirement; Phase 0/1 foundation is in progress. Rapid-MLX benchmark classification is now informational-only (`classify_rapid_mlx_benchmark_result`), and typed fingerprints, workload/request contracts, active-root receipt paths, and durable journal/snapshot primitives are covered by focused Rust tests and clippy. The remaining Phase 0 discovery, introspection, qualification, executor/API, and documentation gates are open.
+**State:** Approved as a bounded Local LLM Foundry 2.0.0 release requirement; the Phase 1 single-trial boundary is in progress. Rapid-MLX benchmark classification is informational-only (`classify_rapid_mlx_benchmark_result`); typed fingerprints, workload/request contracts, active-root receipt paths, durable journal/snapshot primitives, and an authenticated llama.cpp-only Quick single-trial executor/API pass the full Rust suite, release build, focused tests, clippy, and diff checks. Upstream pin/evidence, full introspection/capability qualification, Quick/Balanced search, transactional apply, UI, and Phase 10 gates remain open.
 **Date:** 2026-08-13
 **Primary owner:** Luna, executed phase-by-phase with one focused verifier after each hard gate.
 **Target release:** 2.0.0 for the bounded llama.cpp Calibration v1 scope below; advanced stages remain post-2.0 follow-ups.

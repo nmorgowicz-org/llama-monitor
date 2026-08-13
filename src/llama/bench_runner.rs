@@ -175,6 +175,43 @@ pub async fn run_sweep(
     depths: &[u64],
     n_cpu_moe: Option<i32>,
 ) -> Result<Vec<SweepPoint>, String> {
+    run_sweep_with_tokens(
+        bench_bin,
+        cwd,
+        model_path,
+        ngl,
+        flash_attn,
+        ctk,
+        ctv,
+        batch_size,
+        ubatch_size,
+        depths,
+        n_cpu_moe,
+        512,
+        64,
+    )
+    .await
+}
+
+/// Run a bounded depth sweep with explicit prompt and generation lengths.
+/// Calibration uses this form so the workload recorded in its receipt is the
+/// workload actually measured.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_sweep_with_tokens(
+    bench_bin: &Path,
+    cwd: &Path,
+    model_path: &str,
+    ngl: i32,
+    flash_attn: bool,
+    ctk: &str,
+    ctv: &str,
+    batch_size: u32,
+    ubatch_size: u32,
+    depths: &[u64],
+    n_cpu_moe: Option<i32>,
+    prompt_tokens: u32,
+    generation_tokens: u32,
+) -> Result<Vec<SweepPoint>, String> {
     if depths.is_empty() {
         return Err("No depths requested".into());
     }
@@ -189,9 +226,9 @@ pub async fn run_sweep(
         n_cpu_moe,
     );
     args.push("-p".into());
-    args.push("512".into());
+    args.push(prompt_tokens.to_string());
     args.push("-n".into());
-    args.push("64".into());
+    args.push(generation_tokens.to_string());
     args.push("-d".into());
     args.push(
         depths

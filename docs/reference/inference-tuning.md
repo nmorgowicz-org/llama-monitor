@@ -417,6 +417,34 @@ llama-bench -m <moe.gguf> -ngl 99 -fa 1 --n-cpu-moe 48 -n 64 -r 1   # then 40, 3
 - `-r` is repetitions (higher = less noise, slower). Use `-r 1` for quick depth
   sweeps, `-r 2+` for numbers you'll publish.
 
+### Calibration (bounded v1)
+
+Calibration is the evidence-first path for llama.cpp tuning. The current
+release boundary exposes a single, explicitly confirmed Quick baseline trial;
+it does not stop an active server, mutate presets, or emit Rapid-MLX settings.
+The job records durable journal transitions and a redacted receipt under the
+active application home, and an interrupted trial is surfaced as a suspected
+crash instead of being retried silently.
+
+The authenticated API is:
+
+- **POST `/api/calibrations/preflight`** with `{ "preset_id": "..." }` —
+  validates a local llama.cpp preset, configured managed `llama-bench`, model
+  library membership, and returns a redacted fingerprint plus one-trial plan.
+- **POST `/api/calibrations`** — starts the bounded trial. The request must
+  include the preflight fingerprint, `budget: "quick"`, and the exact
+  confirmation string returned by the application; active-server stop/restart
+  is not permitted in this version.
+- **GET `/api/calibrations/{id}`** — polls the durable job snapshot.
+- **POST `/api/calibrations/{id}/cancel`** — requests cancellation and cleans up
+  the owned benchmark process.
+
+Quick Calibration is intentionally a foundation for the later measured
+Pareto/Quick/Balanced funnel. It is not a claim that one baseline trial has
+found an optimal configuration. Rapid-MLX benchmark output remains
+informational-only until a separate backend-owned factor catalog and receipt
+qualification exists.
+
 ### Built-in tuning and benchmark endpoints
 
 The app exposes several POST endpoints (all require api-token auth) that automate
