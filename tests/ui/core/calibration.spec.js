@@ -167,6 +167,36 @@ test.describe('Calibration preset flow', () => {
         expect(applyBody.create_derived).toBe(true);
     });
 
+    test('successful apply exposes an explicit rollback action', async ({ page }) => {
+        await boot(page);
+        await installHappyCalibration(page);
+        await page.route('**/api/db/admin-token', route => route.fulfill({
+            status: 200, contentType: 'application/json', body: JSON.stringify({ token: 'db-admin' }),
+        }));
+        await page.route('**/api/calibrations/job-1/apply', route => route.fulfill({
+            status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, apply: {
+                preset_id: 'derived-1', derived: true, candidate_id: 'bounded-batch',
+                before_fingerprint: 'sha256:before', after_fingerprint: 'sha256:after', validation: 'passed',
+            } }),
+        }));
+        let rollbackBody = null;
+        await page.route('**/api/calibrations/job-1/rollback', async route => {
+            rollbackBody = JSON.parse(route.request().postData() || '{}');
+            await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, rollback: {} }) });
+        });
+        await openEditor(page);
+        await page.locator('#preset-modal-calibrate').click();
+        await page.locator('#calibration-start').click();
+        await expect(page.locator('#calibration-apply')).toBeEnabled({ timeout: 5000 });
+        await page.locator('#calibration-apply').click();
+        await page.locator('.app-confirm-overlay.active .btn-modal-save').click();
+        await expect(page.locator('#calibration-rollback')).toBeVisible();
+        await page.locator('#calibration-rollback').click();
+        await page.locator('.app-confirm-overlay.active .btn-modal-save').click();
+        await expect(page.locator('#calibration-rollback')).toBeDisabled();
+        expect(rollbackBody).toEqual({ expected_target_fingerprint: 'sha256:after', exact_confirmation: 'ROLLBACK_CALIBRATION' });
+    });
+
     test('Rapid-MLX presets never expose the llama.cpp Calibration action', async ({ page }) => {
         await boot(page);
         await page.evaluate(async (preset) => {

@@ -24,6 +24,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -91,6 +92,20 @@ pub struct ApplyCalibrationResult {
     pub before_fingerprint: String,
     pub after_fingerprint: String,
     pub validation: String,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+pub struct RollbackCalibrationRequest {
+    pub expected_target_fingerprint: String,
+    pub exact_confirmation: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RollbackCalibrationResult {
+    pub preset_id: String,
+    pub before_fingerprint: String,
+    pub after_fingerprint: String,
 }
 
 pub fn confirmation_phrase() -> &'static str {
@@ -484,9 +499,14 @@ async fn run_job(
 }
 
 const APPLY_CONFIRMATION: &str = "APPLY_CALIBRATION";
+const ROLLBACK_CONFIRMATION: &str = "ROLLBACK_CALIBRATION";
 
 pub fn apply_confirmation_phrase() -> &'static str {
     APPLY_CONFIRMATION
+}
+
+pub fn rollback_confirmation_phrase() -> &'static str {
+    ROLLBACK_CONFIRMATION
 }
 
 pub fn apply(
@@ -560,6 +580,15 @@ pub fn apply(
     } else {
         updated.id.clone()
     };
+    let rollback_id = crate::config::generate_random_token()
+        .chars()
+        .take(32)
+        .collect::<String>();
+    let rollback_path = config
+        .app_paths
+        .calibration_apply_backups_dir()
+        .join(format!("{rollback_id}.json"));
+    write_rollback_backup(&rollback_path, &presets[source_index])?;
     if derived {
         presets.push(updated.clone());
     } else {
@@ -577,6 +606,7 @@ pub fn apply(
             .duration_since(UNIX_EPOCH)
             .map_or(0, |duration| duration.as_millis()),
         validation: "not_run".into(),
+        rollback_id,
     };
     receipt.apply_history.push(record);
     if let Err(error) = write_receipt(&receipt_path, &receipt) {
@@ -594,6 +624,99 @@ pub fn apply(
         after_fingerprint: after,
         validation: "not_run".into(),
     })
+}
+
+pub fn rollback(
+    config: &AppConfig,
+    state: &AppState,
+    job_id: &str,
+    request: RollbackCalibrationRequest,
+) -> Result<RollbackCalibrationResult> {
+    if request.exact_confirmation.as_deref() != Some(ROLLBACK_CONFIRMATION) {
+        bail!("Exact confirmation ROLLBACK_CALIBRATION is required");
+    }
+    let receipt_path = config
+        .app_paths
+        .calibration_receipts_dir()
+        .join(format!("{job_id}.json"));
+    let bytes = fs::read(&receipt_path).map_err(|_| anyhow!("Calibration receipt not found"))?;
+    let mut receipt: CalibrationReceipt =
+        serde_json::from_slice(&bytes).context("Calibration receipt is invalid")?;
+    let record = receipt
+        .apply_history
+        .last()
+        .cloned()
+        .ok_or_else(|| anyhow!("Calibration receipt has no applied preset"))?;
+    if record.validation == "rolled_back" {
+        bail!("Calibration apply has already been rolled back");
+    }
+    let mut presets = state
+        .presets
+        .lock()
+        .map_err(|_| anyhow!("Preset store unavailable"))?
+        .clone();
+    let index = presets
+        .iter()
+        .position(|preset| preset.id == record.target_preset_id)
+        .ok_or_else(|| anyhow!("Applied preset no longer exists"))?;
+    let current = preset_fingerprint(&presets[index])?;
+    if !request.expected_target_fingerprint.is_empty()
+        && request.expected_target_fingerprint != current
+    {
+        bail!("Preset changed since Calibration apply; refresh before rolling back");
+    }
+    if current != record.after_fingerprint {
+        bail!("Applied preset changed since Calibration apply; rollback is unsafe");
+    }
+    let backup_path = config
+        .app_paths
+        .calibration_apply_backups_dir()
+        .join(format!("{}.json", record.rollback_id));
+    let backup = read_rollback_backup(&backup_path)?;
+    let before_fingerprint = preset_fingerprint(&backup)?;
+    if record.derived {
+        presets.remove(index);
+    } else {
+        presets[index] = backup;
+    }
+    presets::save_presets(&config.presets_file, &presets).context("save Calibration rollback")?;
+    let restored = if record.derived {
+        before_fingerprint
+    } else {
+        preset_fingerprint(&presets[index])?
+    };
+    receipt.apply_history.push(CalibrationApplyRecord {
+        validation: "rolled_back".into(),
+        ..record.clone()
+    });
+    write_receipt(&receipt_path, &receipt)?;
+    *state.presets.lock().unwrap() = presets;
+    Ok(RollbackCalibrationResult {
+        preset_id: record.target_preset_id,
+        before_fingerprint: current,
+        after_fingerprint: restored,
+    })
+}
+
+fn write_rollback_backup(path: &Path, preset: &ModelPreset) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let temporary = path.with_extension("json.tmp");
+    let encoded = serde_json::to_vec(preset).context("serialize Calibration rollback backup")?;
+    let mut file = fs::File::create(&temporary)?;
+    file.write_all(&encoded)?;
+    file.sync_all()?;
+    drop(file);
+    crate::config::harden_file_permissions(&temporary);
+    fs::rename(&temporary, path)?;
+    crate::config::harden_file_permissions(path);
+    Ok(())
+}
+
+fn read_rollback_backup(path: &Path) -> Result<ModelPreset> {
+    let bytes = fs::read(path).map_err(|_| anyhow!("Calibration rollback backup not found"))?;
+    serde_json::from_slice(&bytes).context("Calibration rollback backup is invalid")
 }
 
 /// Apply a measured candidate, then run one bounded real llama-bench check. If
@@ -985,5 +1108,20 @@ mod tests {
             tg_tps: 0.0,
         }]);
         assert_eq!(measurement.status, Some(TrialStatus::Implausible));
+    }
+
+    #[test]
+    fn rollback_backup_round_trips_a_preset() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("apply-backups").join("one.json");
+        let mut preset = ModelPreset::default();
+        preset.id = "source".into();
+        preset.name = "Source".into();
+        preset.api_key = Some("secret".into());
+        write_rollback_backup(&path, &preset).expect("write backup");
+        let restored = read_rollback_backup(&path).expect("read backup");
+        assert_eq!(restored.id, preset.id);
+        assert_eq!(restored.name, preset.name);
+        assert_eq!(restored.api_key, preset.api_key);
     }
 }

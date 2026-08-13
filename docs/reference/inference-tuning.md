@@ -420,11 +420,11 @@ llama-bench -m <moe.gguf> -ngl 99 -fa 1 --n-cpu-moe 48 -n 64 -r 1   # then 40, 3
 ### Calibration (bounded v1)
 
 Calibration is the evidence-first path for llama.cpp tuning. The current
-release boundary exposes a single, explicitly confirmed Quick baseline trial;
-it does not stop an active server, mutate presets, or emit Rapid-MLX settings.
-The job records durable journal transitions and a redacted receipt under the
-active application home, and an interrupted trial is surfaced as a suspected
-crash instead of being retried silently.
+release boundary exposes a bounded, explicitly confirmed Quick candidate set;
+it does not stop an active server or emit Rapid-MLX settings. The job records
+durable journal transitions and a receipt under the active application home,
+and an interrupted trial is surfaced as a suspected crash instead of being
+retried silently.
 
 The authenticated API is:
 
@@ -436,13 +436,22 @@ The authenticated API is:
   confirmation string returned by the application; active-server stop/restart
   is not permitted in this version.
 - **GET `/api/calibrations/{id}`** — polls the durable job snapshot.
+- **GET `/api/calibrations/{id}/receipt`** — reads the authenticated measured
+  receipt and apply history.
 - **POST `/api/calibrations/{id}/cancel`** — requests cancellation and cleans up
   the owned benchmark process.
 - **POST `/api/calibrations/{id}/apply`** — requires `db-admin-token`, the
   `APPLY_CALIBRATION` confirmation, and the expected target fingerprint. It
   creates a derived preset by default; updating the source preset is an
   explicit `create_derived: false` choice. Applying never changes the active
-  session and records before/after fingerprints in the receipt.
+  session, runs one bounded post-apply `llama-bench` validation by default,
+  and records before/after fingerprints plus validation status in the receipt.
+  A failed validation immediately restores the source or removes the derived
+  preset.
+- **POST `/api/calibrations/{id}/rollback`** — requires `db-admin-token`, the
+  `ROLLBACK_CALIBRATION` confirmation, and the applied preset fingerprint. It
+  restores the private pre-apply snapshot (or removes the derived preset) only
+  when the preset is unchanged since apply; conflicting edits fail closed.
 
 Quick Calibration is intentionally a foundation for the later measured
 Pareto/Quick/Balanced funnel. It is not a claim that one baseline trial has

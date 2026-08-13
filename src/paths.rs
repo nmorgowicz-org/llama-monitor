@@ -147,6 +147,10 @@ impl AppPaths {
         self.calibrations_dir().join("receipts")
     }
 
+    pub fn calibration_apply_backups_dir(&self) -> PathBuf {
+        self.calibrations_dir().join("apply-backups")
+    }
+
     pub fn presets_file(&self) -> PathBuf {
         self.config_file("presets.json")
     }

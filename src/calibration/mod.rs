@@ -217,6 +217,8 @@ pub struct CalibrationApplyRecord {
     pub after_fingerprint: String,
     pub timestamp_unix_ms: u128,
     pub validation: String,
+    #[serde(default)]
+    pub rollback_id: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

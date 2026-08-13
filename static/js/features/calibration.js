@@ -5,6 +5,7 @@ let currentJobId = null;
 let currentPreflight = null;
 let currentReceipt = null;
 let pollTimer = null;
+let lastApply = null;
 
 function apiHeaders(json = false) {
     const headers = window.authHeaders ? { ...window.authHeaders() } : {};
@@ -82,8 +83,11 @@ async function openCalibration() {
     setStatus('Validating preset, model library, and managed llama-bench…');
     document.getElementById('calibration-start').disabled = true;
     document.getElementById('calibration-apply').disabled = true;
+    document.getElementById('calibration-rollback').hidden = true;
+    document.getElementById('calibration-rollback').disabled = true;
     currentJobId = null;
     currentReceipt = null;
+    lastApply = null;
     try {
         const data = await requestJson('/api/calibrations/preflight', {
             method: 'POST',
@@ -190,7 +194,7 @@ async function applyCalibration() {
     );
     if (!confirmed) return;
     try {
-        await requestJson(`/api/calibrations/${encodeURIComponent(currentJobId)}/apply`, {
+        const applyData = await requestJson(`/api/calibrations/${encodeURIComponent(currentJobId)}/apply`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${tokenData.token}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -201,9 +205,43 @@ async function applyCalibration() {
                 exact_confirmation: 'APPLY_CALIBRATION',
             }),
         });
+        lastApply = applyData.apply;
         window.dispatchEvent(new CustomEvent('presets:reload'));
+        document.getElementById('calibration-apply').disabled = true;
+        const rollbackButton = document.getElementById('calibration-rollback');
+        rollbackButton.hidden = false;
+        rollbackButton.disabled = false;
+        setStatus(`Applied preset validated: ${applyData.apply.validation || 'complete'}. You can roll it back before closing.`);
         showToast('Derived calibrated preset created', 'success');
-        setModalOpen(false);
+    } catch (error) {
+        setError(error.message || String(error));
+    }
+}
+
+async function rollbackCalibration() {
+    if (!currentJobId || !lastApply) return;
+    const confirmed = await showConfirmDialog(
+        'Rollback calibrated preset',
+        'Restore the exact preset state captured before Calibration? The active session will remain unchanged.',
+        'Rollback preset',
+    );
+    if (!confirmed) return;
+    try {
+        const tokenResponse = await fetch('/api/db/admin-token', { headers: apiHeaders() });
+        const tokenData = tokenResponse.ok ? await tokenResponse.json().catch(() => ({})) : {};
+        if (!tokenData.token) throw new Error('The db-admin token is unavailable; no preset was changed.');
+        await requestJson(`/api/calibrations/${encodeURIComponent(currentJobId)}/rollback`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${tokenData.token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                expected_target_fingerprint: lastApply.after_fingerprint,
+                exact_confirmation: 'ROLLBACK_CALIBRATION',
+            }),
+        });
+        document.getElementById('calibration-rollback').disabled = true;
+        setStatus('Calibration apply rolled back. The source preset is restored.');
+        showToast('Calibration apply rolled back', 'success');
+        window.dispatchEvent(new CustomEvent('presets:reload'));
     } catch (error) {
         setError(error.message || String(error));
     }
@@ -213,6 +251,7 @@ export function initCalibrationUi() {
     document.getElementById('preset-modal-calibrate')?.addEventListener('click', openCalibration);
     document.getElementById('calibration-start')?.addEventListener('click', startCalibration);
     document.getElementById('calibration-apply')?.addEventListener('click', applyCalibration);
+    document.getElementById('calibration-rollback')?.addEventListener('click', rollbackCalibration);
     document.getElementById('calibration-cancel')?.addEventListener('click', cancelCalibration);
     document.getElementById('calibration-modal-close')?.addEventListener('click', cancelCalibration);
     document.getElementById('calibration-modal')?.addEventListener('click', (event) => {

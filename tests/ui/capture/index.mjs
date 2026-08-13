@@ -190,9 +190,9 @@ Examples:
   Note: RUNNING_PORT connects to an already-running llama-monitor (e.g. your production instance
 with a remote agent reporting GPU data). No binary is spawned; no temp config is seeded.
 
-Calibration capture is opt-in and requires `CALIBRATION_CAPTURE_MODEL=<local GGUF path>`;
-optionally set `CALIBRATION_CAPTURE_MODELS_DIR`, `CALIBRATION_CAPTURE_LLAMA_SERVER`, or
-`LLAMA_MONITOR_CAPTURE_CONFIG_DIR`. It performs real preflight only; benchmark lifecycle
+Calibration capture is opt-in and requires CALIBRATION_CAPTURE_MODEL=<local GGUF path>;
+optionally set CALIBRATION_CAPTURE_MODELS_DIR, CALIBRATION_CAPTURE_LLAMA_SERVER, or
+LLAMA_MONITOR_CAPTURE_CONFIG_DIR. It performs real preflight only; benchmark lifecycle
 responses are intercepted for stable screenshots.
 `);
 }
