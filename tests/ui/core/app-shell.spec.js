@@ -128,6 +128,22 @@ test.describe('modals and menus', () => {
     await expect(page.getByRole('button', { name: /open runtime configuration/i })).toBeVisible();
   });
 
+  test('font scale applies the explicit root baseline', async ({ page }) => {
+    await openSettings(page, 'appearance');
+    const scale = page.locator('#settings-appearance-font-scale');
+    await expect(scale).toBeVisible();
+
+    for (const value of ['0.9', '1', '1.2']) {
+      await scale.evaluate((element, nextValue) => {
+        element.value = nextValue;
+        element.dispatchEvent(new Event('input', { bubbles: true }));
+      }, value);
+      const expected = `${Number(value) * 16}px`;
+      await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).fontSize)).toBe(expected);
+      await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).fontSize)).toBe(expected);
+    }
+  });
+
   test('models modal opens and lists model discovery state', async ({ page }) => {
     // No dedicated Models button; open via JS helper
     await page.evaluate(async () => {
