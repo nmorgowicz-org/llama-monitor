@@ -1,13 +1,34 @@
 // Browser/page lifecycle: launch, navigate, wait-for-app, tab switching.
 // Extracted from tests/ui/capture.mjs (Phase A1).
 import puppeteer from 'puppeteer';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { DEFAULT_VIEWPORT, sleep } from './paths.mjs';
 
 export async function launchBrowser(viewport = DEFAULT_VIEWPORT) {
+    // Puppeteer's implicit Windows temp profile can retain a Chromium
+    // `lockfile` after a failed launch, causing every subsequent capture to
+    // report "browser is already running". An explicit unique profile avoids
+    // that process-singleton race on Windows and remains isolated per launch.
+    const userDataDir = mkdtempSync(join(tmpdir(), 'local-llm-foundry-capture-'));
     const browser = await puppeteer.launch({
         headless: 'new',
+        userDataDir,
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-cache', '--disable-service-workers'],
     });
+    const closeBrowser = browser.close.bind(browser);
+    browser.close = async (...args) => {
+        try {
+            await closeBrowser(...args);
+        } finally {
+            try {
+                rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+            } catch {
+                // Chromium may release profile files asynchronously on Windows.
+            }
+        }
+    };
     const page = await browser.newPage();
     await page.setCacheEnabled(false);
     await page.setViewport(viewport);
