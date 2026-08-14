@@ -21,6 +21,15 @@ The product should call the capability **Calibration**, not “llama-optimize,�
 
 The recommended implementation is a **native Rust calibration service** that borrows and verifies the upstream methodology while using llama-monitor's existing typed launch, model introspection, managed binaries, auth, job, preset, and UI systems. Do not ship the upstream Python program as the permanent product integration.
 
+### Current gate audit (2026-08-13)
+
+Phase 0 source-side gates pass: backend-qualified benchmark dispatch,
+metadata provenance, attribution, authentication/UI regressions, and the
+dedicated Phase 0 evidence receipt are complete. Native Windows capability and
+real-runtime receipts remain explicit Phase 10 return markers; they must not be
+inferred from macOS or GNU cross-compilation. Phase 1–4 lifecycle, evaluator,
+and design evidence gates remain open.
+
 ### 2.0.0 release boundary
 
 Calibration v1 is a required part of the Local LLM Foundry 2.0.0 product and release story. It must land before the rebrand plan's Phase 12 cross-platform/security qualification begins. Phase 12 and Phase 13 must qualify and visually accept Calibration together with migration, packaging, auth, runtime, and the rest of the release candidate; adding or materially changing it afterward reopens those gates.

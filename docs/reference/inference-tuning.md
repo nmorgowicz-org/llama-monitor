@@ -420,21 +420,24 @@ llama-bench -m <moe.gguf> -ngl 99 -fa 1 --n-cpu-moe 48 -n 64 -r 1   # then 40, 3
 ### Calibration (bounded v1)
 
 Calibration is the evidence-first path for llama.cpp tuning. The current
-release boundary exposes a bounded, explicitly confirmed Quick candidate set;
-it does not stop an active server or emit Rapid-MLX settings. The job records
+release boundary exposes bounded, explicitly confirmed Quick and Balanced
+candidate plans; Thorough search is not part of the 2.0 release contract. It
+does not stop an active server or emit Rapid-MLX settings. The job records
 durable journal transitions and a receipt under the active application home,
 and an interrupted trial is surfaced as a suspected crash instead of being
 retried silently.
 
 The authenticated API is:
 
-- **POST `/api/calibrations/preflight`** with `{ "preset_id": "..." }` —
-  validates a local llama.cpp preset, configured managed `llama-bench`, model
-  library membership, and returns a redacted fingerprint plus one-trial plan.
+- **POST `/api/calibrations/preflight`** with `{ "preset_id": "...",
+  "budget": "quick" | "balanced", "workload": { ... } }` — validates a
+  local llama.cpp preset, configured managed `llama-bench`, model library
+  membership, and returns a redacted fingerprint plus the bounded candidate
+  and verification-trial plan.
 - **POST `/api/calibrations`** — starts the bounded trial. The request must
-  include the preflight fingerprint, `budget: "quick"`, and the exact
-  confirmation string returned by the application; active-server stop/restart
-  is not permitted in this version.
+  include the preflight fingerprint, a supported `budget` (`quick` or
+  `balanced`), and the exact `CALIBRATE` confirmation string returned by the
+  application; active-server stop/restart is not permitted in this version.
 - **GET `/api/calibrations/{id}`** — polls the durable job snapshot.
 - **GET `/api/calibrations/{id}/receipt`** — reads the authenticated measured
   receipt and apply history.
@@ -453,9 +456,10 @@ The authenticated API is:
   restores the private pre-apply snapshot (or removes the derived preset) only
   when the preset is unchanged since apply; conflicting edits fail closed.
 
-Quick Calibration is intentionally a foundation for the later measured
-Pareto/Quick/Balanced funnel. It is not a claim that one baseline trial has
-found an optimal configuration. Rapid-MLX benchmark output remains
+Quick and Balanced Calibration report measured candidate results, baseline
+deltas, Pareto tradeoffs, and confidence/noise warnings. They are not a claim
+that one run has found an optimal configuration: Balanced verification remains
+bounded and Thorough refinement is deferred. Rapid-MLX benchmark output remains
 informational-only until a separate backend-owned factor catalog and receipt
 qualification exists.
 

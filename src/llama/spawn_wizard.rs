@@ -8,6 +8,7 @@
 //! - Third-party model import helpers.
 //! - Model introspection via llama.cpp.
 
+use crate::inference::InferenceBackend;
 use crate::llama::batch_import;
 use crate::llama::vram_estimator;
 use std::fs;
@@ -255,6 +256,38 @@ pub fn classify_rapid_mlx_benchmark_result(
         verdict: verdict.to_string(),
         hints,
         suggestions: Vec::new(),
+    }
+}
+
+/// Dispatch benchmark advice through the backend-owned classifier.
+///
+/// Rapid-MLX and llama.cpp have different configuration contracts. Keeping
+/// this boundary in one function prevents a caller from accidentally routing
+/// Rapid-MLX measurements through the llama.cpp classifier and exposing
+/// actionable llama.cpp fields such as `flash_attn`, `batch_size`, or
+/// `n_cpu_moe`.
+#[allow(clippy::too_many_arguments)]
+pub fn classify_backend_benchmark_result(
+    backend: InferenceBackend,
+    prompt_tps: f64,
+    gen_tps: f64,
+    ttft_ms: f64,
+    model_size_bytes: Option<u64>,
+    available_vram_bytes: Option<u64>,
+    n_moe_layers: u64,
+) -> BenchmarkResult {
+    match backend {
+        InferenceBackend::RapidMlx => {
+            classify_rapid_mlx_benchmark_result(prompt_tps, gen_tps, ttft_ms)
+        }
+        _ => classify_benchmark_result(
+            prompt_tps,
+            gen_tps,
+            ttft_ms,
+            model_size_bytes,
+            available_vram_bytes,
+            n_moe_layers,
+        ),
     }
 }
 
@@ -1390,6 +1423,25 @@ mod tests {
         assert_eq!(result.verdict, "poor");
         assert!(!result.hints.is_empty());
         assert!(result.suggestions.is_empty());
+    }
+
+    #[test]
+    fn backend_dispatch_keeps_rapid_advice_non_actionable() {
+        let result = classify_backend_benchmark_result(
+            InferenceBackend::RapidMlx,
+            120.0,
+            2.5,
+            2_000.0,
+            Some(32 * 1024 * 1024 * 1024),
+            Some(16 * 1024 * 1024 * 1024),
+            32,
+        );
+        assert!(
+            result
+                .suggestions
+                .iter()
+                .all(|suggestion| { suggestion.param.is_empty() && suggestion.patch.is_none() })
+        );
     }
 
     #[test]

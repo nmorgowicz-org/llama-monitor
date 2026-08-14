@@ -17,6 +17,26 @@ use super::common::{ApiCtx, ApiRoute, check_api_token, unauthorized_api_token};
 static BENCHMARK_LAST_TS: std::sync::LazyLock<std::sync::Mutex<u64>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(0u64));
 
+fn model_default_provenance(
+    introspected: bool,
+    gguf_arch: &str,
+    arch_family: &str,
+) -> (&'static str, &'static str) {
+    if introspected {
+        ("model-native", "Progressive GGUF header")
+    } else if !gguf_arch.is_empty() || !arch_family.is_empty() {
+        (
+            "qualified-profile",
+            "Caller-supplied qualified architecture/profile",
+        )
+    } else {
+        (
+            "unknown/degraded",
+            "No authoritative model metadata was available",
+        )
+    }
+}
+
 /// Build the argv (excluding the binary itself) for a `rapid-mlx bench` invocation.
 /// `rapid-mlx bench` requires a positional `model` argument immediately after the
 /// `bench` subcommand — without it the CLI exits with code 2 ("the following
@@ -287,10 +307,14 @@ fn api_benchmark(
                         match bench_result {
                             Ok(Some((prompt_tps, gen_tps, ttft_ms))) => {
                                 let benchmark =
-                                    crate::llama::spawn_wizard::classify_rapid_mlx_benchmark_result(
+                                    crate::llama::spawn_wizard::classify_backend_benchmark_result(
+                                        InferenceBackend::RapidMlx,
                                         prompt_tps,
                                         gen_tps,
                                         ttft_ms,
+                                        None,
+                                        None,
+                                        0,
                                     );
                                 return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                                     Box::new(warp::reply::json(&serde_json::json!({
@@ -471,7 +495,8 @@ fn api_benchmark(
                     match result {
                         Ok(Some((prompt_tps, gen_tps, ttft_ms))) => {
                             let benchmark =
-                                crate::llama::spawn_wizard::classify_benchmark_result(
+                                crate::llama::spawn_wizard::classify_backend_benchmark_result(
+                                    InferenceBackend::LlamaCpp,
                                     prompt_tps,
                                     gen_tps,
                                     ttft_ms,
@@ -603,20 +628,8 @@ fn api_model_defaults(
                     .first()
                     .map(|mode| mode.defaults.clone())
                     .unwrap_or_default();
-                let provenance = if introspected_meta.is_some() {
-                    "model-native"
-                } else if !gguf_arch.is_empty() || !arch_family.is_empty() {
-                    "qualified-profile"
-                } else {
-                    "unknown/degraded"
-                };
-                let provenance_evidence = if introspected_meta.is_some() {
-                    "Progressive GGUF header"
-                } else if !gguf_arch.is_empty() || !arch_family.is_empty() {
-                    "Caller-supplied qualified architecture/profile"
-                } else {
-                    "No authoritative model metadata was available"
-                };
+                let (provenance, provenance_evidence) =
+                    model_default_provenance(introspected_meta.is_some(), &gguf_arch, &arch_family);
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
@@ -1596,6 +1609,32 @@ Rapid-MLX bench — tier=smoke model=mlx-community/Qwen3-0.6B-4bit
         assert!(
             !WELL_FORMED_BENCH_OUTPUT.contains("llama.cpp"),
             "rapid-mlx fixture must not contain 'llama.cpp'"
+        );
+    }
+
+    #[test]
+    fn missing_model_metadata_is_explicitly_degraded() {
+        assert_eq!(
+            model_default_provenance(false, "", ""),
+            (
+                "unknown/degraded",
+                "No authoritative model metadata was available"
+            )
+        );
+    }
+
+    #[test]
+    fn renamed_model_uses_architecture_evidence_not_filename() {
+        assert_eq!(
+            model_default_provenance(false, "", "gemma"),
+            (
+                "qualified-profile",
+                "Caller-supplied qualified architecture/profile"
+            )
+        );
+        assert_eq!(
+            model_default_provenance(true, "", ""),
+            ("model-native", "Progressive GGUF header")
         );
     }
 
