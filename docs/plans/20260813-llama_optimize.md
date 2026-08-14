@@ -1,5 +1,12 @@
 # Hardware-native llama.cpp calibration inspired by `llama-optimize`
 
+> **Phase 2 source-side closure (2026-08-13):** Managed sibling resolution,
+> exact executable/help identity evidence, optional `llama-fit-params`
+> degradation, and typed capability-gated benchmark argv are implemented and
+> receipt-backed in `docs/plans/evidence/20260813-llama-optimize/phase-02/`.
+> Focused calibration tests pass (30). Native Windows `.exe` execution/help
+> receipts remain an explicit Phase 10 return marker.
+
 **State:** Approved as a bounded Local LLM Foundry 2.0.0 release requirement; the Phase 5 screenshot-acceptance gate is complete and its backend receipt gates remain in progress. Rapid-MLX benchmark classification is informational-only (`classify_rapid_mlx_benchmark_result`); typed contracts, active-root persistence, durable recovery, authenticated preflight/start/poll/cancel, deterministic typed Quick and Balanced candidate planning, sequential bounded Quick execution with per-candidate receipts/winner selection, db-admin transactional apply with optimistic conflict checks and derived-preset default, and the Preset Editor Calibrate flow pass full Rust/JS validation, release build, clippy, diff checks, and focused release-built Playwright coverage. Nick accepted the six fresh release-built Calibration screenshots on 2026-08-13. A native bounded L9/L25 orthogonal-array generator, capability-gated typed factor catalog, fail-closed Balanced budget calculator, and cross-platform regular-file classifier are now implemented with focused tests and upstream attribution. The pinned upstream source/license ledger, offline self-test, and macOS managed-binary capability receipt are recorded; the upstream regular-file portability caveat, native Windows capability receipt, deterministic fake-runtime post-apply receipts, interrupted-job resume evidence, Balanced executor/analysis wiring, Phase 6, and Phase 10 qualification remain open.
 **Date:** 2026-08-13
 **Primary owner:** Luna, executed phase-by-phase with one focused verifier after each hard gate.
@@ -652,7 +659,7 @@ No subprocess may be launched until lifecycle, cancellation, crash recovery, aut
 
 #### Tasks
 
-- [ ] Generalize sibling tool resolution in `src/llama/bench_runner.rs` or a new `src/inference/llama_cpp_tools.rs` for platform names:
+- [x] Generalize sibling tool resolution in `src/inference/llama_cpp_tools.rs` with explicit platform names:
   - `llama-bench[.exe]`;
   - `llama-fit-params[.exe]`;
   - future tools only through an explicit enum.

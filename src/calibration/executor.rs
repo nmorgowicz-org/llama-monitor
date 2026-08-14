@@ -21,6 +21,9 @@ use super::{
 };
 use crate::config::AppConfig;
 use crate::inference::InferenceBackend;
+use crate::inference::llama_cpp_tools::{
+    LlamaCppTool, OptionalFitParams, ToolHelpEvidence, probe_help, resolve_tool,
+};
 use crate::llama::bench_runner::{SweepPoint, llama_bench_path, run_sweep_with_tokens};
 use crate::presets::{self, ModelPreset};
 use crate::state::AppState;
@@ -63,6 +66,15 @@ pub struct CalibrationPreflight {
     pub model_identity: String,
     pub server_identity: String,
     pub bench_identity: String,
+    /// SHA-256 identity of the exact managed sibling used for measurement.
+    pub bench_sha256: String,
+    /// Optional helper is intentionally non-blocking: missing support only
+    /// disables predictive pruning, never measured calibration.
+    pub fit_params_sha256: Option<String>,
+    pub bench_help_sha256: Option<String>,
+    pub bench_help_flags: Vec<String>,
+    pub bench_help_exit_code: Option<i32>,
+    pub fit_params_help_sha256: Option<String>,
     pub planned_trials: u32,
     pub candidate_ids: Vec<String>,
     pub requires_server_stop: bool,
@@ -177,10 +189,18 @@ pub fn preflight(
     }
 
     let model = resolve_model_path(config, &preset.model_path)?;
-    let bench = llama_bench_path(&config.llama_server_path);
-    if !bench.is_file() {
-        bail!("Managed llama-bench is unavailable beside the configured llama-server");
-    }
+    let bench_tool =
+        resolve_tool(&config.llama_server_path, LlamaCppTool::Bench).map_err(|error| {
+            anyhow!(
+                "Managed llama-bench is unavailable beside the configured llama-server: {error}"
+            )
+        })?;
+    let bench = bench_tool.path.clone();
+    let fit_params_sha256 =
+        match crate::inference::llama_cpp_tools::optional_fit_params(&config.llama_server_path) {
+            OptionalFitParams::Available(tool) => Some(tool.identity.file_hash),
+            OptionalFitParams::Missing | OptionalFitParams::Unusable(_) => None,
+        };
 
     let fingerprint = preset_fingerprint(&preset)?;
     validate_workload(workload)?;
@@ -209,6 +229,12 @@ pub fn preflight(
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "llama-bench".into()),
+        bench_sha256: bench_tool.identity.file_hash,
+        fit_params_sha256,
+        bench_help_sha256: None,
+        bench_help_flags: Vec::new(),
+        bench_help_exit_code: None,
+        fit_params_help_sha256: None,
         planned_trials: candidate_ids.len() as u32
             + u32::from(budget == CalibrationBudget::Balanced) * 2,
         candidate_ids,
@@ -221,6 +247,39 @@ pub fn preflight(
         requested_budget: budget,
         confirmation: CONFIRMATION,
     })
+}
+
+/// Attach bounded `--help` evidence to an already validated preflight. This
+/// is kept separate so pure callers and tests do not spawn a process, while
+/// the authenticated HTTP preflight can make capability eligibility explicit.
+pub async fn enrich_preflight_with_help(
+    config: &AppConfig,
+    preflight: &mut CalibrationPreflight,
+) -> Result<()> {
+    let bench = resolve_tool(&config.llama_server_path, LlamaCppTool::Bench)?;
+    let evidence = probe_help(&bench, &config.llama_server_cwd).await?;
+    apply_help_evidence(preflight, &evidence, false);
+    if let OptionalFitParams::Available(fit) =
+        crate::inference::llama_cpp_tools::optional_fit_params(&config.llama_server_path)
+        && let Ok(evidence) = probe_help(&fit, &config.llama_server_cwd).await
+    {
+        apply_help_evidence(preflight, &evidence, true);
+    }
+    Ok(())
+}
+
+fn apply_help_evidence(
+    preflight: &mut CalibrationPreflight,
+    evidence: &ToolHelpEvidence,
+    fit_params: bool,
+) {
+    if fit_params {
+        preflight.fit_params_help_sha256 = Some(evidence.help_sha256.clone());
+    } else {
+        preflight.bench_help_sha256 = Some(evidence.help_sha256.clone());
+        preflight.bench_help_flags = evidence.flags.iter().cloned().collect();
+        preflight.bench_help_exit_code = evidence.exit_code;
+    }
 }
 
 pub fn start(

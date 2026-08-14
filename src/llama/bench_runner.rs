@@ -35,12 +35,19 @@ pub struct NcpuMoeProbe {
 
 /// Resolve the `llama-bench` binary that ships alongside `llama-server`.
 pub fn llama_bench_path(server_path: &Path) -> PathBuf {
-    let name = if cfg!(windows) {
-        "llama-bench.exe"
-    } else {
-        "llama-bench"
-    };
-    server_path.with_file_name(name)
+    crate::inference::llama_cpp_tools::sibling_tool_path(
+        server_path,
+        crate::inference::llama_cpp_tools::LlamaCppTool::Bench,
+    )
+}
+
+/// Resolve the optional predictive-fit helper shipped by some llama.cpp
+/// bundles. Its absence degrades predictive pruning only.
+pub fn llama_fit_params_path(server_path: &Path) -> PathBuf {
+    crate::inference::llama_cpp_tools::sibling_tool_path(
+        server_path,
+        crate::inference::llama_cpp_tools::LlamaCppTool::FitParams,
+    )
 }
 
 fn fa_flag(flash_attn: bool) -> &'static str {

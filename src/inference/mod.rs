@@ -5,6 +5,7 @@ pub mod capabilities;
 pub mod launch;
 pub mod llama_cpp;
 pub mod llama_cpp_capabilities;
+pub mod llama_cpp_tools;
 pub mod metrics;
 pub mod rapid_mlx;
 pub mod supervisor;

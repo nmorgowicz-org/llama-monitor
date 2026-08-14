@@ -169,39 +169,34 @@ fn api_preflight(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "calibrations" / "preflight")
         .and(warp::post())
-        .and(warp::header::optional::<String>("authorization"))
-        .and(safe_json_body::<executor::CalibrationPreflightRequest>())
-        .and(with_app_config(config.clone()))
-        .and_then(
-            move |auth: Option<String>,
-                  body: executor::CalibrationPreflightRequest,
-                  cfg: Arc<AppConfig>| {
-                if !check_api_token(&auth, &cfg) {
-                    return futures_util::future::ready(Ok(unauthorized_api_token()));
-                }
-                let response = match executor::preflight(
-                    &cfg,
-                    &state,
-                    &body.preset_id,
-                    &body.workload,
-                    body.budget,
-                ) {
-                    Ok(preflight) => warp::reply::with_status(
-                        warp::reply::json(&serde_json::json!({"ok": true, "preflight": preflight})),
-                        warp::http::StatusCode::OK,
-                    ),
-                    Err(error) => warp::reply::with_status(
-                        warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": error.to_string()}),
-                        ),
-                        warp::http::StatusCode::BAD_REQUEST,
-                    ),
-                };
-                futures_util::future::ready(Ok::<Box<dyn warp::Reply>, warp::Rejection>(Box::new(
-                    response,
-                )))
-            },
-        )
+ .and(warp::header::optional::<String>("authorization"))
+ .and(safe_json_body::<executor::CalibrationPreflightRequest>())
+ .and(with_app_config(config.clone()))
+ .and_then(move |auth: Option<String>, body: executor::CalibrationPreflightRequest, cfg: Arc<AppConfig>| {
+  let state = state.clone();
+  async move {
+  if !check_api_token(&auth, &cfg) {
+   return Ok::<Box<dyn warp::Reply>, warp::Rejection>(Box::new(unauthorized_api_token()));
+  }
+  let response = match executor::preflight(&cfg, &state, &body.preset_id, &body.workload, body.budget) {
+   Ok(mut preflight) => match executor::enrich_preflight_with_help(&cfg, &mut preflight).await {
+    Ok(()) => warp::reply::with_status(
+     warp::reply::json(&serde_json::json!({"ok": true, "preflight": preflight})),
+     warp::http::StatusCode::OK,
+    ),
+    Err(error) => warp::reply::with_status(
+     warp::reply::json(&serde_json::json!({"ok": false, "error": format!("Managed llama.cpp capability probe failed: {error}")})),
+     warp::http::StatusCode::BAD_REQUEST,
+    ),
+   },
+   Err(error) => warp::reply::with_status(
+    warp::reply::json(&serde_json::json!({"ok": false, "error": error.to_string()})),
+    warp::http::StatusCode::BAD_REQUEST,
+   ),
+  };
+  Ok::<Box<dyn warp::Reply>, warp::Rejection>(Box::new(response))
+  }
+ })
 }
 
 fn api_start(

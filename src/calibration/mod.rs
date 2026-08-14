@@ -11,6 +11,7 @@ pub mod jobs;
 pub mod paths;
 
 pub mod analysis;
+pub mod argv;
 pub mod candidates;
 pub mod design;
 pub mod executor;
