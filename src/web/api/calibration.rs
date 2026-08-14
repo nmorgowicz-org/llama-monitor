@@ -1,3 +1,4 @@
+use serde::Deserialize;
 use std::sync::Arc;
 
 use warp::Filter;
@@ -24,6 +25,10 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .map(box_reply)
         .or(api_start(state.clone(), config.clone()).map(box_reply))
         .unify()
+        .or(api_list(config.clone()).map(box_reply))
+        .unify()
+        .or(api_resume(state.clone(), config.clone()).map(box_reply))
+        .unify()
         .or(api_get(config.clone()).map(box_reply))
         .unify()
         .or(api_receipt(config.clone()).map(box_reply))
@@ -32,9 +37,23 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .or(api_rollback(state, config.clone()).map(box_reply))
         .unify()
-        .or(api_cancel(config).map(box_reply))
+        .or(api_cancel(config.clone()).map(box_reply))
+        .unify()
+        .or(api_forget(config).map(box_reply))
         .unify()
         .boxed()
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+struct ForgetCalibrationRequest {
+    confirmation: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+struct ResumeCalibrationRequest {
+    confirmation: String,
 }
 
 fn api_rollback(
@@ -84,7 +103,7 @@ fn api_receipt(
             if !check_api_token(&auth, &cfg) {
                 return futures_util::future::ready(Ok(unauthorized_api_token()));
             }
-            let response = match executor::get_receipt(&cfg, &id) {
+        let response = match executor::get_receipt_view(&cfg, &id) {
                 Ok(Some(receipt)) => warp::reply::with_status(
                     warp::reply::json(&serde_json::json!({"ok": true, "receipt": receipt})),
                     warp::http::StatusCode::OK,
@@ -218,6 +237,87 @@ fn api_start(
         )
 }
 
+fn api_list(
+    config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "calibrations")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(config))
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
+            if !check_api_token(&auth, &cfg) {
+                return futures_util::future::ready(Ok(unauthorized_api_token()));
+            }
+            let response = match executor::list(&cfg) {
+                Ok(jobs) => warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({
+                        "ok": true,
+                        "jobs": jobs,
+                    })),
+                    warp::http::StatusCode::OK,
+                ),
+                Err(error) => warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({
+                        "ok": false,
+                        "error": error.to_string(),
+                    })),
+                    warp::http::StatusCode::BAD_REQUEST,
+                ),
+            };
+            futures_util::future::ready(Ok::<Box<dyn warp::Reply>, warp::Rejection>(Box::new(
+                response,
+            )))
+        })
+}
+
+fn api_resume(
+    state: AppState,
+    config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "calibrations" / String / "resume")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(safe_json_body::<ResumeCalibrationRequest>())
+        .and(with_app_config(config))
+        .and_then(
+            move |id: String,
+                  auth: Option<String>,
+                  request: ResumeCalibrationRequest,
+                  cfg: Arc<AppConfig>| {
+                if !check_api_token(&auth, &cfg) {
+                    return futures_util::future::ready(Ok(unauthorized_api_token()));
+                }
+                let response =
+                    match executor::resume(cfg, state.clone(), &id, &request.confirmation) {
+                        Ok(Some(snapshot)) => warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": true,
+                                "job": snapshot,
+                            })),
+                            warp::http::StatusCode::ACCEPTED,
+                        ),
+                        Ok(None) => warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "calibration job not found",
+                            })),
+                            warp::http::StatusCode::NOT_FOUND,
+                        ),
+                        Err(error) => warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": error.to_string(),
+                            })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ),
+                    };
+                futures_util::future::ready(Ok::<Box<dyn warp::Reply>, warp::Rejection>(Box::new(
+                    response,
+                )))
+            },
+        )
+}
+
 fn api_get(
     config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -282,6 +382,49 @@ fn api_cancel(
                         warp::reply::json(
                             &serde_json::json!({"ok": false, "error": error.to_string()}),
                         ),
+                        warp::http::StatusCode::BAD_REQUEST,
+                    ),
+                };
+                futures_util::future::ready(Ok::<Box<dyn warp::Reply>, warp::Rejection>(Box::new(
+                    response,
+                )))
+            },
+        )
+}
+
+fn api_forget(
+    config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "calibrations" / String / "forget")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(safe_json_body::<ForgetCalibrationRequest>())
+        .and(with_app_config(config))
+        .and_then(
+            move |id: String,
+                  auth: Option<String>,
+                  request: ForgetCalibrationRequest,
+                  cfg: Arc<AppConfig>| {
+                if !check_db_admin_token(&auth, &cfg) {
+                    return futures_util::future::ready(Ok(unauthorized_db_admin_token()));
+                }
+                let response = match executor::forget(&cfg, &id, &request.confirmation) {
+                    Ok(true) => warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({ "ok": true })),
+                        warp::http::StatusCode::OK,
+                    ),
+                    Ok(false) => warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "calibration job not found",
+                        })),
+                        warp::http::StatusCode::NOT_FOUND,
+                    ),
+                    Err(error) => warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": error.to_string(),
+                        })),
                         warp::http::StatusCode::BAD_REQUEST,
                     ),
                 };

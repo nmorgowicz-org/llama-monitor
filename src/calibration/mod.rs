@@ -279,6 +279,21 @@ pub struct CalibrationJobSnapshot {
     pub receipt_id: Option<String>,
 }
 
+/// Protected manifest needed to resume a job after process restart. It is
+/// never returned directly by the API; the public snapshot remains redacted.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CalibrationJobManifest {
+    pub schema_version: u32,
+    pub preset_id: String,
+    pub preset_fingerprint: String,
+    pub workload: CalibrationWorkload,
+    pub budget: CalibrationBudget,
+    pub candidates: Vec<CalibrationCandidate>,
+    pub model_path: String,
+    pub bench_path: String,
+    pub fingerprint: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

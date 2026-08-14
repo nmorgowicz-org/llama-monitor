@@ -17,6 +17,17 @@ pub enum RegularFileError {
     Canonicalize,
 }
 
+/// Calibration job and receipt identifiers are generated internally, but they
+/// cross an HTTP path boundary. Restrict them to a short filename-safe token
+/// before joining them to any application-home directory.
+pub fn is_safe_calibration_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
 /// Verify a path is an existing, non-symlink regular file and return its
 /// canonical path. The classification is platform-neutral and deliberately
 /// does not expose OS error strings as an API contract.
@@ -64,6 +75,15 @@ mod tests {
             require_regular_file(&temp.path().join("missing.gguf")),
             Err(RegularFileError::NotFound)
         );
+    }
+
+    #[test]
+    fn calibration_ids_are_filename_safe() {
+        assert!(is_safe_calibration_id("job-01_test"));
+        assert!(!is_safe_calibration_id(""));
+        assert!(!is_safe_calibration_id("../escape"));
+        assert!(!is_safe_calibration_id("/absolute"));
+        assert!(!is_safe_calibration_id("job with spaces"));
     }
 
     #[cfg(unix)]

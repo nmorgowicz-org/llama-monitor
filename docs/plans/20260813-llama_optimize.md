@@ -30,6 +30,13 @@ real-runtime receipts remain explicit Phase 10 return markers; they must not be
 inferred from macOS or GNU cross-compilation. Phase 1–4 lifecycle, evaluator,
 and design evidence gates remain open.
 
+Phase 1 lifecycle slice (2026-08-13): durable manifests and per-trial result
+journals, redacted receipt projection, list/cancel/resume/forget routes,
+filename-safe identifiers, explicit suspected-crash resume, and terminal-job
+forget semantics are implemented and covered by the Phase 1 evidence receipt.
+Route smoke/auth coverage passes; malformed-input matrix and native Windows
+restart receipts remain final qualification gates.
+
 ### 2.0.0 release boundary
 
 Calibration v1 is a required part of the Local LLM Foundry 2.0.0 product and release story. It must land before the rebrand plan's Phase 12 cross-platform/security qualification begins. Phase 12 and Phase 13 must qualify and visually accept Calibration together with migration, packaging, auth, runtime, and the rest of the release candidate; adding or materially changing it afterward reopens those gates.

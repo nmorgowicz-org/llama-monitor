@@ -4,7 +4,9 @@
 //! every state transition durable before a trial can start, and classify a
 //! started-without-finished trial as a suspected crash on recovery.
 
-use super::{CalibrationJobSnapshot, CalibrationJobState};
+use super::{
+    CalibrationCandidateResult, CalibrationJobManifest, CalibrationJobSnapshot, CalibrationJobState,
+};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -14,6 +16,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_JOURNAL_LINE_BYTES: usize = 32 * 1024;
+const MAX_TRIAL_RESULT_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -25,6 +28,8 @@ pub enum JournalEventKind {
     TrialFinished,
     JobCancelled,
     JobFailed,
+    JobResumed,
+    TrialAbandoned,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -98,7 +103,7 @@ pub fn suspected_crash_trials(events: &[JournalEvent]) -> BTreeSet<String> {
             JournalEventKind::TrialStarted => {
                 started.insert(trial_id.to_string());
             }
-            JournalEventKind::TrialFinished => {
+            JournalEventKind::TrialFinished | JournalEventKind::TrialAbandoned => {
                 started.remove(trial_id);
             }
             _ => {}
@@ -132,6 +137,32 @@ pub fn recover_snapshot(path: &Path) -> Result<Option<CalibrationJobSnapshot>> {
     Ok(Some(snapshot))
 }
 
+pub fn write_manifest(path: &Path, manifest: &CalibrationJobManifest) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    let encoded = serde_json::to_vec_pretty(manifest).context("serialize Calibration manifest")?;
+    let temporary = path.with_extension("json.tmp");
+    let mut file = File::create(&temporary)?;
+    file.write_all(&encoded)?;
+    file.sync_all()?;
+    drop(file);
+    crate::config::harden_file_permissions(&temporary);
+    fs::rename(&temporary, path)?;
+    crate::config::harden_file_permissions(path);
+    Ok(())
+}
+
+pub fn read_manifest(path: &Path) -> Result<Option<CalibrationJobManifest>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let encoded = fs::read(path)?;
+    Ok(Some(serde_json::from_slice(&encoded).with_context(
+        || format!("parse Calibration manifest {}", path.display()),
+    )?))
+}
+
 pub fn mark_recovered_crash(snapshot: &mut CalibrationJobSnapshot, trial_count: usize) {
     if matches!(snapshot.state, CalibrationJobState::Running) {
         snapshot.state = CalibrationJobState::Failed;
@@ -140,6 +171,43 @@ pub fn mark_recovered_crash(snapshot: &mut CalibrationJobSnapshot, trial_count: 
             .diagnostics
             .push(format!("Recovered {} unfinished trial(s) as suspected crash; explicit confirmation is required before retry", trial_count));
     }
+}
+
+pub fn append_trial_result(path: &Path, result: &CalibrationCandidateResult) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    let encoded = serde_json::to_vec(result).context("serialize Calibration trial result")?;
+    if encoded.len() > MAX_TRIAL_RESULT_BYTES {
+        bail!("Calibration trial result exceeds bounded output limit");
+    }
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    file.write_all(&encoded)?;
+    file.write_all(b"\n")?;
+    file.sync_data()?;
+    Ok(())
+}
+
+pub fn read_trial_results(path: &Path) -> Result<Vec<CalibrationCandidateResult>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let file = File::open(path)?;
+    let mut results = Vec::new();
+    for (index, line) in BufReader::new(file).lines().enumerate() {
+        let line = line?;
+        if line.len() > MAX_TRIAL_RESULT_BYTES {
+            bail!(
+                "Calibration trial result line {} exceeds bounded output limit",
+                index + 1
+            );
+        }
+        results.push(
+            serde_json::from_str(&line)
+                .with_context(|| format!("parse Calibration trial result {}", index + 1))?,
+        );
+    }
+    Ok(results)
 }
 
 fn now_ms() -> u128 {
@@ -205,5 +273,20 @@ mod tests {
         mark_recovered_crash(&mut snapshot, 1);
         assert_eq!(snapshot.state, CalibrationJobState::Failed);
         assert!(snapshot.phase.contains("suspected_crash"));
+    }
+
+    #[test]
+    fn trial_results_round_trip_for_resume() {
+        let temp = tempdir().expect("tempdir");
+        let path = temp.path().join("results.jsonl");
+        let result = CalibrationCandidateResult {
+            candidate: Default::default(),
+            measurement: Default::default(),
+        };
+        append_trial_result(&path, &result).expect("append result");
+        assert_eq!(
+            read_trial_results(&path).expect("read results"),
+            vec![result]
+        );
     }
 }

@@ -438,11 +438,18 @@ The authenticated API is:
   include the preflight fingerprint, a supported `budget` (`quick` or
   `balanced`), and the exact `CALIBRATE` confirmation string returned by the
   application; active-server stop/restart is not permitted in this version.
+- **GET `/api/calibrations`** — lists durable job snapshots from the active
+  application home. Protected receipt contents and manifests are never
+  returned by this endpoint.
 - **GET `/api/calibrations/{id}`** — polls the durable job snapshot.
 - **GET `/api/calibrations/{id}/receipt`** — reads the authenticated measured
   receipt and apply history.
 - **POST `/api/calibrations/{id}/cancel`** — requests cancellation and cleans up
   the owned benchmark process.
+- **POST `/api/calibrations/{id}/resume`** — explicitly resumes a job recovered
+  as a suspected crash. It requires the `RESUME_CALIBRATION` confirmation;
+  finished trial results are loaded from the protected journal and are not
+  silently repeated.
 - **POST `/api/calibrations/{id}/apply`** — requires `db-admin-token`, the
   `APPLY_CALIBRATION` confirmation, and the expected target fingerprint. It
   creates a derived preset by default; updating the source preset is an
@@ -455,6 +462,9 @@ The authenticated API is:
   `ROLLBACK_CALIBRATION` confirmation, and the applied preset fingerprint. It
   restores the private pre-apply snapshot (or removes the derived preset) only
   when the preset is unchanged since apply; conflicting edits fail closed.
+- **POST `/api/calibrations/{id}/forget`** — requires `db-admin-token` and
+  `FORGET_CALIBRATION`; removes a terminal job, its receipt, and private
+  rollback backups. Active jobs must be cancelled first.
 
 Quick and Balanced Calibration report measured candidate results, baseline
 deltas, Pareto tradeoffs, and confidence/noise warnings. They are not a claim

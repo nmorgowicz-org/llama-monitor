@@ -1072,6 +1072,61 @@ mod tests {
             "/api/rapid-mlx/command-preview",
             Some("{}")
         ),
+        (
+            route_calibration_preflight,
+            "POST",
+            "/api/calibrations/preflight",
+            Some("{}")
+        ),
+        (
+            route_calibration_start,
+            "POST",
+            "/api/calibrations",
+            Some("{}")
+        ),
+        (route_calibration_list, "GET", "/api/calibrations", None),
+        (
+            route_calibration_resume,
+            "POST",
+            "/api/calibrations/missing/resume",
+            Some("{}")
+        ),
+        (
+            route_calibration_get,
+            "GET",
+            "/api/calibrations/missing",
+            None
+        ),
+        (
+            route_calibration_receipt,
+            "GET",
+            "/api/calibrations/missing/receipt",
+            None
+        ),
+        (
+            route_calibration_apply,
+            "POST",
+            "/api/calibrations/missing/apply",
+            Some("{}")
+        ),
+        (
+            route_calibration_rollback,
+            "POST",
+            "/api/calibrations/missing/rollback",
+            Some("{}")
+        ),
+        (
+            route_calibration_cancel,
+            "POST",
+            "/api/calibrations/missing/cancel",
+            None
+        ),
+        (
+            route_calibration_forget,
+            "POST",
+            "/api/calibrations/missing/forget",
+            Some("{}")
+        ),
     ];
 
     #[tokio::test]

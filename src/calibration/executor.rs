@@ -7,15 +7,17 @@
 
 use super::candidates::{balanced_candidates, quick_candidates};
 use super::jobs::{
-    JournalEvent, JournalEventKind, append_event, mark_recovered_crash, read_events,
-    recover_snapshot, suspected_crash_trials, write_snapshot,
+    JournalEvent, JournalEventKind, append_event, append_trial_result, mark_recovered_crash,
+    read_events, read_manifest, read_trial_results, recover_snapshot, suspected_crash_trials,
+    write_manifest, write_snapshot,
 };
+use super::paths::is_safe_calibration_id;
 use super::paths::{RegularFileError, require_regular_file};
 use super::{
     CalibrationApplyRecord, CalibrationBudget, CalibrationCandidate, CalibrationCandidateResult,
-    CalibrationFingerprint, CalibrationJobSnapshot, CalibrationJobState, CalibrationMeasurement,
-    CalibrationReceipt, CalibrationWorkload, LlamaCppCalibrationPatch, StartCalibrationRequest,
-    TrialStatus,
+    CalibrationFingerprint, CalibrationJobManifest, CalibrationJobSnapshot, CalibrationJobState,
+    CalibrationMeasurement, CalibrationReceipt, CalibrationWorkload, LlamaCppCalibrationPatch,
+    StartCalibrationRequest, TrialStatus,
 };
 use crate::config::AppConfig;
 use crate::inference::InferenceBackend;
@@ -36,6 +38,7 @@ use tokio::sync::{Notify, Semaphore};
 const METHOD_VERSION_QUICK: &str = "calibration-v1-quick-single-trial";
 const METHOD_VERSION_BALANCED: &str = "calibration-v1-balanced-bounded-search";
 const CONFIRMATION: &str = "CALIBRATE";
+const RESUME_CONFIRMATION: &str = "RESUME_CALIBRATION";
 const MAX_DIAGNOSTICS: usize = 24;
 
 static JOBS: LazyLock<Mutex<BTreeMap<String, RuntimeJob>>> =
@@ -49,6 +52,7 @@ struct RuntimeJob {
     cancel_notify: Arc<Notify>,
     snapshot_path: PathBuf,
     journal_path: PathBuf,
+    results_path: PathBuf,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -73,6 +77,25 @@ pub struct CalibrationPreflightRequest {
     pub preset_id: String,
     pub workload: CalibrationWorkload,
     pub budget: CalibrationBudget,
+}
+
+/// Public receipt projection. Keep this separate from the on-disk receipt so
+/// future private fields (raw commands, paths, or diagnostics) cannot leak by
+/// accidentally deriving API serialization from the protected record.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CalibrationReceiptView {
+    pub schema_version: u32,
+    pub method_version: String,
+    pub job_id: String,
+    pub fingerprint: super::CalibrationFingerprint,
+    pub measurement: super::CalibrationMeasurement,
+    pub budget: super::CalibrationBudget,
+    pub candidate_results: Vec<super::CalibrationCandidateResult>,
+    pub analysis: super::analysis::CalibrationAnalysis,
+    pub selected_candidate: Option<String>,
+    pub preset_id: String,
+    pub preset_fingerprint: String,
+    pub apply_history: Vec<super::CalibrationApplyRecord>,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -122,6 +145,10 @@ pub struct RollbackCalibrationResult {
 
 pub fn confirmation_phrase() -> &'static str {
     CONFIRMATION
+}
+
+pub fn resume_confirmation_phrase() -> &'static str {
+    RESUME_CONFIRMATION
 }
 
 pub fn preset_fingerprint(preset: &ModelPreset) -> Result<String> {
@@ -247,6 +274,8 @@ pub fn start(
     let job_dir = config.app_paths.calibration_jobs_dir().join(&id);
     let snapshot_path = job_dir.join("snapshot.json");
     let journal_path = job_dir.join("journal.jsonl");
+    let results_path = job_dir.join("trial-results.jsonl");
+    let manifest_path = job_dir.join("manifest.json");
     let snapshot = CalibrationJobSnapshot {
         id: id.clone(),
         state: CalibrationJobState::Queued,
@@ -257,6 +286,20 @@ pub fn start(
         receipt_id: None,
     };
     write_snapshot(&snapshot_path, &snapshot)?;
+    write_manifest(
+        &manifest_path,
+        &CalibrationJobManifest {
+            schema_version: super::CALIBRATION_SCHEMA_VERSION,
+            preset_id: preset.id.clone(),
+            preset_fingerprint: fingerprint.clone(),
+            workload: request.workload.clone(),
+            budget: request.budget.clone(),
+            candidates: candidates.clone(),
+            model_path: model_path.to_string_lossy().into_owned(),
+            bench_path: bench_path.to_string_lossy().into_owned(),
+            fingerprint: fingerprint.clone(),
+        },
+    )?;
     append_event(
         &journal_path,
         &JournalEvent::new(JournalEventKind::JobCreated, None),
@@ -268,6 +311,7 @@ pub fn start(
         cancel_notify: Arc::new(Notify::new()),
         snapshot_path,
         journal_path,
+        results_path,
     };
     {
         let mut jobs = JOBS
@@ -299,11 +343,116 @@ pub fn start(
         fingerprint,
         request.budget,
         runtime,
+        Vec::new(),
     ));
     Ok(snapshot)
 }
 
+/// Explicitly resume a job recovered from a suspected crash. Finished trial
+/// results are loaded from the protected journal and are never silently rerun;
+/// only unfinished trials are eligible for the resumed execution.
+pub fn resume(
+    config: Arc<AppConfig>,
+    state: AppState,
+    id: &str,
+    confirmation: &str,
+) -> Result<Option<CalibrationJobSnapshot>> {
+    validate_job_id(id)?;
+    if confirmation != RESUME_CONFIRMATION {
+        bail!("Exact confirmation RESUME_CALIBRATION required");
+    }
+    {
+        let jobs = JOBS
+            .lock()
+            .map_err(|_| anyhow!("Calibration registry unavailable"))?;
+        if jobs.values().any(|job| {
+            job.snapshot.lock().ok().is_some_and(|snapshot| {
+                matches!(
+                    snapshot.state,
+                    CalibrationJobState::Queued
+                        | CalibrationJobState::Running
+                        | CalibrationJobState::Cancelling
+                )
+            })
+        }) {
+            bail!("Another Calibration job is already active");
+        }
+    }
+
+    let job_dir = config.app_paths.calibration_jobs_dir().join(id);
+    let snapshot_path = job_dir.join("snapshot.json");
+    let journal_path = job_dir.join("journal.jsonl");
+    let results_path = job_dir.join("trial-results.jsonl");
+    let manifest_path = job_dir.join("manifest.json");
+    let Some(mut snapshot) = recover_snapshot(&snapshot_path)? else {
+        return Ok(None);
+    };
+    if !matches!(snapshot.state, CalibrationJobState::Failed) {
+        bail!("Calibration job is not resumable");
+    }
+    if !snapshot.phase.contains("suspected_crash") {
+        bail!("Calibration job did not recover from a suspected crash");
+    }
+    let manifest = read_manifest(&manifest_path)?
+        .ok_or_else(|| anyhow!("Calibration resume manifest not found"))?;
+    let preset = find_preset(&state, &manifest.preset_id)?;
+    let current_fingerprint = preset_fingerprint(&preset)?;
+    if current_fingerprint != manifest.preset_fingerprint {
+        bail!("Preset changed since Calibration; refresh before resuming");
+    }
+    let model_path = require_regular_file(Path::new(&manifest.model_path))
+        .map_err(|error| anyhow!("Calibration model is no longer available: {error:?}"))?;
+    let bench_path = require_regular_file(Path::new(&manifest.bench_path))
+        .map_err(|error| anyhow!("Calibration bench binary is no longer available: {error:?}"))?;
+    let events = read_events(&journal_path)?;
+    let suspected = suspected_crash_trials(&events);
+    for trial_id in suspected {
+        append_event(
+            &journal_path,
+            &JournalEvent::new(JournalEventKind::TrialAbandoned, Some(trial_id)),
+        )?;
+    }
+    let prior_results = read_trial_results(&results_path)?;
+    snapshot.state = CalibrationJobState::Queued;
+    snapshot.phase = "resuming".into();
+    snapshot
+        .diagnostics
+        .push("Explicit resume confirmed; finished trials will not be repeated".into());
+    snapshot.diagnostics.truncate(MAX_DIAGNOSTICS);
+    write_snapshot(&snapshot_path, &snapshot)?;
+    append_event(
+        &journal_path,
+        &JournalEvent::new(JournalEventKind::JobResumed, None),
+    )?;
+    let runtime = RuntimeJob {
+        snapshot: Arc::new(Mutex::new(snapshot.clone())),
+        cancel: Arc::new(AtomicBool::new(false)),
+        cancel_notify: Arc::new(Notify::new()),
+        snapshot_path,
+        journal_path,
+        results_path,
+    };
+    JOBS.lock()
+        .map_err(|_| anyhow!("Calibration registry unavailable"))?
+        .insert(id.to_string(), runtime.clone());
+    tokio::spawn(run_job(
+        id.to_string(),
+        config,
+        preset,
+        manifest.workload,
+        manifest.candidates,
+        model_path,
+        bench_path,
+        manifest.fingerprint,
+        manifest.budget,
+        runtime,
+        prior_results,
+    ));
+    Ok(Some(snapshot))
+}
+
 pub fn get(config: &AppConfig, id: &str) -> Result<Option<CalibrationJobSnapshot>> {
+    validate_job_id(id)?;
     if let Some(runtime) = JOBS
         .lock()
         .map_err(|_| anyhow!("Calibration registry unavailable"))?
@@ -330,7 +479,99 @@ pub fn get(config: &AppConfig, id: &str) -> Result<Option<CalibrationJobSnapshot
     Ok(Some(snapshot))
 }
 
+/// List durable job snapshots from the active application home. Terminal and
+/// recovered jobs are retained until the user explicitly forgets them.
+pub fn list(config: &AppConfig) -> Result<Vec<CalibrationJobSnapshot>> {
+    let root = config.app_paths.calibration_jobs_dir();
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut snapshots = Vec::new();
+    for entry in fs::read_dir(&root).context("list Calibration job directory")? {
+        let entry = entry.context("read Calibration job entry")?;
+        let file_type = entry.file_type().context("inspect Calibration job entry")?;
+        if !file_type.is_dir() {
+            continue;
+        }
+        let id = entry.file_name().to_string_lossy().into_owned();
+        if !is_safe_calibration_id(&id) {
+            continue;
+        }
+        if let Some(snapshot) = get(config, &id)? {
+            snapshots.push(snapshot);
+        }
+    }
+    snapshots.sort_by(|left, right| left.id.cmp(&right.id));
+    Ok(snapshots)
+}
+
+/// Forget a terminal calibration job, its receipt, and any private rollback
+/// backups referenced by that receipt. Active jobs must be cancelled and
+/// allowed to reach a terminal state first.
+pub fn forget(config: &AppConfig, id: &str, confirmation: &str) -> Result<bool> {
+    if confirmation != FORGET_CONFIRMATION {
+        bail!("Exact confirmation FORGET_CALIBRATION required");
+    }
+    validate_job_id(id)?;
+    let runtime = JOBS
+        .lock()
+        .map_err(|_| anyhow!("Calibration registry unavailable"))?
+        .get(id)
+        .cloned();
+    if let Some(runtime) = runtime {
+        let snapshot = runtime
+            .snapshot
+            .lock()
+            .map_err(|_| anyhow!("Calibration job unavailable"))?
+            .clone();
+        if matches!(
+            snapshot.state,
+            CalibrationJobState::Queued
+                | CalibrationJobState::Running
+                | CalibrationJobState::Cancelling
+        ) {
+            bail!("active Calibration job must be cancelled before forgetting");
+        }
+    }
+
+    let receipt = get_receipt(config, id)?;
+    if let Some(receipt) = receipt {
+        for record in receipt.apply_history {
+            if is_safe_calibration_id(&record.rollback_id) {
+                let backup = config
+                    .app_paths
+                    .calibration_apply_backups_dir()
+                    .join(format!("{}.json", record.rollback_id));
+                if backup.exists() {
+                    fs::remove_file(backup).context("remove Calibration rollback backup")?;
+                }
+            }
+        }
+    }
+
+    let job_dir = config.app_paths.calibration_jobs_dir().join(id);
+    if job_dir.exists() {
+        let metadata = fs::symlink_metadata(&job_dir).context("inspect Calibration job")?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            bail!("Calibration job path is not a directory");
+        }
+        fs::remove_dir_all(&job_dir).context("remove Calibration job")?;
+    }
+    let receipt_path = config
+        .app_paths
+        .calibration_receipts_dir()
+        .join(format!("{id}.json"));
+    if receipt_path.exists() {
+        fs::remove_file(receipt_path).context("remove Calibration receipt")?;
+    }
+    JOBS.lock()
+        .map_err(|_| anyhow!("Calibration registry unavailable"))?
+        .remove(id);
+    Ok(true)
+}
+
 pub fn get_receipt(config: &AppConfig, id: &str) -> Result<Option<CalibrationReceipt>> {
+    validate_job_id(id)?;
     let path = config
         .app_paths
         .calibration_receipts_dir()
@@ -344,7 +585,27 @@ pub fn get_receipt(config: &AppConfig, id: &str) -> Result<Option<CalibrationRec
     ))
 }
 
+pub fn get_receipt_view(config: &AppConfig, id: &str) -> Result<Option<CalibrationReceiptView>> {
+    Ok(
+        get_receipt(config, id)?.map(|receipt| CalibrationReceiptView {
+            schema_version: receipt.schema_version,
+            method_version: receipt.method_version,
+            job_id: receipt.job_id,
+            fingerprint: receipt.fingerprint,
+            measurement: receipt.measurement,
+            budget: receipt.budget,
+            candidate_results: receipt.candidate_results,
+            analysis: receipt.analysis,
+            selected_candidate: receipt.selected_candidate,
+            preset_id: receipt.preset_id,
+            preset_fingerprint: receipt.preset_fingerprint,
+            apply_history: receipt.apply_history,
+        }),
+    )
+}
+
 pub fn cancel(config: &AppConfig, id: &str) -> Result<Option<CalibrationJobSnapshot>> {
+    validate_job_id(id)?;
     let runtime = JOBS
         .lock()
         .map_err(|_| anyhow!("Calibration registry unavailable"))?
@@ -383,6 +644,7 @@ async fn run_job(
     fingerprint: String,
     budget: CalibrationBudget,
     runtime: RuntimeJob,
+    mut candidate_results: Vec<CalibrationCandidateResult>,
 ) {
     let _permit = match JOB_GATE.clone().acquire_owned().await {
         Ok(permit) => permit,
@@ -403,8 +665,14 @@ async fn run_job(
         return;
     }
 
-    let mut candidate_results = Vec::new();
+    let finished_ids = candidate_results
+        .iter()
+        .map(|result| result.candidate.id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
     for candidate in candidates {
+        if finished_ids.contains(&candidate.id) {
+            continue;
+        }
         if runtime.cancel.load(Ordering::Acquire) {
             let _ = append_event(
                 &runtime.journal_path,
@@ -488,6 +756,15 @@ async fn run_job(
             candidate,
             measurement,
         });
+        if let Some(result) = candidate_results.last()
+            && let Err(error) = append_trial_result(&runtime.results_path, result)
+        {
+            let _ = fail_job(
+                &runtime,
+                &format!("Calibration trial result could not be persisted: {error}"),
+            );
+            return;
+        }
         let _ = append_event(
             &runtime.journal_path,
             &JournalEvent::new(JournalEventKind::TrialFinished, Some(candidate_id)),
@@ -505,6 +782,12 @@ async fn run_job(
                 return;
             }
             let trial_id = format!("{}-verification", candidate.id);
+            if candidate_results
+                .iter()
+                .any(|result| result.candidate.id == trial_id)
+            {
+                continue;
+            }
             let journal_result = append_event(
                 &runtime.journal_path,
                 &JournalEvent::new(JournalEventKind::TrialPlanned, Some(trial_id.clone())),
@@ -545,6 +828,15 @@ async fn run_job(
                 },
                 measurement,
             });
+            if let Some(result) = candidate_results.last()
+                && let Err(error) = append_trial_result(&runtime.results_path, result)
+            {
+                let _ = fail_job(
+                    &runtime,
+                    &format!("Calibration verification result could not be persisted: {error}"),
+                );
+                return;
+            }
             if let Err(error) = append_event(
                 &runtime.journal_path,
                 &JournalEvent::new(JournalEventKind::TrialFinished, Some(trial_id)),
@@ -619,6 +911,7 @@ async fn run_job(
 
 const APPLY_CONFIRMATION: &str = "APPLY_CALIBRATION";
 const ROLLBACK_CONFIRMATION: &str = "ROLLBACK_CALIBRATION";
+const FORGET_CONFIRMATION: &str = "FORGET_CALIBRATION";
 
 pub fn apply_confirmation_phrase() -> &'static str {
     APPLY_CONFIRMATION
@@ -628,12 +921,17 @@ pub fn rollback_confirmation_phrase() -> &'static str {
     ROLLBACK_CONFIRMATION
 }
 
+pub fn forget_confirmation_phrase() -> &'static str {
+    FORGET_CONFIRMATION
+}
+
 pub fn apply(
     config: &AppConfig,
     state: &AppState,
     job_id: &str,
     request: ApplyCalibrationRequest,
 ) -> Result<ApplyCalibrationResult> {
+    validate_job_id(job_id)?;
     if request.exact_confirmation.as_deref() != Some(APPLY_CONFIRMATION) {
         bail!("Exact confirmation APPLY_CALIBRATION is required");
     }
@@ -751,6 +1049,7 @@ pub fn rollback(
     job_id: &str,
     request: RollbackCalibrationRequest,
 ) -> Result<RollbackCalibrationResult> {
+    validate_job_id(job_id)?;
     if request.exact_confirmation.as_deref() != Some(ROLLBACK_CONFIRMATION) {
         bail!("Exact confirmation ROLLBACK_CALIBRATION is required");
     }
@@ -848,6 +1147,7 @@ pub async fn apply_with_validation(
     job_id: &str,
     request: ApplyCalibrationRequest,
 ) -> Result<ApplyCalibrationResult> {
+    validate_job_id(job_id)?;
     let source_id = if request.target_preset_id.is_empty() {
         get_receipt(config, job_id)?
             .ok_or_else(|| anyhow!("Calibration receipt not found"))?
@@ -1211,6 +1511,14 @@ fn sanitize_error(error: &dyn std::fmt::Display) -> String {
         .collect()
 }
 
+fn validate_job_id(id: &str) -> Result<()> {
+    if is_safe_calibration_id(id) {
+        Ok(())
+    } else {
+        bail!("invalid calibration job identifier")
+    }
+}
+
 fn write_receipt(path: &Path, receipt: &CalibrationReceipt) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -1363,5 +1671,44 @@ mod tests {
         assert_eq!(restored.id, preset.id);
         assert_eq!(restored.name, preset.name);
         assert_eq!(restored.api_key, preset.api_key);
+    }
+
+    #[test]
+    fn public_job_operations_reject_path_traversal() {
+        let config = AppConfig::for_test(None, None);
+        assert!(get(&config, "../escape").is_err());
+        assert!(get_receipt_view(&config, "/absolute").is_err());
+        assert!(forget(&config, "job with spaces", FORGET_CONFIRMATION).is_err());
+    }
+
+    #[test]
+    fn forgetting_requires_exact_confirmation() {
+        let config = AppConfig::for_test(None, None);
+        let error = forget(&config, "missing-job", "FORGET").expect_err("confirmation required");
+        assert!(error.to_string().contains("FORGET_CALIBRATION"));
+    }
+
+    #[test]
+    fn public_receipt_projection_does_not_include_private_paths() {
+        let view = CalibrationReceiptView {
+            schema_version: 1,
+            method_version: "test".into(),
+            job_id: "job".into(),
+            fingerprint: CalibrationFingerprint::current(
+                InferenceBackend::LlamaCpp,
+                CalibrationWorkload::default(),
+            ),
+            measurement: Default::default(),
+            budget: CalibrationBudget::Quick,
+            candidate_results: Vec::new(),
+            analysis: Default::default(),
+            selected_candidate: None,
+            preset_id: "preset".into(),
+            preset_fingerprint: "fingerprint".into(),
+            apply_history: Vec::new(),
+        };
+        let encoded = serde_json::to_string(&view).expect("serialize public receipt");
+        assert!(!encoded.contains("model_path"));
+        assert!(!encoded.contains("bench_path"));
     }
 }
