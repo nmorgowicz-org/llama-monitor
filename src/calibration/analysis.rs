@@ -5,6 +5,7 @@
 
 use super::{CalibrationCandidateResult, TrialStatus};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -42,6 +43,17 @@ pub struct CalibrationAnalysis {
     pub balanced_candidate: Option<String>,
     pub max_context_candidate: Option<String>,
     pub warnings: Vec<String>,
+    pub main_effects: Vec<MainEffect>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct MainEffect {
+    pub factor: String,
+    pub level: String,
+    pub sample_count: usize,
+    pub median_effective_tps: f64,
+    pub delta_from_factor_mean: f64,
 }
 
 pub fn analyze(results: &[CalibrationCandidateResult]) -> CalibrationAnalysis {
@@ -93,6 +105,7 @@ pub fn analyze(results: &[CalibrationCandidateResult]) -> CalibrationAnalysis {
         .filter(|candidate| candidate.noise_warning)
         .map(|candidate| format!("{} has high decode noise", candidate.candidate_id))
         .collect();
+    let main_effects = main_effects(results);
     CalibrationAnalysis {
         candidates,
         pareto_candidate_ids: pareto_ids,
@@ -100,7 +113,68 @@ pub fn analyze(results: &[CalibrationCandidateResult]) -> CalibrationAnalysis {
         balanced_candidate: balanced,
         max_context_candidate: max_context,
         warnings,
+        main_effects,
     }
+}
+
+fn main_effects(results: &[CalibrationCandidateResult]) -> Vec<MainEffect> {
+    let mut grouped: BTreeMap<(String, String), Vec<f64>> = BTreeMap::new();
+    for result in results.iter().filter(|result| valid(&result.measurement)) {
+        let value = median(&result.measurement.effective_tps_samples);
+        if value <= 0.0 {
+            continue;
+        }
+        for (factor, level) in factor_levels(&result.candidate.typed_patch) {
+            grouped.entry((factor, level)).or_default().push(value);
+        }
+    }
+    let factor_means = grouped.iter().fold(
+        BTreeMap::<String, Vec<f64>>::new(),
+        |mut means, ((factor, _), values)| {
+            means
+                .entry(factor.clone())
+                .or_default()
+                .push(median(values));
+            means
+        },
+    );
+    grouped
+        .into_iter()
+        .map(|((factor, level), values)| {
+            let median_effective_tps = median(&values);
+            let mean = factor_means
+                .get(&factor)
+                .map(|values| values.iter().sum::<f64>() / values.len() as f64)
+                .unwrap_or(0.0);
+            MainEffect {
+                factor,
+                level,
+                sample_count: values.len(),
+                median_effective_tps,
+                delta_from_factor_mean: median_effective_tps - mean,
+            }
+        })
+        .collect()
+}
+
+fn factor_levels(patch: &super::LlamaCppCalibrationPatch) -> Vec<(String, String)> {
+    let mut levels = Vec::new();
+    if let Some(value) = patch.context_size {
+        levels.push(("context_size".into(), value.to_string()));
+    }
+    if let Some(value) = patch.batch_size {
+        levels.push(("batch_size".into(), value.to_string()));
+    }
+    if let Some(value) = patch.ubatch_size {
+        levels.push(("ubatch_size".into(), value.to_string()));
+    }
+    if let Some(value) = patch.threads {
+        levels.push(("threads".into(), value.to_string()));
+    }
+    if let Some(value) = patch.flash_attn {
+        levels.push(("flash_attn".into(), value.to_string()));
+    }
+    levels
 }
 
 fn pareto_frontier(candidates: &[CandidateAnalysis]) -> Vec<String> {
@@ -243,5 +317,11 @@ mod tests {
         assert_eq!(analysis.pareto_candidate_ids, ["fast", "context"]);
         assert_eq!(analysis.candidates[1].baseline_delta_tg_tps, Some(9.0));
         assert!(!analysis.candidates[3].pareto);
+        assert!(
+            analysis
+                .main_effects
+                .iter()
+                .any(|effect| effect.factor == "context_size" && effect.level == "8192")
+        );
     }
 }
