@@ -1,4 +1,4 @@
-# Calibration Phase 1 evidence
+# Calibration Phase 1 evidence — source-side closed
 
 Date: 2026-08-13
 

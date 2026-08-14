@@ -30,6 +30,13 @@ The recommended implementation is a **native Rust calibration service** that bor
 
 ### Current gate audit (2026-08-13)
 
+**Phase 1 source-side closure:** verified by
+`docs/plans/evidence/20260813-llama-optimize/phase-01/README.md`.
+Durable lifecycle, authenticated routes, restart recovery, redacted receipts,
+path safety, and applicable macOS/Linux validation are complete. Malformed
+input/security sweep coverage and native Windows restart/cancellation receipts
+remain final Phase 10 return markers and do not reopen Phase 1.
+
 Phase 0 source-side gates pass: backend-qualified benchmark dispatch,
 metadata provenance, attribution, authentication/UI regressions, and the
 dedicated Phase 0 evidence receipt are complete. Native Windows capability and
