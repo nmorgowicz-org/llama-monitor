@@ -11,8 +11,32 @@
 //! `llama-server` (the llama.cpp release bundle ships both).
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::process::Stdio;
+use std::time::{Duration, Instant};
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
+
+pub const BENCH_MAX_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BenchFailureKind {
+    Launch,
+    Timeout,
+    Oom,
+    NonZero,
+    OutputLimit,
+}
+
+#[derive(Debug, Clone)]
+pub struct BenchRunReceipt {
+    pub stdout: String,
+    pub stderr: String,
+    pub wall_time: Duration,
+    pub exit_code: Option<i32>,
+    pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
+    pub failure: Option<BenchFailureKind>,
+}
 
 /// One measured point in a depth sweep.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -149,22 +173,115 @@ async fn run_bench(
         ));
     }
 
-    let mut cmd = Command::new(bench_bin);
-    cmd.current_dir(cwd);
-    cmd.args(args);
-    cmd.kill_on_drop(true);
-
-    let output = tokio::time::timeout(timeout, cmd.output())
-        .await
-        .map_err(|_| "llama-bench timed out".to_string())?
-        .map_err(|e| format!("Failed to launch llama-bench: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let tail: String = stderr.lines().rev().take(5).collect::<Vec<_>>().join(" | ");
-        return Err(format!("llama-bench exited with error: {tail}"));
+    let receipt = run_bench_receipt(bench_bin, cwd, args, timeout).await?;
+    if let Some(failure) = receipt.failure {
+        let tail: String = receipt
+            .stderr
+            .lines()
+            .rev()
+            .take(5)
+            .collect::<Vec<_>>()
+            .join(" | ");
+        return Err(match failure {
+            BenchFailureKind::Timeout => "llama-bench timed out".to_string(),
+            BenchFailureKind::OutputLimit => {
+                "llama-bench output exceeded the safety limit".to_string()
+            }
+            _ if tail.is_empty() => format!("llama-bench failed ({failure:?})"),
+            _ => format!("llama-bench failed ({failure:?}): {tail}"),
+        });
     }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    Ok(receipt.stdout)
+}
+
+/// Run a managed benchmark with bounded stdout/stderr and a structured
+/// failure receipt. The existing sweep helpers retain their string API while
+/// callers migrate to this safer primitive.
+pub async fn run_bench_receipt(
+    bench_bin: &Path,
+    cwd: &Path,
+    args: &[String],
+    timeout: Duration,
+) -> Result<BenchRunReceipt, String> {
+    if !bench_bin.is_file() {
+        return Err(format!(
+            "llama-bench not found at {}. It ships with the llama.cpp release alongside llama-server.",
+            bench_bin.display()
+        ));
+    }
+    let started = Instant::now();
+    let mut command = Command::new(bench_bin);
+    command
+        .current_dir(cwd)
+        .args(args)
+        .kill_on_drop(true)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("Failed to launch llama-bench: {error}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "llama-bench stdout pipe unavailable".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "llama-bench stderr pipe unavailable".to_string())?;
+    let capture = async move {
+        let mut stdout = stdout.take(BENCH_MAX_OUTPUT_BYTES as u64);
+        let mut stderr = stderr.take(BENCH_MAX_OUTPUT_BYTES as u64);
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let (out_result, err_result) =
+            tokio::join!(stdout.read_to_end(&mut out), stderr.read_to_end(&mut err),);
+        out_result.map_err(|error| error.to_string())?;
+        err_result.map_err(|error| error.to_string())?;
+        let out_truncated = out.len() >= BENCH_MAX_OUTPUT_BYTES;
+        let err_truncated = err.len() >= BENCH_MAX_OUTPUT_BYTES;
+        Ok::<_, String>((out, err, out_truncated, err_truncated))
+    };
+    let (stdout, stderr, stdout_truncated, stderr_truncated) =
+        match tokio::time::timeout(timeout, capture).await {
+            Ok(result) => result?,
+            Err(_) => {
+                let _ = child.kill().await;
+                return Ok(BenchRunReceipt {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    wall_time: started.elapsed(),
+                    exit_code: None,
+                    stdout_truncated: false,
+                    stderr_truncated: false,
+                    failure: Some(BenchFailureKind::Timeout),
+                });
+            }
+        };
+    let status = child
+        .wait()
+        .await
+        .map_err(|error| format!("Failed waiting for llama-bench: {error}"))?;
+    let stdout_text = String::from_utf8_lossy(&stdout).into_owned();
+    let stderr_text = String::from_utf8_lossy(&stderr).into_owned();
+    let stderr_lower = stderr_text.to_ascii_lowercase();
+    let failure = if stdout_truncated || stderr_truncated {
+        Some(BenchFailureKind::OutputLimit)
+    } else if status.success() {
+        None
+    } else if stderr_lower.contains("out of memory") || stderr_lower.contains("oom") {
+        Some(BenchFailureKind::Oom)
+    } else {
+        Some(BenchFailureKind::NonZero)
+    };
+    Ok(BenchRunReceipt {
+        stdout: stdout_text,
+        stderr: stderr_text,
+        wall_time: started.elapsed(),
+        exit_code: status.code(),
+        stdout_truncated,
+        stderr_truncated,
+        failure,
+    })
 }
 
 /// Run a depth sweep: prefill (512) + decode (64) at each requested depth.
@@ -378,5 +495,35 @@ mod tests {
         } else {
             "llama-bench"
         }));
+    }
+
+    #[tokio::test]
+    async fn bounded_receipt_classifies_missing_binary() {
+        let result = run_bench_receipt(
+            Path::new("/definitely/missing/llama-bench"),
+            Path::new("."),
+            &[],
+            Duration::from_millis(20),
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn bounded_receipt_classifies_oom_without_unbounded_output() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().expect("tempdir");
+        let script = temp.path().join("fake-bench");
+        std::fs::write(&script, "#!/bin/sh\necho 'out of memory' >&2\nexit 1\n").expect("script");
+        let mut permissions = std::fs::metadata(&script).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&script, permissions).expect("permissions");
+        let receipt = run_bench_receipt(&script, temp.path(), &[], Duration::from_secs(5))
+            .await
+            .expect("receipt");
+        assert_eq!(receipt.failure, Some(BenchFailureKind::Oom));
+        assert!(!receipt.stdout_truncated);
+        assert!(!receipt.stderr_truncated);
     }
 }
