@@ -51,6 +51,14 @@ forget semantics are implemented and covered by the Phase 1 evidence receipt.
 Route smoke/auth coverage passes; malformed-input matrix and native Windows
 restart receipts remain final qualification gates.
 
+### Phase 6 source audit (2026-08-14)
+
+Phase 6 remains **not started** and must stay open. The current implementation exposes calibration only from the Preset Editor (`static/index.html`, `static/js/features/calibration.js`) and has no Spawn Wizard receipt-lookup route, exact-fingerprint matching path, queued-calibration affordance, or wizard calibration state. `src/web/api/calibration.rs` currently supports lookup by calibration job ID only; it does not expose a model/fingerprint query suitable for wizard reuse. The Spawn Wizard still provides the ordinary llama.cpp flow and payload builders (`static/js/features/spawn-wizard.js`, `static/js/features/spawn-wizard-review-step.js`, `static/js/features/spawn-wizard-spawn.js`) with no calibration integration.
+
+The reusable seams are present: local GGUF introspection is already performed during wizard model setup, and `static/js/features/spawn-wizard-groups.js` is the canonical control registry. Phase 6 must use those existing events/controls when implemented; it must not introduce a parallel hidden settings object. The existing `wizard-llamacpp` capture group (`tests/ui/capture/scenarios/wizard-llamacpp/`) has no calibration scenario, and `tests/ui/core/spawn-wizard.spec.js` has no receipt reuse, stale-fingerprint, queued-job, or reopen/duplicate-job coverage.
+
+**Status:** 0/7 Phase 6 tasks and 0/5 Phase 6 verification gates are complete. No Phase 6 behavior is claimed for 2.0.0 until exact-receipt reuse, explicit post-download opt-in, ordinary-flow preservation, job visibility/idempotency, Rapid-MLX separation, and release-built wizard capture/E2E coverage are implemented and validated. Native Windows qualification remains a later return marker and is not counted against this source-side audit.
+
 ### 2.0.0 release boundary
 
 Calibration v1 is a required part of the Local LLM Foundry 2.0.0 product and release story. It must land before the rebrand plan's Phase 12 cross-platform/security qualification begins. Phase 12 and Phase 13 must qualify and visually accept Calibration together with migration, packaging, auth, runtime, and the rest of the release candidate; adding or materially changing it afterward reopens those gates.
