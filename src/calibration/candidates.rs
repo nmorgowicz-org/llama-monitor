@@ -14,6 +14,7 @@ use super::design::{OrthogonalArray, generate};
 pub const BALANCED_MAX_SCREEN_TRIALS: usize = 48;
 pub const BALANCED_MAX_OA_ROWS: usize = 25;
 pub const BALANCED_MAX_VERIFICATION_CANDIDATES: usize = 2;
+const BALANCED_BATCH_LEVELS: [u32; 5] = [512, 1024, 1536, 2048, 4096];
 
 /// The deliberately small, typed factor surface used by Balanced v1.
 ///
@@ -85,7 +86,7 @@ pub fn validate_balanced_budget(
 pub fn quick_candidates(
     preset: &ModelPreset,
     workload: &CalibrationWorkload,
-    capabilities: Option<&CapabilitySnapshot>,
+    _capabilities: Option<&CapabilitySnapshot>,
 ) -> Result<Vec<CalibrationCandidate>> {
     validate_common_inputs(preset, workload)?;
 
@@ -94,19 +95,6 @@ pub fn quick_candidates(
         LlamaCppCalibrationPatch::default(),
         vec!["baseline preset configuration".to_string()],
     )];
-
-    if capability_has(capabilities, "-fa", "--flash-attn")
-        && !matches!(preset.flash_attn.trim(), "on" | "1" | "true")
-    {
-        planned.push((
-            "flash-attention".into(),
-            LlamaCppCalibrationPatch {
-                flash_attn: Some(true),
-                ..Default::default()
-            },
-            vec!["llama-server help advertises flash attention".into()],
-        ));
-    }
 
     let current_batch = effective_batch(preset.batch_size);
     let current_ubatch = effective_ubatch(preset.ubatch_size);
@@ -127,7 +115,7 @@ pub fn quick_candidates(
 
 /// Build the deterministic Balanced orthogonal-array plan without launching
 /// any process. Four numeric core factors use L9 by default; a verified
-/// flash-attention runtime uses L25 while flash remains a separate control.
+/// flash-attention runtime uses L25 while preserving the preset's flash mode.
 pub fn balanced_plan(
     preset: &ModelPreset,
     workload: &CalibrationWorkload,
@@ -141,7 +129,12 @@ pub fn balanced_plan(
         OrthogonalArray::L9
     };
     let final_rows = array.rows();
-    validate_balanced_budget(0, final_rows, BALANCED_MAX_VERIFICATION_CANDIDATES)?;
+    let batch_coverage_trials = BALANCED_BATCH_LEVELS.len();
+    validate_balanced_budget(
+        batch_coverage_trials,
+        final_rows,
+        BALANCED_MAX_VERIFICATION_CANDIDATES,
+    )?;
     let design = generate(array, specs.len())?;
 
     let mut candidates = vec![materialize_candidate(
@@ -176,23 +169,35 @@ pub fn balanced_plan(
             evidence,
         )?);
     }
-    if capability_has(capabilities, "-fa", "--flash-attn")
-        && !matches!(preset.flash_attn.trim(), "on" | "1" | "true")
-    {
+    // L9 and L25 expose only three or five levels per factor. Keep explicit
+    // coverage for all five product batch values so the upper end is measured
+    // rather than silently omitted by the orthogonal-array mapping. Lower
+    // ubatch when necessary to preserve llama.cpp's `ubatch <= batch` rule.
+    let current_ubatch = effective_ubatch(preset.ubatch_size);
+    for batch_size in BALANCED_BATCH_LEVELS {
+        let patch = LlamaCppCalibrationPatch {
+            batch_size: Some(batch_size),
+            ubatch_size: Some(current_ubatch.min(batch_size)),
+            ..Default::default()
+        };
+        if candidates
+            .iter()
+            .any(|candidate| candidate.typed_patch == patch)
+        {
+            continue;
+        }
         candidates.push(materialize_candidate(
             preset,
             workload,
-            "flash-attention".into(),
-            LlamaCppCalibrationPatch {
-                flash_attn: Some(true),
-                ..Default::default()
-            },
-            vec!["llama-server help advertises flash attention control".into()],
+            format!("balanced-batch-{batch_size}"),
+            patch,
+            vec![format!("explicit batch coverage at {batch_size}")],
         )?);
     }
+
     Ok(BalancedPlan {
         array,
-        screen_trials: 0,
+        screen_trials: batch_coverage_trials,
         final_rows,
         verification_candidates: BALANCED_MAX_VERIFICATION_CANDIDATES,
         candidates,
@@ -231,12 +236,13 @@ fn factor_catalog(
     workload: &CalibrationWorkload,
     _capabilities: Option<&CapabilitySnapshot>,
 ) -> Result<Vec<FactorSpec>> {
-    let batch_levels = numeric_u32_levels(effective_batch(preset.batch_size), |value| {
-        LlamaCppCalibrationPatch {
+    let batch_levels: Vec<LlamaCppCalibrationPatch> = BALANCED_BATCH_LEVELS
+        .into_iter()
+        .map(|value| LlamaCppCalibrationPatch {
             batch_size: Some(value),
             ..Default::default()
-        }
-    });
+        })
+        .collect();
     let batch_floor = batch_levels
         .iter()
         .filter_map(|patch| patch.batch_size)
@@ -281,23 +287,6 @@ fn factor_catalog(
         },
     ];
     Ok(specs)
-}
-
-fn numeric_u32_levels<F>(baseline: u32, make_patch: F) -> Vec<LlamaCppCalibrationPatch>
-where
-    F: Fn(u32) -> LlamaCppCalibrationPatch,
-{
-    let low = (baseline / 4).max(1);
-    let half = (baseline / 2).max(low);
-    let high = baseline.saturating_mul(2).max(baseline);
-    let one_half = baseline.saturating_add(baseline / 2).max(baseline);
-    vec![
-        make_patch(low),
-        make_patch(half),
-        make_patch(baseline),
-        make_patch(one_half),
-        make_patch(high),
-    ]
 }
 
 fn numeric_u32_levels_bounded<F>(
@@ -509,7 +498,12 @@ mod tests {
         );
         let with = quick_candidates(&preset, &workload, Some(&snapshot_with_flash()))
             .expect("capability candidates");
-        assert_eq!(with[1].id, "flash-attention");
+        assert_eq!(
+            with.iter()
+                .map(|candidate| candidate.id.as_str())
+                .collect::<Vec<_>>(),
+            ["baseline", "bounded-batch"]
+        );
     }
 
     #[test]
@@ -535,6 +529,25 @@ mod tests {
     }
 
     #[test]
+    fn balanced_plan_covers_batch_range_without_crossing_ubatch_bound() {
+        let mut preset = ModelPreset::default();
+        preset.batch_size = 2048;
+        preset.ubatch_size = 2048;
+        let plan =
+            balanced_plan(&preset, &CalibrationWorkload::default(), None).expect("balanced plan");
+        let mut observed = Vec::new();
+        for candidate in &plan.candidates {
+            let mut mapped = preset.clone();
+            super::super::executor::apply_patch_to_preset(&mut mapped, &candidate.typed_patch);
+            observed.push(effective_batch(mapped.batch_size));
+            assert!(effective_ubatch(mapped.ubatch_size) <= effective_batch(mapped.batch_size));
+        }
+        observed.sort_unstable();
+        observed.dedup();
+        assert_eq!(observed, BALANCED_BATCH_LEVELS);
+    }
+
+    #[test]
     fn balanced_plan_without_flash_uses_l9_and_never_emits_flash() {
         let preset = ModelPreset::default();
         let plan =
@@ -548,7 +561,7 @@ mod tests {
     }
 
     #[test]
-    fn balanced_flash_is_a_separate_control_not_a_binary_oa_factor() {
+    fn balanced_preserves_flash_setting_without_sweeping_it() {
         let plan = balanced_plan(
             &ModelPreset::default(),
             &CalibrationWorkload::default(),
@@ -556,12 +569,8 @@ mod tests {
         )
         .expect("balanced plan");
         assert_eq!(plan.array, OrthogonalArray::L25);
-        assert_eq!(
-            plan.candidates.last().expect("flash control").id,
-            "flash-attention"
-        );
         assert!(
-            plan.candidates[..plan.candidates.len() - 1]
+            plan.candidates
                 .iter()
                 .all(|candidate| candidate.typed_patch.flash_attn.is_none())
         );

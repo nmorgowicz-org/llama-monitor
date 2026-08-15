@@ -82,6 +82,14 @@ async function installHappyCalibration(page) {
         status: 200, contentType: 'application/json',
         body: JSON.stringify({ ok: true, receipt: {
             selected_candidate: 'bounded-batch',
+            baseline: {
+                effective: {
+                    batch_size: { value: '2048', source: 'calibration_policy' },
+                    ubatch_size: { value: '512', source: 'calibration_policy' },
+                },
+                llama_server_help_defaults: { batch_size: '2048', ubatch_size: '512' },
+                llama_server_help_sha256: 'help-hash',
+            },
             candidate_results: [
                 { candidate: { id: 'baseline' }, measurement: { status: 'ok', tg_tps_samples: [12.1] } },
                 { candidate: { id: 'bounded-batch' }, measurement: { status: 'ok', tg_tps_samples: [13.4] } },
@@ -103,6 +111,9 @@ test.describe('Calibration preset flow', () => {
         await page.locator('#calibration-start').click();
         await expect(page.locator('#calibration-apply')).toBeEnabled({ timeout: 5000 });
         await expect(page.locator('#calibration-candidates')).toContainText('13.4 tok/s');
+        await expect(page.locator('#calibration-baseline')).toContainText('batch size');
+        await expect(page.locator('#calibration-baseline')).toContainText('2048 (calibration policy)');
+        await expect(page.locator('#calibration-baseline-help-note')).toContainText('help-hash');
     });
 
     test('stale preflight is shown without opening a run', async ({ page }) => {

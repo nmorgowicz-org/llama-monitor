@@ -6,6 +6,7 @@
 
 use crate::inference::InferenceBackend;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 pub mod jobs;
 pub mod paths;
@@ -180,6 +181,38 @@ pub struct LlamaCppCalibrationPatch {
     pub n_cpu_moe: Option<i32>,
 }
 
+/// The control configuration actually measured by Calibration.
+///
+/// This is intentionally not called “llama.cpp defaults”: an omitted preset
+/// field can be normalized by the product (for example, q8_0 K-cache and
+/// f16 V-cache) before `llama-bench` is launched. The adjacent help-default
+/// table records what the managed server advertises for comparison.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct CalibrationBaseline {
+    pub effective: BTreeMap<String, CalibrationBaselineValue>,
+    pub llama_server_help_defaults: BTreeMap<String, String>,
+    pub llama_server_help_sha256: Option<String>,
+    pub llama_server_help_exit_code: Option<i32>,
+    pub llama_server_help_output_truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CalibrationBaselineValue {
+    pub value: String,
+    /// `preset`, `calibration_policy`, or `llama_server_help_default`.
+    pub source: String,
+}
+
+impl CalibrationBaselineValue {
+    pub fn new(value: impl Into<String>, source: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+            source: source.into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct CalibrationCandidate {
@@ -197,6 +230,7 @@ pub struct CalibrationReceipt {
     pub job_id: String,
     pub fingerprint: CalibrationFingerprint,
     pub measurement: CalibrationMeasurement,
+    pub baseline: CalibrationBaseline,
     pub budget: CalibrationBudget,
     pub candidate_results: Vec<CalibrationCandidateResult>,
     #[serde(default)]
@@ -292,7 +326,9 @@ pub struct CalibrationJobManifest {
     pub candidates: Vec<CalibrationCandidate>,
     pub model_path: String,
     pub bench_path: String,
-    pub fingerprint: String,
+    pub fingerprint: CalibrationFingerprint,
+    #[serde(default)]
+    pub baseline: CalibrationBaseline,
 }
 
 #[cfg(test)]

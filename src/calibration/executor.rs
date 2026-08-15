@@ -14,15 +14,18 @@ use super::jobs::{
 use super::paths::is_safe_calibration_id;
 use super::paths::{RegularFileError, require_regular_file};
 use super::{
-    CalibrationApplyRecord, CalibrationBudget, CalibrationCandidate, CalibrationCandidateResult,
-    CalibrationFingerprint, CalibrationJobManifest, CalibrationJobSnapshot, CalibrationJobState,
-    CalibrationMeasurement, CalibrationReceipt, CalibrationWorkload, LlamaCppCalibrationPatch,
-    StartCalibrationRequest, TrialStatus,
+    CalibrationApplyRecord, CalibrationBaseline, CalibrationBaselineValue, CalibrationBudget,
+    CalibrationCandidate, CalibrationCandidateResult, CalibrationFingerprint,
+    CalibrationJobManifest, CalibrationJobSnapshot, CalibrationJobState, CalibrationMeasurement,
+    CalibrationReceipt, CalibrationWorkload, GpuFingerprint, HardwareFingerprint,
+    LlamaCppCalibrationPatch, ModelFingerprint, RuntimeFingerprint, StartCalibrationRequest,
+    TrialStatus,
 };
 use crate::config::AppConfig;
 use crate::inference::InferenceBackend;
+use crate::inference::llama_cpp_capabilities::ExecutableIdentity;
 use crate::inference::llama_cpp_tools::{
-    LlamaCppTool, OptionalFitParams, ToolHelpEvidence, probe_help, resolve_tool,
+    LlamaCppTool, OptionalFitParams, ResolvedTool, ToolHelpEvidence, probe_help, resolve_tool,
 };
 use crate::llama::bench_runner::{SweepPoint, llama_bench_path, run_sweep_with_tokens};
 use crate::presets::{self, ModelPreset};
@@ -30,8 +33,8 @@ use crate::state::AppState;
 use anyhow::{Context, Result, anyhow, bail};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::fs;
-use std::io::Write;
+use std::fs::{self, File};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -65,12 +68,19 @@ pub struct CalibrationPreflight {
     pub backend: InferenceBackend,
     pub model_identity: String,
     pub server_identity: String,
+    pub server_sha256: String,
     pub bench_identity: String,
     /// SHA-256 identity of the exact managed sibling used for measurement.
     pub bench_sha256: String,
     /// Optional helper is intentionally non-blocking: missing support only
     /// disables predictive pruning, never measured calibration.
     pub fit_params_sha256: Option<String>,
+    /// Defaults parsed from the exact managed `llama-server --help` output.
+    /// Informational only; preset values remain the calibration authority.
+    pub server_help_sha256: Option<String>,
+    pub server_help_defaults: BTreeMap<String, String>,
+    pub server_help_exit_code: Option<i32>,
+    pub server_help_output_truncated: bool,
     pub bench_help_sha256: Option<String>,
     pub bench_help_flags: Vec<String>,
     pub bench_help_exit_code: Option<i32>,
@@ -101,6 +111,7 @@ pub struct CalibrationReceiptView {
     pub job_id: String,
     pub fingerprint: super::CalibrationFingerprint,
     pub measurement: super::CalibrationMeasurement,
+    pub baseline: super::CalibrationBaseline,
     pub budget: super::CalibrationBudget,
     pub candidate_results: Vec<super::CalibrationCandidateResult>,
     pub analysis: super::analysis::CalibrationAnalysis,
@@ -196,6 +207,7 @@ pub fn preflight(
             )
         })?;
     let bench = bench_tool.path.clone();
+    let server_sha256 = sha256_file(&config.llama_server_path)?;
     let fit_params_sha256 =
         match crate::inference::llama_cpp_tools::optional_fit_params(&config.llama_server_path) {
             OptionalFitParams::Available(tool) => Some(tool.identity.file_hash),
@@ -225,12 +237,17 @@ pub fn preflight(
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "llama-server".into()),
+        server_sha256,
         bench_identity: bench
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "llama-bench".into()),
         bench_sha256: bench_tool.identity.file_hash,
         fit_params_sha256,
+        server_help_sha256: None,
+        server_help_defaults: BTreeMap::new(),
+        server_help_exit_code: None,
+        server_help_output_truncated: false,
         bench_help_sha256: None,
         bench_help_flags: Vec::new(),
         bench_help_exit_code: None,
@@ -256,6 +273,16 @@ pub async fn enrich_preflight_with_help(
     config: &AppConfig,
     preflight: &mut CalibrationPreflight,
 ) -> Result<()> {
+    let server = ResolvedTool {
+        tool: LlamaCppTool::Server,
+        path: config.llama_server_path.clone(),
+        identity: ExecutableIdentity::from_path(&config.llama_server_path)?,
+    };
+    let server_evidence = probe_help(&server, &config.llama_server_cwd).await?;
+    preflight.server_help_sha256 = Some(server_evidence.help_sha256.clone());
+    preflight.server_help_defaults = server_evidence.defaults.clone();
+    preflight.server_help_exit_code = server_evidence.exit_code;
+    preflight.server_help_output_truncated = server_evidence.output_truncated;
     let bench = resolve_tool(&config.llama_server_path, LlamaCppTool::Bench)?;
     let evidence = probe_help(&bench, &config.llama_server_cwd).await?;
     apply_help_evidence(preflight, &evidence, false);
@@ -282,7 +309,7 @@ fn apply_help_evidence(
     }
 }
 
-pub fn start(
+pub async fn start(
     config: Arc<AppConfig>,
     state: AppState,
     request: StartCalibrationRequest,
@@ -306,19 +333,20 @@ pub fn start(
     if preset.backend != InferenceBackend::LlamaCpp {
         bail!("Calibration v1 supports llama.cpp presets only");
     }
-    let fingerprint = preset_fingerprint(&preset)?;
+    let preset_fingerprint = preset_fingerprint(&preset)?;
     if !request.expected_preset_fingerprint.is_empty()
-        && request.expected_preset_fingerprint != fingerprint
+        && request.expected_preset_fingerprint != preset_fingerprint
     {
         bail!("Preset changed since preflight; refresh before starting Calibration");
     }
-    let preflight = preflight(
+    let mut preflight = preflight(
         &config,
         &state,
         &request.preset_id,
         &request.workload,
         request.budget.clone(),
     )?;
+    enrich_preflight_with_help(&config, &mut preflight).await?;
     let candidates = match &request.budget {
         CalibrationBudget::Quick => quick_candidates(&preset, &request.workload, None)?,
         CalibrationBudget::Balanced => balanced_candidates(&preset, &request.workload, None)?,
@@ -326,6 +354,15 @@ pub fn start(
     };
     let model_path = resolve_model_path(&config, &preset.model_path)?;
     let bench_path = llama_bench_path(&config.llama_server_path);
+    let calibration_fingerprint = build_calibration_fingerprint(
+        &config,
+        &preset,
+        &request.workload,
+        &preflight,
+        &model_path,
+        &preset_fingerprint,
+    )?;
+    let baseline = calibration_baseline(&preset, &preflight);
     let id = crate::config::generate_random_token()
         .chars()
         .take(24)
@@ -350,13 +387,14 @@ pub fn start(
         &CalibrationJobManifest {
             schema_version: super::CALIBRATION_SCHEMA_VERSION,
             preset_id: preset.id.clone(),
-            preset_fingerprint: fingerprint.clone(),
+            preset_fingerprint: preset_fingerprint.clone(),
             workload: request.workload.clone(),
             budget: request.budget.clone(),
             candidates: candidates.clone(),
             model_path: model_path.to_string_lossy().into_owned(),
             bench_path: bench_path.to_string_lossy().into_owned(),
-            fingerprint: fingerprint.clone(),
+            fingerprint: calibration_fingerprint.clone(),
+            baseline: baseline.clone(),
         },
     )?;
     append_event(
@@ -399,7 +437,8 @@ pub fn start(
         candidates,
         model_path,
         bench_path,
-        fingerprint,
+        calibration_fingerprint,
+        baseline,
         request.budget,
         runtime,
         Vec::new(),
@@ -503,6 +542,7 @@ pub fn resume(
         model_path,
         bench_path,
         manifest.fingerprint,
+        manifest.baseline,
         manifest.budget,
         runtime,
         prior_results,
@@ -652,6 +692,7 @@ pub fn get_receipt_view(config: &AppConfig, id: &str) -> Result<Option<Calibrati
             job_id: receipt.job_id,
             fingerprint: receipt.fingerprint,
             measurement: receipt.measurement,
+            baseline: receipt.baseline,
             budget: receipt.budget,
             candidate_results: receipt.candidate_results,
             analysis: receipt.analysis,
@@ -700,7 +741,8 @@ async fn run_job(
     candidates: Vec<CalibrationCandidate>,
     model_path: PathBuf,
     bench_path: PathBuf,
-    fingerprint: String,
+    fingerprint: CalibrationFingerprint,
+    baseline: CalibrationBaseline,
     budget: CalibrationBudget,
     runtime: RuntimeJob,
     mut candidate_results: Vec<CalibrationCandidateResult>,
@@ -760,9 +802,14 @@ async fn run_job(
         let mut candidate_preset = preset.clone();
         apply_patch_to_preset(&mut candidate_preset, &candidate.typed_patch);
         let ngl = candidate_preset.gpu_layers.unwrap_or(99);
-        let flash_attn = matches!(candidate_preset.flash_attn.trim(), "on" | "1" | "true");
-        let ctk = non_empty_or(&candidate_preset.ctk, "q8_0");
-        let ctv = non_empty_or(&candidate_preset.ctv, "q8_0");
+        // An unset/auto preset follows the managed runtime's Metal default,
+        // which enables flash attention for quantized KV caches. Only an
+        // explicit off/false value disables it for a calibration candidate.
+        let flash_attn = calibration_flash_attn(&candidate_preset);
+        // Match the product preset defaults: quantized K cache with an f16 V
+        // cache. Forcing q8_0 for both sides can make valid models fail context
+        // creation before any candidate is measured.
+        let (ctk, ctv) = calibration_cache_types(&candidate_preset);
         let batch_size = if candidate_preset.batch_size == 0 {
             2048
         } else {
@@ -799,7 +846,11 @@ async fn run_job(
             return;
         }
         let measurement = match result {
-            Some(Ok(points)) => measurement_from_points(points),
+            Some(Ok(points)) => {
+                let mut measurement = measurement_from_points(points);
+                measurement.trial_id = candidate_id.clone();
+                measurement
+            }
             Some(Err(error)) => CalibrationMeasurement {
                 trial_id: candidate_id.clone(),
                 status: Some(TrialStatus::Error),
@@ -933,17 +984,17 @@ async fn run_job(
         .into(),
         job_id: id.clone(),
         fingerprint: CalibrationFingerprint {
-            baseline_config_hash: fingerprint.clone(),
             workload,
-            ..CalibrationFingerprint::current(InferenceBackend::LlamaCpp, Default::default())
+            ..fingerprint.clone()
         },
         measurement,
+        baseline,
         budget,
         candidate_results,
         analysis,
         selected_candidate,
         preset_id: preset.id.clone(),
-        preset_fingerprint: fingerprint.clone(),
+        preset_fingerprint: fingerprint.baseline_config_hash.clone(),
         apply_history: Vec::new(),
     };
     let receipt_path = config
@@ -1228,9 +1279,8 @@ pub async fn apply_with_validation(
     let model_path = resolve_model_path(config, &applied.model_path)?;
     let bench_path = llama_bench_path(&config.llama_server_path);
     let ngl = applied.gpu_layers.unwrap_or(99);
-    let flash_attn = matches!(applied.flash_attn.trim(), "on" | "1" | "true");
-    let ctk = non_empty_or(&applied.ctk, "q8_0");
-    let ctv = non_empty_or(&applied.ctv, "q8_0");
+    let flash_attn = calibration_flash_attn(&applied);
+    let (ctk, ctv) = calibration_cache_types(&applied);
     let batch_size = if applied.batch_size == 0 {
         2048
     } else {
@@ -1370,9 +1420,8 @@ async fn run_candidate_measurement(
     trial_id: &str,
 ) -> Option<CalibrationMeasurement> {
     let ngl = candidate_preset.gpu_layers.unwrap_or(99);
-    let flash_attn = matches!(candidate_preset.flash_attn.trim(), "on" | "1" | "true");
-    let ctk = non_empty_or(&candidate_preset.ctk, "q8_0");
-    let ctv = non_empty_or(&candidate_preset.ctv, "q8_0");
+    let flash_attn = calibration_flash_attn(candidate_preset);
+    let (ctk, ctv) = calibration_cache_types(candidate_preset);
     let batch_size = if candidate_preset.batch_size == 0 {
         2048
     } else {
@@ -1442,12 +1491,20 @@ fn find_preset(state: &AppState, id: &str) -> Result<ModelPreset> {
         .ok_or_else(|| anyhow!("Preset not found"))
 }
 
+const MAX_CALIBRATION_WORKLOAD_TOKENS: u32 = 32_768;
+
 fn validate_workload(workload: &super::CalibrationWorkload) -> Result<()> {
-    if workload.prompt_tokens == 0 || workload.prompt_tokens > 4096 {
-        bail!("Quick Calibration prompt length must be between 1 and 4096 tokens");
+    if workload.prompt_tokens == 0 || workload.prompt_tokens > MAX_CALIBRATION_WORKLOAD_TOKENS {
+        bail!(
+            "Calibration prompt length must be between 1 and {MAX_CALIBRATION_WORKLOAD_TOKENS} tokens"
+        );
     }
-    if workload.generation_tokens == 0 || workload.generation_tokens > 4096 {
-        bail!("Quick Calibration generation length must be between 1 and 4096 tokens");
+    if workload.generation_tokens == 0
+        || workload.generation_tokens > MAX_CALIBRATION_WORKLOAD_TOKENS
+    {
+        bail!(
+            "Calibration generation length must be between 1 and {MAX_CALIBRATION_WORKLOAD_TOKENS} tokens"
+        );
     }
     if workload.parallel_requests != 1 {
         bail!("Quick Calibration supports one request only");
@@ -1517,16 +1574,152 @@ fn library_relative_identity(config: &AppConfig, model: &Path) -> String {
         })
 }
 
+fn build_calibration_fingerprint(
+    config: &AppConfig,
+    _preset: &ModelPreset,
+    workload: &CalibrationWorkload,
+    preflight: &CalibrationPreflight,
+    model_path: &Path,
+    preset_fingerprint: &str,
+) -> Result<CalibrationFingerprint> {
+    let metadata = fs::metadata(model_path).context("read Calibration model metadata")?;
+    let header = crate::llama::gguf_meta::read_gguf_header_inventory(
+        model_path,
+        crate::llama::gguf_meta::MAX_INSPECTION_HEADER_BYTES,
+    )
+    .map_err(|error| anyhow!("read GGUF fingerprint header: {error}"))?;
+    let content_fingerprint = sha256_file_prefix(model_path, header.header_bytes)?;
+    let gguf = crate::llama::gguf_meta::read_gguf_metadata(model_path).ok();
+    let metadata_fingerprint = gguf
+        .as_ref()
+        .and_then(|metadata| serde_json::to_vec(metadata).ok())
+        .map(|bytes| sha256_bytes(&bytes))
+        .unwrap_or_else(|| content_fingerprint.clone());
+    let system = sysinfo::System::new_all();
+    let logical_cores = std::thread::available_parallelism()
+        .map(|count| count.get() as u32)
+        .unwrap_or_default();
+    let gpu_devices = crate::gpu::detect_backend(&config.gpu_backend)
+        .read_metrics()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(name, metrics)| {
+            let lower = name.to_ascii_lowercase();
+            let vendor = if lower.contains("nvidia") {
+                Some("nvidia".into())
+            } else if lower.contains("amd") || lower.contains("radeon") {
+                Some("amd".into())
+            } else if lower.contains("apple") {
+                Some("apple".into())
+            } else {
+                None
+            };
+            GpuFingerprint {
+                vendor,
+                name: Some(name),
+                device_id: None,
+                memory_bytes: (metrics.vram_total > 0).then_some(metrics.vram_total),
+            }
+        })
+        .collect();
+    let modified_unix_ms = metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default();
+
+    Ok(CalibrationFingerprint {
+        schema_version: super::CALIBRATION_SCHEMA_VERSION,
+        backend: InferenceBackend::LlamaCpp,
+        hardware: HardwareFingerprint {
+            os: std::env::consts::OS.into(),
+            arch: std::env::consts::ARCH.into(),
+            cpu_identity: system.cpus().first().map(|cpu| cpu.brand().to_string()),
+            physical_cores: sysinfo::System::physical_core_count().map(|count| count as u32),
+            logical_cores,
+            memory_bytes: system.total_memory(),
+            gpu_devices,
+            unified_memory: cfg!(target_os = "macos"),
+        },
+        model: ModelFingerprint {
+            library_relative_id: library_relative_identity(config, model_path),
+            file_size: metadata.len(),
+            modified_unix_ms,
+            content_fingerprint,
+            gguf_arch: gguf.and_then(|metadata| metadata.architecture),
+            metadata_fingerprint,
+        },
+        runtime: RuntimeFingerprint {
+            server_identity: preflight.server_identity.clone(),
+            server_sha256: preflight.server_sha256.clone(),
+            version: None,
+            capability_hash: preflight.bench_help_sha256.clone().unwrap_or_default(),
+            bench_sha256: preflight.bench_sha256.clone(),
+            fit_params_sha256: preflight.fit_params_sha256.clone(),
+        },
+        workload: workload.clone(),
+        baseline_config_hash: preset_fingerprint.into(),
+        factor_catalog_version: super::CALIBRATION_FACTOR_CATALOG_VERSION,
+    })
+}
+
+fn sha256_bytes(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn sha256_file(path: &Path) -> Result<String> {
+    sha256_file_prefix(path, u64::MAX)
+}
+
+fn sha256_file_prefix(path: &Path, limit: u64) -> Result<String> {
+    let mut file = File::open(path).with_context(|| format!("open {}", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut remaining = limit;
+    let mut buffer = [0u8; 1024 * 1024];
+    while remaining > 0 {
+        let read_limit = remaining.min(buffer.len() as u64) as usize;
+        let count = file.read(&mut buffer[..read_limit])?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+        remaining -= count as u64;
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
 fn measurement_from_points(points: Vec<SweepPoint>) -> CalibrationMeasurement {
     let mut pp = Vec::new();
     let mut tg = Vec::new();
     for point in points {
-        if point.pp_tps.is_finite() && point.pp_tps > 0.0 {
-            pp.push(point.pp_tps);
-        }
-        if point.tg_tps.is_finite() && point.tg_tps > 0.0 {
-            tg.push(point.tg_tps);
-        }
+        let pp_samples = if point.pp_samples.is_empty() {
+            vec![point.pp_tps]
+        } else {
+            point.pp_samples
+        };
+        pp.extend(
+            pp_samples
+                .into_iter()
+                .filter(|value| value.is_finite() && *value > 0.0),
+        );
+        let tg_samples = if point.tg_samples.is_empty() {
+            vec![point.tg_tps]
+        } else {
+            point.tg_samples
+        };
+        tg.extend(
+            tg_samples
+                .into_iter()
+                .filter(|value| value.is_finite() && *value > 0.0),
+        );
     }
     let effective = tg.clone();
     CalibrationMeasurement {
@@ -1551,6 +1744,208 @@ fn non_empty_or(value: &str, fallback: &str) -> String {
         fallback.into()
     } else {
         value.into()
+    }
+}
+
+fn calibration_cache_types(preset: &ModelPreset) -> (String, String) {
+    // Keep the product quality floor: q8_0 for K, f16 for V. Some hybrid
+    // architectures reject a quantized V cache during context creation.
+    (
+        non_empty_or(&preset.ctk, "q8_0"),
+        non_empty_or(&preset.ctv, "f16"),
+    )
+}
+
+fn calibration_flash_attn(preset: &ModelPreset) -> &'static str {
+    match preset.flash_attn.trim().to_ascii_lowercase().as_str() {
+        "on" | "1" | "true" => "on",
+        "off" | "0" | "false" => "off",
+        _ => "auto",
+    }
+}
+
+fn calibration_baseline(
+    preset: &ModelPreset,
+    preflight: &CalibrationPreflight,
+) -> CalibrationBaseline {
+    const HELP_KEYS: [&str; 10] = [
+        "ctx_size",
+        "threads",
+        "threads_batch",
+        "batch_size",
+        "ubatch_size",
+        "cache_type_k",
+        "cache_type_v",
+        "flash_attn",
+        "gpu_layers",
+        "n_cpu_moe",
+    ];
+    let mut effective = BTreeMap::new();
+    let mut add = |name: &str, value: String, source: &str| {
+        effective.insert(
+            name.to_string(),
+            CalibrationBaselineValue::new(value, source),
+        );
+    };
+    let help_default = |name: &str, fallback: &str| {
+        preflight
+            .server_help_defaults
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| fallback.to_string())
+    };
+
+    add(
+        "context_size",
+        if preset.context_size == 0 {
+            help_default("ctx_size", "0 (loaded model)")
+        } else {
+            preset.context_size.to_string()
+        },
+        if preset.context_size == 0 {
+            "llama_server_help_default"
+        } else {
+            "preset"
+        },
+    );
+    add(
+        "threads",
+        preset
+            .threads
+            .map_or_else(|| help_default("threads", "-1"), |value| value.to_string()),
+        if preset.threads.is_some() {
+            "preset"
+        } else {
+            "llama_server_help_default"
+        },
+    );
+    add(
+        "threads_batch",
+        preset.threads_batch.map_or_else(
+            || help_default("threads_batch", "same as threads"),
+            |value| value.to_string(),
+        ),
+        if preset.threads_batch.is_some() {
+            "preset"
+        } else {
+            "llama_server_help_default"
+        },
+    );
+    add(
+        "batch_size",
+        if preset.batch_size == 0 {
+            "2048".into()
+        } else {
+            preset.batch_size.to_string()
+        },
+        if preset.batch_size == 0 {
+            "calibration_policy"
+        } else {
+            "preset"
+        },
+    );
+    add(
+        "ubatch_size",
+        if preset.ubatch_size == 0 {
+            "512".into()
+        } else {
+            preset.ubatch_size.to_string()
+        },
+        if preset.ubatch_size == 0 {
+            "calibration_policy"
+        } else {
+            "preset"
+        },
+    );
+    let (ctk, ctv) = calibration_cache_types(preset);
+    add(
+        "cache_type_k",
+        ctk,
+        if preset.ctk.trim().is_empty() {
+            "calibration_policy"
+        } else {
+            "preset"
+        },
+    );
+    add(
+        "cache_type_v",
+        ctv,
+        if preset.ctv.trim().is_empty() {
+            "calibration_policy"
+        } else {
+            "preset"
+        },
+    );
+    add(
+        "flash_attn",
+        calibration_flash_attn(preset).into(),
+        if preset.flash_attn.trim().is_empty() {
+            "calibration_policy"
+        } else {
+            "preset"
+        },
+    );
+    add(
+        "gpu_layers",
+        preset.gpu_layers.map_or_else(
+            || "all (bench sentinel 99)".into(),
+            |value| value.to_string(),
+        ),
+        if preset.gpu_layers.is_some() {
+            "preset"
+        } else {
+            "calibration_policy"
+        },
+    );
+    add(
+        "n_cpu_moe",
+        preset
+            .n_cpu_moe
+            .map_or_else(|| "unset".into(), |value| value.to_string()),
+        if preset.n_cpu_moe.is_some() {
+            "preset"
+        } else {
+            "preset_omitted"
+        },
+    );
+
+    let help_defaults = preflight
+        .server_help_defaults
+        .iter()
+        .filter(|(key, _)| HELP_KEYS.contains(&key.as_str()))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    CalibrationBaseline {
+        effective,
+        llama_server_help_defaults: help_defaults,
+        llama_server_help_sha256: preflight.server_help_sha256.clone(),
+        llama_server_help_exit_code: preflight.server_help_exit_code,
+        llama_server_help_output_truncated: preflight.server_help_output_truncated,
+    }
+}
+
+#[cfg(test)]
+mod calibration_runtime_defaults_tests {
+    use super::*;
+
+    #[test]
+    fn preserves_product_q8_key_and_f16_value_defaults() {
+        let preset = ModelPreset::default();
+        assert_eq!(
+            calibration_cache_types(&preset),
+            ("q8_0".into(), "f16".into())
+        );
+
+        let mut explicit = preset.clone();
+        explicit.ctk = "f16".into();
+        explicit.ctv = "q8_0".into();
+        assert_eq!(
+            calibration_cache_types(&explicit),
+            ("f16".into(), "q8_0".into())
+        );
+        assert_eq!(calibration_flash_attn(&preset), "auto");
+        explicit.flash_attn = "off".into();
+        assert_eq!(calibration_flash_attn(&explicit), "off");
     }
 }
 
@@ -1683,8 +2078,29 @@ mod tests {
             depth: 1,
             pp_tps: f64::NAN,
             tg_tps: 0.0,
+            pp_stddev: 0.0,
+            tg_stddev: 0.0,
+            repetitions: 1,
+            pp_samples: Vec::new(),
+            tg_samples: Vec::new(),
         }]);
         assert_eq!(measurement.status, Some(TrialStatus::Implausible));
+    }
+
+    #[test]
+    fn measurement_preserves_benchmark_repetition_samples() {
+        let measurement = measurement_from_points(vec![SweepPoint {
+            depth: 0,
+            pp_tps: 100.0,
+            tg_tps: 20.0,
+            pp_stddev: 1.0,
+            tg_stddev: 0.5,
+            repetitions: 3,
+            pp_samples: vec![99.0, 100.0, 101.0],
+            tg_samples: vec![19.5, 20.0, 20.5],
+        }]);
+        assert_eq!(measurement.pp_tps_samples, [99.0, 100.0, 101.0]);
+        assert_eq!(measurement.tg_tps_samples, [19.5, 20.0, 20.5]);
     }
 
     #[test]
@@ -1758,6 +2174,7 @@ mod tests {
                 CalibrationWorkload::default(),
             ),
             measurement: Default::default(),
+            baseline: Default::default(),
             budget: CalibrationBudget::Quick,
             candidate_results: Vec::new(),
             analysis: Default::default(),
@@ -1769,5 +2186,304 @@ mod tests {
         let encoded = serde_json::to_string(&view).expect("serialize public receipt");
         assert!(!encoded.contains("model_path"));
         assert!(!encoded.contains("bench_path"));
+    }
+
+    #[cfg(unix)]
+    fn fake_apply_fixture(valid: bool) -> (tempfile::TempDir, AppConfig, AppState, String) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().expect("fixture tempdir");
+        let root = temp.path();
+        let models = root.join("models");
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&models).expect("models dir");
+        std::fs::create_dir_all(&bin).expect("bin dir");
+        let model = models.join("fixture.gguf");
+        std::fs::write(&model, b"deterministic fake model").expect("model fixture");
+        let server = bin.join("llama-server");
+        std::fs::write(&server, b"fake server").expect("server fixture");
+        let bench = bin.join("llama-bench");
+        let output = if valid {
+            r#"[
+                {"n_depth":4096,"n_gen":0,"n_prompt":512,"avg_ts":100000,"stddev":0.1,"n_rep":3,"samples_ts":[99999,100000,100001]},
+                {"n_depth":4096,"n_gen":256,"n_prompt":0,"avg_ts":100000,"stddev":0.1,"n_rep":3,"samples_ts":[99999,100000,100001]}
+            ]"#
+        } else {
+            r#"[{"n_depth":4096,"n_gen":256,"n_prompt":0,"avg_ts":0,"stddev":0,"n_rep":3}]"#
+        };
+        let escaped_output = output.replace('\'', "'\\''");
+        let script = format!("#!/bin/sh\nprintf '%s' '{escaped_output}'\n");
+        std::fs::write(&bench, script).expect("bench fixture");
+        let mut permissions = std::fs::metadata(&bench)
+            .expect("bench metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&bench, permissions).expect("bench executable");
+
+        let mut config = AppConfig::for_test(None, None);
+        config.app_paths = crate::paths::AppPaths::from_root(root.to_path_buf());
+        config.config_dir = root.to_path_buf();
+        config.models_dir = Some(models);
+        config.presets_file = root.join("presets.json");
+        config.llama_server_path = server;
+        config.llama_server_cwd = root.to_path_buf();
+        std::fs::create_dir_all(config.app_paths.calibration_receipts_dir()).expect("receipt dir");
+        std::fs::create_dir_all(config.app_paths.calibration_apply_backups_dir())
+            .expect("backup dir");
+
+        let mut preset = ModelPreset::default();
+        preset.id = "source".into();
+        preset.name = "Source".into();
+        preset.model_path = model.to_string_lossy().into_owned();
+        preset.batch_size = 512;
+        preset.ubatch_size = 512;
+        let fingerprint = preset_fingerprint(&preset).expect("preset fingerprint");
+        let candidate = CalibrationCandidate {
+            id: "candidate".into(),
+            typed_patch: LlamaCppCalibrationPatch {
+                batch_size: Some(512),
+                ubatch_size: Some(512),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let receipt = CalibrationReceipt {
+            fingerprint: CalibrationFingerprint {
+                baseline_config_hash: fingerprint.clone(),
+                workload: CalibrationWorkload::default(),
+                ..CalibrationFingerprint::current(
+                    InferenceBackend::LlamaCpp,
+                    CalibrationWorkload::default(),
+                )
+            },
+            job_id: "job-1".into(),
+            preset_id: preset.id.clone(),
+            preset_fingerprint: fingerprint.clone(),
+            selected_candidate: Some(candidate.id.clone()),
+            candidate_results: vec![CalibrationCandidateResult {
+                candidate,
+                measurement: CalibrationMeasurement {
+                    status: Some(TrialStatus::Ok),
+                    tg_tps_samples: vec![100.0],
+                    ..Default::default()
+                },
+            }],
+            ..Default::default()
+        };
+        let receipt_path = config
+            .app_paths
+            .calibration_receipts_dir()
+            .join("job-1.json");
+        write_receipt(&receipt_path, &receipt).expect("write receipt");
+        std::fs::write(
+            &config.presets_file,
+            serde_json::to_vec(&vec![preset]).expect("serialize preset"),
+        )
+        .expect("write presets");
+        let state = AppState::default();
+        *state.presets.lock().expect("preset state") =
+            serde_json::from_slice(&std::fs::read(&config.presets_file).expect("read presets"))
+                .expect("decode presets");
+        (temp, config, state, fingerprint)
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn post_apply_fake_runtime_persists_passed_validation() {
+        let (_temp, config, state, fingerprint) = fake_apply_fixture(true);
+        let result = apply_with_validation(
+            &config,
+            &state,
+            "job-1",
+            ApplyCalibrationRequest {
+                target_preset_id: "source".into(),
+                expected_target_fingerprint: fingerprint,
+                candidate_id: Some("candidate".into()),
+                create_derived: true,
+                exact_confirmation: Some(APPLY_CONFIRMATION.into()),
+                validate_after_apply: true,
+            },
+        )
+        .await
+        .expect("fake validation succeeds");
+        assert_eq!(result.validation, "passed");
+        let receipt = get_receipt(&config, "job-1")
+            .expect("read receipt")
+            .expect("receipt exists");
+        assert_eq!(receipt.apply_history.last().unwrap().validation, "passed");
+        assert!(
+            state
+                .presets
+                .lock()
+                .expect("preset state")
+                .iter()
+                .any(|preset| preset.name == "Source (Calibrated)")
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn post_apply_fake_runtime_rolls_back_failed_validation() {
+        let (_temp, config, state, fingerprint) = fake_apply_fixture(false);
+        let error = apply_with_validation(
+            &config,
+            &state,
+            "job-1",
+            ApplyCalibrationRequest {
+                target_preset_id: "source".into(),
+                expected_target_fingerprint: fingerprint,
+                candidate_id: Some("candidate".into()),
+                create_derived: true,
+                exact_confirmation: Some(APPLY_CONFIRMATION.into()),
+                validate_after_apply: true,
+            },
+        )
+        .await
+        .expect_err("fake validation fails");
+        assert!(
+            error
+                .to_string()
+                .contains("Post-apply Calibration validation failed")
+        );
+        assert!(
+            !state
+                .presets
+                .lock()
+                .expect("preset state")
+                .iter()
+                .any(|preset| preset.name == "Source (Calibrated)")
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn resume_fake_runtime_reuses_finished_results_once() {
+        let (_temp, config, state, fingerprint) = fake_apply_fixture(true);
+        let job_dir = config.app_paths.calibration_jobs_dir().join("resume-job");
+        std::fs::create_dir_all(&job_dir).expect("job dir");
+        let snapshot_path = job_dir.join("snapshot.json");
+        let journal_path = job_dir.join("journal.jsonl");
+        let results_path = job_dir.join("trial-results.jsonl");
+        let manifest_path = job_dir.join("manifest.json");
+        let preset = state
+            .presets
+            .lock()
+            .expect("preset state")
+            .first()
+            .cloned()
+            .expect("source preset");
+        let baseline = CalibrationCandidate {
+            id: "baseline".into(),
+            ..Default::default()
+        };
+        let pending = CalibrationCandidate {
+            id: "pending".into(),
+            typed_patch: LlamaCppCalibrationPatch {
+                batch_size: Some(512),
+                ubatch_size: Some(512),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let manifest = CalibrationJobManifest {
+            schema_version: super::super::CALIBRATION_SCHEMA_VERSION,
+            preset_id: preset.id,
+            preset_fingerprint: fingerprint.clone(),
+            workload: CalibrationWorkload::default(),
+            budget: CalibrationBudget::Quick,
+            candidates: vec![baseline.clone(), pending],
+            model_path: preset.model_path,
+            bench_path: config
+                .llama_server_path
+                .with_file_name("llama-bench")
+                .to_string_lossy()
+                .into_owned(),
+            fingerprint: CalibrationFingerprint {
+                baseline_config_hash: fingerprint,
+                ..CalibrationFingerprint::current(
+                    InferenceBackend::LlamaCpp,
+                    CalibrationWorkload::default(),
+                )
+            },
+            baseline: Default::default(),
+        };
+        write_manifest(&manifest_path, &manifest).expect("write manifest");
+        write_snapshot(
+            &snapshot_path,
+            &CalibrationJobSnapshot {
+                id: "resume-job".into(),
+                state: CalibrationJobState::Failed,
+                phase: "suspected_crash".into(),
+                completed_trials: 1,
+                planned_trials: 2,
+                diagnostics: vec!["suspected crash".into()],
+                receipt_id: None,
+            },
+        )
+        .expect("write recovered snapshot");
+        for (candidate_id, event) in [
+            ("baseline", JournalEventKind::TrialPlanned),
+            ("baseline", JournalEventKind::TrialStarted),
+            ("baseline", JournalEventKind::TrialFinished),
+            ("pending", JournalEventKind::TrialPlanned),
+            ("pending", JournalEventKind::TrialStarted),
+        ] {
+            append_event(
+                &journal_path,
+                &JournalEvent::new(event, Some(candidate_id.into())),
+            )
+            .expect("append resume event");
+        }
+        append_trial_result(
+            &results_path,
+            &CalibrationCandidateResult {
+                candidate: baseline,
+                measurement: CalibrationMeasurement {
+                    trial_id: "baseline".into(),
+                    status: Some(TrialStatus::Ok),
+                    pp_tps_samples: vec![100.0],
+                    tg_tps_samples: vec![100.0],
+                    ..Default::default()
+                },
+            },
+        )
+        .expect("write finished result");
+
+        resume(
+            Arc::new(config.clone()),
+            state,
+            "resume-job",
+            RESUME_CONFIRMATION,
+        )
+        .expect("resume accepted");
+        for _ in 0..250 {
+            if get(&config, "resume-job")
+                .expect("get resumed job")
+                .is_some_and(|snapshot| snapshot.state == CalibrationJobState::Complete)
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        assert_eq!(
+            get(&config, "resume-job")
+                .expect("get completed job")
+                .expect("resumed snapshot")
+                .state,
+            CalibrationJobState::Complete
+        );
+        let results = read_trial_results(&results_path).expect("read resumed results");
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| result.candidate.id == "baseline")
+                .count(),
+            1
+        );
+        assert!(
+            results
+                .iter()
+                .any(|result| result.candidate.id == "pending")
+        );
     }
 }

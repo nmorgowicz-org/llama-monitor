@@ -66,3 +66,46 @@
 [data-theme="light"] .calibration-status {
     background: color-mix(in srgb, var(--color-accent) 5%, var(--color-bg-elevated));
 }
+.calibration-baseline {
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 12px;
+    margin-top: 12px;
+    max-height: 280px;
+    overflow: auto;
+}
+
+.calibration-baseline h3,
+.calibration-baseline h4 {
+    margin: 0 0 6px;
+}
+
+.calibration-baseline h4 {
+    margin-top: 12px;
+    color: var(--color-text-muted);
+    font-size: 0.9rem;
+}
+
+.calibration-baseline p {
+    margin: 0 0 8px;
+    color: var(--color-text-muted);
+    font-size: 0.86rem;
+}
+
+.calibration-baseline-values {
+    display: grid;
+    grid-template-columns: minmax(130px, 1fr) minmax(150px, 2fr);
+    gap: 3px 12px;
+    margin: 0;
+    font-size: 0.84rem;
+}
+
+.calibration-baseline-values dt {
+    color: var(--color-text-muted);
+    text-transform: capitalize;
+}
+
+.calibration-baseline-values dd {
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+}

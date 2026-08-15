@@ -7,7 +7,7 @@
 use crate::inference::llama_cpp_capabilities::ExecutableIdentity;
 use anyhow::{Context, Result, anyhow, bail};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -19,6 +19,7 @@ pub const TOOL_HELP_MAX_OUTPUT: usize = 256 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LlamaCppTool {
+    Server,
     Bench,
     FitParams,
 }
@@ -26,6 +27,7 @@ pub enum LlamaCppTool {
 impl LlamaCppTool {
     pub const fn stem(self) -> &'static str {
         match self {
+            Self::Server => "llama-server",
             Self::Bench => "llama-bench",
             Self::FitParams => "llama-fit-params",
         }
@@ -45,6 +47,10 @@ pub struct ToolHelpEvidence {
     pub identity: ExecutableIdentity,
     pub help_sha256: String,
     pub flags: BTreeSet<String>,
+    /// Defaults advertised by help lines, keyed by canonical option name.
+    /// This is intentionally separate from `flags`: a flag may be present
+    /// without exposing a parseable default.
+    pub defaults: BTreeMap<String, String>,
     pub exit_code: Option<i32>,
     pub output_truncated: bool,
 }
@@ -113,6 +119,49 @@ pub fn flags_from_help(help: &str) -> BTreeSet<String> {
         .collect()
 }
 
+/// Extract the small, user-facing default table from llama.cpp help output.
+///
+/// llama.cpp has changed the prose around defaults over time, so this parser
+/// is deliberately conservative: it only records a value when a help line
+/// contains an option and an explicit `(default: VALUE)` marker. The raw help
+/// hash and executable identity remain the authority when no value is found.
+pub fn defaults_from_help(help: &str) -> BTreeMap<String, String> {
+    let mut defaults = BTreeMap::new();
+    for line in help.lines() {
+        let lower = line.to_ascii_lowercase();
+        let Some(marker) = lower.find("default:") else {
+            continue;
+        };
+        let value = line[marker + "default:".len()..]
+            .trim_start()
+            .trim_start_matches(['(', '['])
+            .split([')', ']', ',', ';'])
+            .next()
+            .unwrap_or_default()
+            .trim();
+        if value.is_empty() {
+            continue;
+        }
+        let options = line[..marker]
+            .split_whitespace()
+            .filter_map(|token| {
+                let token = token.trim_matches(|c: char| c == ',' || c == ':' || c == '=');
+                (token.starts_with('-') && token.len() > 1).then_some(token)
+            })
+            .collect::<Vec<_>>();
+        let Some(option) = options
+            .iter()
+            .find(|option| option.starts_with("--"))
+            .or_else(|| options.first())
+        else {
+            continue;
+        };
+        let canonical = option.trim_start_matches('-').replace('-', "_");
+        defaults.insert(canonical, value.to_string());
+    }
+    defaults
+}
+
 pub async fn probe_help(tool: &ResolvedTool, cwd: &Path) -> Result<ToolHelpEvidence> {
     let mut command = Command::new(&tool.path);
     command
@@ -150,6 +199,7 @@ pub async fn probe_help(tool: &ResolvedTool, cwd: &Path) -> Result<ToolHelpEvide
     let status = child.wait().await?;
     let mut combined = stdout;
     combined.extend_from_slice(&stderr);
+    let help_text = String::from_utf8_lossy(&combined);
     let help_sha256 = Sha256::digest(&combined)
         .iter()
         .map(|byte| format!("{byte:02x}"))
@@ -158,7 +208,8 @@ pub async fn probe_help(tool: &ResolvedTool, cwd: &Path) -> Result<ToolHelpEvide
         tool: tool.tool,
         identity: tool.identity.clone(),
         help_sha256,
-        flags: flags_from_help(&String::from_utf8_lossy(&combined)),
+        flags: flags_from_help(&help_text),
+        defaults: defaults_from_help(&help_text),
         exit_code: status.code(),
         output_truncated,
     })
@@ -189,6 +240,25 @@ mod tests {
         assert!(flags.contains("--flash-attn"));
         assert!(flags.contains("--n-cpu-moe"));
         assert!(!flags.contains("FILE"));
+    }
+
+    #[test]
+    fn defaults_from_help_keeps_only_explicit_option_defaults() {
+        let defaults = defaults_from_help(
+            "  -b, --batch-size N  batch size (default: 2048)\n\
+             -ub, --ubatch-size N  physical batch (default: 512)\n\
+             -fa, --flash-attn  flash attention (default: auto)\n\
+             --threads N  worker threads (default: same as --threads)\n\
+             --unknown N  no advertised value",
+        );
+        assert_eq!(defaults.get("batch_size"), Some(&"2048".to_string()));
+        assert_eq!(defaults.get("ubatch_size"), Some(&"512".to_string()));
+        assert_eq!(defaults.get("flash_attn"), Some(&"auto".to_string()));
+        assert_eq!(
+            defaults.get("threads"),
+            Some(&"same as --threads".to_string())
+        );
+        assert!(!defaults.contains_key("unknown"));
     }
 
     #[test]

@@ -757,7 +757,7 @@ A single candidate must be trustworthy and recoverable before implementing a mul
 
 The verifier must sign off that result selection is measured, bounded, reproducible, and not dependent on parsing upstream human output.
 
-**Current planner evidence (2026-08-13):** `src/calibration/candidates.rs` now maps a typed, preset/workload-derived four-factor catalog onto deterministic L9 rows, or L25 rows when exact flash-attention capability is present. L25 uses five distinct numeric levels per factor; flash attention is a separate capability-gated control candidate, not a duplicated binary OA level. Every mapped patch is validated through `request_from_preset`; invalid context and batch/ubatch combinations fail closed; Rapid-MLX is rejected before planning; and the Balanced screen/final-array/verification ceilings are checked before a plan is returned. This slice does not start subprocesses or claim executor/analysis completion. Receipt: `docs/plans/evidence/20260811-local-llm-foundry/phase-11/calibration-balanced-planner-receipt.md`.
+**Current planner evidence (2026-08-13):** `src/calibration/candidates.rs` now maps a typed, preset/workload-derived four-factor catalog onto deterministic L9 rows, or L25 rows when exact flash-attention capability is present. The batch factor uses the explicit product range `512, 1024, 1536, 2048, 4096`; explicit coverage candidates measure every batch value and cap ubatch at the selected batch. L25 uses five distinct numeric levels per factor; flash attention is a separate capability-gated control candidate, not a duplicated binary OA level. Every mapped patch is validated through `request_from_preset`; invalid context and batch/ubatch combinations fail closed; Rapid-MLX is rejected before planning; and the Balanced screen/final-array/verification ceilings are checked before a plan is returned. This slice does not start subprocesses or claim executor/analysis completion. Receipt: `docs/plans/evidence/20260811-local-llm-foundry/phase-11/calibration-balanced-planner-receipt.md`.
 
 ### Phase 5 — Preset Editor calibration UX and transactional apply
 
@@ -988,3 +988,63 @@ At the pinned `llama-optimize` commit, consult these source regions as reference
 - `robust/optimize/taguchi/include/taguchi.h` and `robust/screen/morris/include/morris.h`: documented C contracts for oracle fixtures.
 
 Before copying any implementation, re-check the exact file and license at the pinned commit, record the copied region in attribution, and add a fixture proving our native result against it.
+## Phase 3 status ledger (2026-08-14)
+
+Phase 3 source-side evaluator gates are complete and evidenced in
+`docs/plans/evidence/20260813-llama-optimize/phase-03/README.md`. The managed
+macOS 9B GGUF receipt closes the real-model trial. The v1 preflight rejects an
+already-running local server rather than stopping and silently restoring it.
+Native Windows job-tree cleanup and a Windows `.exe` receipt remain explicit
+Phase 10 return markers.
+
+## Phase 4 status ledger (2026-08-14)
+
+Calibration preserves the preset's flash-attention mode for every candidate; it
+does not sweep explicit `on`/`off` controls. An unset preset remains runtime
+`auto`, while explicit user settings remain explicit.
+
+The batch search range is now five explicit values: `512`, `1024`, `1536`,
+`2048`, and `4096`. Coverage trials measure every value, and a regression test
+enforces `ubatch_size <= batch_size`.
+
+The expanded real-model macOS Balanced measurement run is complete: 17/17 trials
+against the Qwen3.5 9B q4 GGUF, q8/q8 KV, 1,024 prompt/4,096 generation
+thinking workload, and 8,192 minimum context. Every trial produced three
+structured samples without timeout, OOM, malformed output, non-zero exit, or
+candidate/measurement ID drift. The receipt selected the baseline; no derived
+candidate showed a trustworthy improvement, and high-noise warnings remain
+explicitly recorded. The regenerated receipt has populated hardware, model,
+and runtime fingerprint fields from the managed binaries, GGUF header, host,
+and workload. Evidence is in
+`docs/plans/evidence/20260813-llama-optimize/phase-04/README.md`.
+That evidence file now includes the cross-platform reproduction runbook,
+including isolated monitor startup, authenticated preflight/start payloads,
+receipt integrity checks, and Windows `.exe`/PowerShell substitutions.
+
+The bounded 2.0 source-side macOS Balanced runtime gate is complete. Thorough,
+Morris, automatic context-ceiling probing, server-driver correctness
+qualification, and native Windows execution remain explicit later/Phase 10
+return markers.
+## Phase 4 baseline semantics correction (2026-08-14)
+
+The receipt contract explicitly separates the measured baseline from llama.cpp
+defaults. `baseline.effective` records values after preset and calibration
+policy normalization, which may vary by OS, hardware, model, and preset.
+`baseline.llama_server_help_defaults` records only explicit defaults parsed from
+the exact managed `llama-server --help` output, along with its hash, exit
+status, and truncation marker. The UI presents both tables; a measured winner
+is never described as a universal compiled default.
+## Phase 5 completion ledger (2026-08-14)
+
+Phase 5 source-side transactional UX gates are complete. Added deterministic
+Unix fake-runtime coverage for post-apply validation success (receipt records
+`passed`), post-apply failure (derived preset is rolled back immediately), and
+interrupted-job resume (finished trial results are reused exactly once while
+unfinished work continues). The 94-module UI baseline is unchanged after
+validation. Calibration apply/validation operates on the backend target preset
+and never infers or mutates the active session from the Preset Editor dropdown;
+the preflight guard remains the backend state authority for active inference.
+
+Remaining Phase 5 return markers are native Windows `.exe` execution and the
+final cross-platform qualification pass. Those do not reopen the completed
+macOS/source-side Phase 4 or Phase 5 gates.

@@ -210,24 +210,27 @@ fn api_start(
         .and(with_app_config(config.clone()))
         .and_then(
             move |auth: Option<String>, request: StartCalibrationRequest, cfg: Arc<AppConfig>| {
-                if !check_api_token(&auth, &cfg) {
-                    return futures_util::future::ready(Ok(unauthorized_api_token()));
-                }
-                let response = match executor::start(cfg, state.clone(), request) {
-                    Ok(snapshot) => warp::reply::with_status(
-                        warp::reply::json(&serde_json::json!({"ok": true, "job": snapshot})),
-                        warp::http::StatusCode::ACCEPTED,
-                    ),
-                    Err(error) => warp::reply::with_status(
-                        warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": error.to_string()}),
+                let state = state.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok::<Box<dyn warp::Reply>, warp::Rejection>(Box::new(
+                            unauthorized_api_token(),
+                        ));
+                    }
+                    let response = match executor::start(cfg, state, request).await {
+                        Ok(snapshot) => warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({"ok": true, "job": snapshot})),
+                            warp::http::StatusCode::ACCEPTED,
                         ),
-                        warp::http::StatusCode::BAD_REQUEST,
-                    ),
-                };
-                futures_util::future::ready(Ok::<Box<dyn warp::Reply>, warp::Rejection>(Box::new(
-                    response,
-                )))
+                        Err(error) => warp::reply::with_status(
+                            warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": error.to_string()}),
+                            ),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ),
+                    };
+                    Ok::<Box<dyn warp::Reply>, warp::Rejection>(Box::new(response))
+                }
             },
         )
 }

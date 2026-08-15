@@ -59,6 +59,67 @@ function renderCandidates(results = [], preflight = currentPreflight) {
     container.hidden = rows.length === 0;
 }
 
+function renderBaseline(baseline) {
+    const body = document.querySelector('.calibration-modal-body');
+    if (!body || !baseline) return;
+    let section = document.getElementById('calibration-baseline');
+    if (!section) {
+        section = document.createElement('section');
+        section.id = 'calibration-baseline';
+        section.className = 'calibration-baseline';
+        const title = document.createElement('h3');
+        title.textContent = 'Measured baseline';
+        section.appendChild(title);
+        const description = document.createElement('p');
+        description.id = 'calibration-baseline-description';
+        section.appendChild(description);
+        const values = document.createElement('dl');
+        values.id = 'calibration-baseline-values';
+        values.className = 'calibration-baseline-values';
+        section.appendChild(values);
+        const helpTitle = document.createElement('h4');
+        helpTitle.textContent = 'Managed llama-server defaults';
+        section.appendChild(helpTitle);
+        const helpNote = document.createElement('p');
+        helpNote.id = 'calibration-baseline-help-note';
+        helpNote.className = 'calibration-baseline-help-note';
+        section.appendChild(helpNote);
+        const helpValues = document.createElement('dl');
+        helpValues.id = 'calibration-baseline-help-values';
+        helpValues.className = 'calibration-baseline-values';
+        section.appendChild(helpValues);
+        body.insertBefore(section, document.getElementById('calibration-candidates'));
+    }
+    const valueList = document.getElementById('calibration-baseline-values');
+    const helpList = document.getElementById('calibration-baseline-help-values');
+    const description = document.getElementById('calibration-baseline-description');
+    const helpNote = document.getElementById('calibration-baseline-help-note');
+    valueList.replaceChildren();
+    helpList.replaceChildren();
+    const effective = baseline.effective || {};
+    Object.entries(effective).forEach(([name, detail]) => {
+        const term = document.createElement('dt');
+        term.textContent = name.replaceAll('_', ' ');
+        const value = document.createElement('dd');
+        value.textContent = `${detail.value} (${detail.source.replaceAll('_', ' ')})`;
+        valueList.append(term, value);
+    });
+    const defaults = baseline.llama_server_help_defaults || {};
+    Object.entries(defaults).forEach(([name, value]) => {
+        const term = document.createElement('dt');
+        term.textContent = name.replaceAll('_', ' ');
+        const detail = document.createElement('dd');
+        detail.textContent = value;
+        helpList.append(term, detail);
+    });
+    description.textContent = effective.context_size
+        ? 'This is the effective preset configuration measured as the control. It is not a claim that these are llama.cpp compiled defaults.'
+        : 'The managed llama-server defaults were captured during preflight; the measured preset baseline appears when the run completes.';
+    const hash = baseline.llama_server_help_sha256 ? ` Help hash: ${baseline.llama_server_help_sha256}.` : '';
+    helpNote.textContent = `Captured from the configured managed llama-server --help output.${hash}`;
+    section.hidden = false;
+}
+
 async function requestJson(url, options = {}) {
     const response = await fetch(url, options);
     const data = await response.json().catch(() => ({}));
@@ -88,6 +149,7 @@ async function openCalibration() {
     currentJobId = null;
     currentReceipt = null;
     lastApply = null;
+    document.getElementById('calibration-baseline')?.remove();
     try {
         const data = await requestJson('/api/calibrations/preflight', {
             method: 'POST',
@@ -147,6 +209,7 @@ async function pollCalibration() {
         if (job.state === 'complete') {
             const receipt = await requestJson(`/api/calibrations/${encodeURIComponent(currentJobId)}/receipt`, { headers: apiHeaders() });
             currentReceipt = receipt.receipt;
+            renderBaseline(currentReceipt.baseline);
             renderCandidates(currentReceipt.candidate_results || []);
             document.getElementById('calibration-apply').disabled = !currentReceipt.selected_candidate;
             return;
