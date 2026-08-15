@@ -34,6 +34,48 @@ export function applyWizardSuggestion(suggestion) {
   showToast('Applied', 'success', suggestion.label);
 }
 
+// Apply a measured llama.cpp calibration patch through the wizard's existing
+// DOM controls/events. This intentionally uses the canonical control registry
+// rather than introducing a second calibration-owned settings object.
+export function applyCalibrationPatch(patch = {}) {
+  const map = {
+    context_size: { id: 'spawn-context-size', evt: 'input' },
+    batch_size: { id: 'spawn-batch-size', evt: 'input' },
+    ubatch_size: { id: 'spawn-ubatch-size', evt: 'input' },
+    ctk: { id: 'spawn-cache-type-k', evt: 'change' },
+    ctv: { id: 'spawn-cache-type-v', evt: 'change' },
+    flash_attn: { id: 'spawn-flash-attn', evt: 'change', value: value => value ? 'on' : 'off' },
+    threads: { id: 'spawn-threads', evt: 'input' },
+    threads_batch: { id: 'spawn-threads-batch', evt: 'input' },
+    n_cpu_moe: { id: 'spawn-n-cpu-moe', evt: 'input' },
+  };
+  Object.entries(patch).forEach(([key, rawValue]) => {
+    if (rawValue == null || !map[key]) return;
+    const entry = map[key];
+    const input = document.getElementById(entry.id);
+    if (!input) return;
+    input.value = String(entry.value ? entry.value(rawValue) : rawValue);
+    input.dispatchEvent(new Event(entry.evt, { bubbles: true }));
+  });
+
+  if (patch.gpu_layers != null) {
+    const select = document.getElementById('spawn-gpu-layers');
+    const manual = document.getElementById('spawn-gpu-layers-manual');
+    const value = Number(patch.gpu_layers);
+    if (select && manual) {
+      if (value < 0) {
+        select.value = 'all';
+      } else {
+        select.value = 'manual';
+        manual.value = String(value);
+        manual.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }
+  updateAdvisor();
+}
+
 // Auto-tune n_cpu_moe: instant estimate, or empirical llama-bench sweep (verify).
 export async function autoTuneWizard(verify) {
   const statusEl = document.getElementById('spawn-moe-autotune-status');

@@ -11,6 +11,78 @@ import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
 test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
+  test('@in-memory-test calibration candidates apply through canonical wizard controls', async ({ page }) => {
+    await page.goto('/');
+    const result = await page.evaluate(async () => {
+      const { applyCalibrationPatch } = await import('/js/features/spawn-wizard-tuning.js');
+      applyCalibrationPatch({
+        context_size: 16384,
+        batch_size: 1024,
+        ubatch_size: 512,
+        ctk: 'q8_0',
+        ctv: 'q8_0',
+        flash_attn: true,
+      });
+      const ids = ['spawn-context-size', 'spawn-batch-size', 'spawn-ubatch-size', 'spawn-cache-type-k', 'spawn-cache-type-v', 'spawn-flash-attn'];
+      return Object.fromEntries(ids.map(id => [id, document.getElementById(id)?.value]));
+    });
+    expect(result).toMatchObject({
+      'spawn-context-size': '16384',
+      'spawn-batch-size': '1024',
+      'spawn-ubatch-size': '512',
+      'spawn-cache-type-k': 'q8_0',
+      'spawn-cache-type-v': 'q8_0',
+      'spawn-flash-attn': 'on',
+    });
+  });
+
+  test('@in-memory-test calibration offer is hidden without a local llama.cpp GGUF', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    const result = await page.evaluate(async () => {
+      const { openSpawnWizard, wizardState, selectWizardEngine, showStep, refreshWizardCalibrationOffer } = await import('/js/features/spawn-wizard.js');
+      openSpawnWizard();
+      wizardState.model.source = 'hf';
+      wizardState.model.path = 'org/model';
+      selectWizardEngine('llama_cpp', true);
+      showStep(2);
+      await refreshWizardCalibrationOffer();
+      const noLocal = document.getElementById('spawn-calibration-card')?.hidden;
+      wizardState.model.source = 'local';
+      wizardState.model.path = '/tmp/rapid-model.gguf';
+      selectWizardEngine('rapid_mlx', true);
+      await refreshWizardCalibrationOffer();
+      const rapid = document.getElementById('spawn-calibration-card')?.hidden;
+      return { noLocal, rapid };
+    });
+    expect(result).toEqual({ noLocal: true, rapid: true });
+  });
+
+  test('@in-memory-test related calibration requires explicit confirmation before applying', async ({ page }) => {
+    await page.goto('/');
+    const result = await page.evaluate(async () => {
+      const { wizardState, applySelectedWizardCalibration } = await import('/js/features/spawn-wizard.js');
+      wizardState.calibration.selectedMatch = {
+        match_kind: 'related',
+        receipt: {
+          selected_candidate: 'related-candidate',
+          candidate_results: [{ candidate: { id: 'related-candidate', typed_patch: { batch_size: 1024 } } }],
+        },
+      };
+      const originalConfirm = window.confirm;
+      let confirmations = 0;
+      window.confirm = () => { confirmations += 1; return false; };
+      applySelectedWizardCalibration();
+      const rejected = document.getElementById('spawn-batch-size')?.value;
+      window.confirm = () => { confirmations += 1; return true; };
+      applySelectedWizardCalibration();
+      const accepted = document.getElementById('spawn-batch-size')?.value;
+      window.confirm = originalConfirm;
+      return { confirmations, rejected, accepted };
+    });
+    expect(result).toEqual({ confirmations: 2, rejected: '2048', accepted: '1024' });
+  });
+
     test('@in-memory-test engine classifier leaves bare HF repos ambiguous and recognizes GGUF inventory', async ({ page }) => {
         await page.goto('/');
         const result = await page.evaluate(async () => {

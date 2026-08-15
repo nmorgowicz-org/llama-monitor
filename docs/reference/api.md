@@ -897,6 +897,15 @@ Rescans `models_dir`.
 
 ### Calibration routes
 
+`POST /api/calibrations/match` accepts a saved llama.cpp `preset_id`, workload,
+and budget and returns tiered receipt evidence for Spawn Wizard. Exact results
+match the complete artifact/runtime fingerprint. Compatible results match the
+introspected family/shape, GGUF weight-quantization signature,
+hardware/workload, and normalized runtime capabilities; related results may
+use a different weight quantization and are review-only. Runtime build changes
+are surfaced as warnings, and Rapid-MLX receipts are never translated into
+this path.
+
 Calibration is llama.cpp-only and requires a regular local GGUF inside the
 configured model library. Read and job-control routes use `api-token`;
 apply and rollback require `db-admin-token` plus their exact confirmation

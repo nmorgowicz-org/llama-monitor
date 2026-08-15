@@ -41,6 +41,7 @@ import scenarioSpawnWizardHfDownload from './scenarios/wizard-llamacpp/spawn-wiz
 import scenarioSpawnWizardTierMatrix from './scenarios/wizard-llamacpp/spawn-wizard-tier-matrix.mjs';
 import scenarioSpawnWizardMmprojSelection from './scenarios/wizard-llamacpp/spawn-wizard-mmproj-selection.mjs';
 import scenarioSpawnWizardGuidedDrawer from './scenarios/wizard-llamacpp/spawn-wizard-guided-drawer.mjs';
+import scenarioSpawnWizardCalibration from './scenarios/wizard-llamacpp/spawn-wizard-calibration.mjs';
 import scenarioSpawnWizardRapidMlxGif from './scenarios/wizard-rapidmlx/spawn-wizard-rapid-mlx-gif.mjs';
 import scenarioRapidMlxRuntime from './scenarios/features/rapid-mlx-runtime.mjs';
 import scenarioRapidMlxLive from './scenarios/validation/rapid-mlx-live.mjs';
@@ -248,6 +249,19 @@ export const SCENARIOS = {
                 'spawn-wizard--llamacpp-local--model-profiles.png', 'spawn-wizard--llamacpp-local--model-source-cards.png',
             ],
         },
+    },
+    'spawn-wizard-calibration': {
+      run: scenarioSpawnWizardCalibration,
+      category: 'wizard-llamacpp',
+      runtime: 'llamacpp-local',
+      contract: {
+        intent: 'Capture exact and compatible calibration evidence reuse plus canonical candidate application in Pro review.',
+        expectedOutputs: [
+      'spawn-wizard-calibration--llamacpp-local--evidence.png',
+      'spawn-wizard-calibration--llamacpp-local--applied.png',
+      'spawn-wizard-calibration--llamacpp-local--related-review.png',
+        ],
+      },
     },
     'spawn-wizard-pro-baseline': {
         run: scenarioSpawnWizardProBaseline, category: 'wizard-llamacpp', runtime: 'llamacpp-local',

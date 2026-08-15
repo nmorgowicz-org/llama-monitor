@@ -730,6 +730,7 @@ export async function saveAsPreset() {
 
     const verb = isUpdate ? 'updated' : 'saved';
     showToast(`Preset "${name}" ${verb}`, 'success');
+    window.refreshWizardCalibrationOffer?.();
     if (dom.savedPresetName) {
       dom.savedPresetName.textContent = `✓ ${isUpdate ? 'Updated' : 'Saved'} as "${name}"`;
       dom.savedPresetName.style.display = '';

@@ -89,6 +89,18 @@ pub struct ModelFingerprint {
     pub content_fingerprint: String,
     pub gguf_arch: Option<String>,
     pub metadata_fingerprint: String,
+    /// Stable architecture/shape/weight-quantization key used only for
+    /// lower-confidence compatible-model evidence. It deliberately excludes
+    /// the model path and file-specific content identity.
+    #[serde(default)]
+    pub compatibility_key: String,
+    /// Architecture/shape key without weight quantization, used only for the
+    /// weaker related-model evidence tier.
+    #[serde(default)]
+    pub family_key: String,
+    /// Human-readable digest source for UI/debugging; never filename-derived.
+    #[serde(default)]
+    pub quantization_signature: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -100,6 +112,10 @@ pub struct RuntimeFingerprint {
     pub capability_hash: String,
     pub bench_sha256: String,
     pub fit_params_sha256: Option<String>,
+    /// Hash of normalized supported capability names. This may remain stable
+    /// across frequent llama.cpp rebuilds even when executable hashes change.
+    #[serde(default)]
+    pub capability_signature: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

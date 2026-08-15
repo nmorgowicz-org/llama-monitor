@@ -1084,6 +1084,12 @@ mod tests {
             "/api/calibrations",
             Some("{}")
         ),
+        (
+            route_calibration_match,
+            "POST",
+            "/api/calibrations/match",
+            Some("{}")
+        ),
         (route_calibration_list, "GET", "/api/calibrations", None),
         (
             route_calibration_resume,

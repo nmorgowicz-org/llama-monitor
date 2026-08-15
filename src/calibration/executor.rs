@@ -121,6 +121,32 @@ pub struct CalibrationReceiptView {
     pub apply_history: Vec<super::CalibrationApplyRecord>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CalibrationReceiptMatch {
+    pub receipt: CalibrationReceiptView,
+    /// `exact` is safe to describe as measured on this artifact/runtime;
+    /// `compatible` is advisory evidence that must carry warnings in the UI.
+    pub match_kind: String,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReceiptMatchKind {
+    Exact,
+    Compatible,
+    Related,
+}
+
+impl ReceiptMatchKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Exact => "exact",
+            Self::Compatible => "compatible",
+            Self::Related => "related",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(default)]
 pub struct ApplyCalibrationRequest {
@@ -702,6 +728,136 @@ pub fn get_receipt_view(config: &AppConfig, id: &str) -> Result<Option<Calibrati
             apply_history: receipt.apply_history,
         }),
     )
+}
+
+fn classify_receipt_match(
+    receipt: &CalibrationFingerprint,
+    expected: &CalibrationFingerprint,
+) -> Option<(ReceiptMatchKind, Vec<String>)> {
+    let mut expected_legacy = expected.clone();
+    expected_legacy.model.compatibility_key.clear();
+    expected_legacy.model.family_key.clear();
+    expected_legacy.model.quantization_signature.clear();
+    expected_legacy.runtime.capability_signature.clear();
+    let mut receipt_legacy = receipt.clone();
+    receipt_legacy.model.compatibility_key.clear();
+    receipt_legacy.model.family_key.clear();
+    receipt_legacy.model.quantization_signature.clear();
+    receipt_legacy.runtime.capability_signature.clear();
+
+    let legacy_exact = receipt.model.compatibility_key.is_empty()
+        && receipt.model.family_key.is_empty()
+        && receipt.runtime.capability_signature.is_empty()
+        && receipt_legacy == expected_legacy;
+    let exact = receipt == expected || legacy_exact;
+    let compatible = !exact
+        && receipt.backend == expected.backend
+        && receipt.hardware == expected.hardware
+        && receipt.workload == expected.workload
+        && receipt.factor_catalog_version == expected.factor_catalog_version
+        && !expected.model.family_key.is_empty()
+        && receipt.model.family_key == expected.model.family_key
+        && receipt.model.quantization_signature == expected.model.quantization_signature
+        && !expected.runtime.capability_signature.is_empty()
+        && receipt.runtime.capability_signature == expected.runtime.capability_signature;
+    let related = !exact
+        && !compatible
+        && receipt.backend == expected.backend
+        && receipt.hardware == expected.hardware
+        && receipt.workload == expected.workload
+        && receipt.factor_catalog_version == expected.factor_catalog_version
+        && !expected.model.family_key.is_empty()
+        && receipt.model.family_key == expected.model.family_key
+        && !expected.runtime.capability_signature.is_empty()
+        && receipt.runtime.capability_signature == expected.runtime.capability_signature;
+
+    let kind = if exact {
+        ReceiptMatchKind::Exact
+    } else if compatible {
+        ReceiptMatchKind::Compatible
+    } else if related {
+        ReceiptMatchKind::Related
+    } else {
+        return None;
+    };
+
+    let mut warnings = Vec::new();
+    if legacy_exact {
+        warnings.push("Legacy artifact/runtime metadata matched".into());
+    }
+    if kind != ReceiptMatchKind::Exact
+        && receipt.model.content_fingerprint != expected.model.content_fingerprint
+    {
+        warnings.push("Different GGUF artifact; introspected structure matched".into());
+    }
+    if kind != ReceiptMatchKind::Exact
+        && (receipt.runtime.server_sha256 != expected.runtime.server_sha256
+            || receipt.runtime.bench_sha256 != expected.runtime.bench_sha256)
+    {
+        warnings.push("Different llama.cpp runtime build; capability signature matched".into());
+    }
+    if kind != ReceiptMatchKind::Exact
+        && receipt.baseline_config_hash != expected.baseline_config_hash
+    {
+        warnings.push("Measured baseline differs from current wizard values".into());
+    }
+    if kind == ReceiptMatchKind::Related {
+        warnings
+            .push("Different GGUF weight quantization; family and structural shape matched".into());
+    }
+    Some((kind, warnings))
+}
+
+/// Return completed receipts whose full calibration fingerprint exactly
+/// matches the current preset, workload, hardware, and managed runtime.
+///
+/// Spawn Wizard reuse is intentionally strict: a model-only or runtime-only
+/// match is not sufficient because the receipt's baseline configuration is
+/// part of the measured result. The caller must still review the candidate
+/// before applying it to wizard controls.
+pub async fn matching_receipts(
+    config: &AppConfig,
+    state: &AppState,
+    preset_id: &str,
+    workload: &CalibrationWorkload,
+    budget: CalibrationBudget,
+) -> Result<Vec<CalibrationReceiptMatch>> {
+    let preflight = preflight(config, state, preset_id, workload, budget)
+        .context("calibration match preflight")?;
+    let mut enriched = preflight.clone();
+    enrich_preflight_with_help(config, &mut enriched).await?;
+    let preset = find_preset(state, preset_id)?;
+    let model_path = resolve_model_path(config, &preset.model_path)?;
+    let expected = build_calibration_fingerprint(
+        config,
+        &preset,
+        workload,
+        &enriched,
+        &model_path,
+        &enriched.preset_fingerprint,
+    )?;
+    let snapshots = list(config)?;
+    let mut matches = Vec::new();
+    for snapshot in snapshots {
+        let Some(receipt_id) = snapshot.receipt_id.as_deref() else {
+            continue;
+        };
+        let Some(receipt) = get_receipt(config, receipt_id)? else {
+            continue;
+        };
+        let Some((kind, warnings)) = classify_receipt_match(&receipt.fingerprint, &expected) else {
+            continue;
+        };
+        if let Some(view) = get_receipt_view(config, receipt_id)? {
+            matches.push(CalibrationReceiptMatch {
+                receipt: view,
+                match_kind: kind.as_str().into(),
+                warnings,
+            });
+        }
+    }
+    matches.sort_by(|left, right| right.receipt.job_id.cmp(&left.receipt.job_id));
+    Ok(matches)
 }
 
 pub fn cancel(config: &AppConfig, id: &str) -> Result<Option<CalibrationJobSnapshot>> {
@@ -1595,6 +1751,45 @@ fn build_calibration_fingerprint(
         .and_then(|metadata| serde_json::to_vec(metadata).ok())
         .map(|bytes| sha256_bytes(&bytes))
         .unwrap_or_else(|| content_fingerprint.clone());
+    let quantization_signature = sha256_bytes(
+        &serde_json::to_vec(&header.quant_types)
+            .context("serialize GGUF quantization inventory")?,
+    );
+    let family_descriptor = serde_json::json!({
+        "architecture": gguf.as_ref().and_then(|metadata| metadata.architecture.clone()),
+        "param_count": gguf.as_ref().and_then(|metadata| metadata.param_count),
+        "block_count": gguf.as_ref().and_then(|metadata| metadata.block_count),
+        "head_count": gguf.as_ref().and_then(|metadata| metadata.head_count),
+        "head_count_kv": gguf.as_ref().and_then(|metadata| metadata.head_count_kv),
+        "key_length": gguf.as_ref().and_then(|metadata| metadata.key_length),
+        "embedding_length": gguf.as_ref().and_then(|metadata| metadata.embedding_length),
+        "feed_forward_length": gguf.as_ref().and_then(|metadata| metadata.feed_forward_length),
+        "expert_count": gguf.as_ref().and_then(|metadata| metadata.expert_count),
+        "expert_used_count": gguf.as_ref().and_then(|metadata| metadata.expert_used_count),
+        "mtp_depth": gguf.as_ref().and_then(|metadata| metadata.mtp_depth),
+        "tensor_param_count": gguf.as_ref().and_then(|metadata| metadata.tensor_param_count),
+        "expert_param_count": gguf.as_ref().and_then(|metadata| metadata.expert_param_count),
+    });
+    let family_key = sha256_bytes(
+        &serde_json::to_vec(&family_descriptor).context("serialize GGUF family descriptor")?,
+    );
+    let compatibility_descriptor = serde_json::json!({
+        "family": family_descriptor,
+        "quant_types": &header.quant_types,
+    });
+    let compatibility_key = sha256_bytes(
+        &serde_json::to_vec(&compatibility_descriptor)
+            .context("serialize GGUF compatibility descriptor")?,
+    );
+    let mut capability_flags = preflight.bench_help_flags.clone();
+    capability_flags.sort();
+    let capability_signature = sha256_bytes(
+        &serde_json::to_vec(&(
+            preflight.server_help_defaults.keys().collect::<Vec<_>>(),
+            capability_flags,
+        ))
+        .context("serialize managed capability signature")?,
+    );
     let system = sysinfo::System::new_all();
     let logical_cores = std::thread::available_parallelism()
         .map(|count| count.get() as u32)
@@ -1649,6 +1844,9 @@ fn build_calibration_fingerprint(
             content_fingerprint,
             gguf_arch: gguf.and_then(|metadata| metadata.architecture),
             metadata_fingerprint,
+            compatibility_key,
+            family_key,
+            quantization_signature,
         },
         runtime: RuntimeFingerprint {
             server_identity: preflight.server_identity.clone(),
@@ -1657,6 +1855,7 @@ fn build_calibration_fingerprint(
             capability_hash: preflight.bench_help_sha256.clone().unwrap_or_default(),
             bench_sha256: preflight.bench_sha256.clone(),
             fit_params_sha256: preflight.fit_params_sha256.clone(),
+            capability_signature,
         },
         workload: workload.clone(),
         baseline_config_hash: preset_fingerprint.into(),
@@ -2186,6 +2385,115 @@ mod tests {
         let encoded = serde_json::to_string(&view).expect("serialize public receipt");
         assert!(!encoded.contains("model_path"));
         assert!(!encoded.contains("bench_path"));
+    }
+
+    fn receipt_match_fixture() -> CalibrationFingerprint {
+        let mut fingerprint = CalibrationFingerprint::current(
+            InferenceBackend::LlamaCpp,
+            CalibrationWorkload::default(),
+        );
+        fingerprint.hardware.os = "test-os".into();
+        fingerprint.hardware.arch = "test-arch".into();
+        fingerprint.model.content_fingerprint = "artifact-a".into();
+        fingerprint.model.family_key = "qwen35-9b-shape".into();
+        fingerprint.model.compatibility_key = "qwen35-9b-q8".into();
+        fingerprint.model.quantization_signature = "q8".into();
+        fingerprint.runtime.server_sha256 = "server-a".into();
+        fingerprint.runtime.bench_sha256 = "bench-a".into();
+        fingerprint.runtime.capability_signature = "cap-a".into();
+        fingerprint.baseline_config_hash = "baseline-a".into();
+        fingerprint
+    }
+
+    #[test]
+    fn receipt_matching_classifies_exact_compatible_related_and_rejects_drift() {
+        let expected = receipt_match_fixture();
+        let (kind, warnings) = classify_receipt_match(&expected, &expected).expect("exact");
+        assert_eq!(kind, ReceiptMatchKind::Exact);
+        assert!(warnings.is_empty());
+
+        let mut compatible = expected.clone();
+        compatible.model.content_fingerprint = "artifact-b".into();
+        compatible.runtime.server_sha256 = "server-b".into();
+        compatible.runtime.bench_sha256 = "bench-b".into();
+        compatible.baseline_config_hash = "baseline-b".into();
+        let (kind, warnings) = classify_receipt_match(&compatible, &expected).expect("compatible");
+        assert_eq!(kind, ReceiptMatchKind::Compatible);
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("runtime build"))
+        );
+        assert!(warnings.iter().any(|warning| warning.contains("baseline")));
+
+        let mut related = compatible.clone();
+        related.model.quantization_signature = "q6".into();
+        related.model.compatibility_key = "qwen35-9b-q6".into();
+        let (kind, warnings) = classify_receipt_match(&related, &expected).expect("related");
+        assert_eq!(kind, ReceiptMatchKind::Related);
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("quantization"))
+        );
+
+        let mut wrong_family = expected.clone();
+        wrong_family.model.family_key = "other-family".into();
+        assert!(classify_receipt_match(&wrong_family, &expected).is_none());
+
+        let mut wrong_hardware = expected.clone();
+        wrong_hardware.hardware.arch = "other-arch".into();
+        assert!(classify_receipt_match(&wrong_hardware, &expected).is_none());
+    }
+
+    #[test]
+    fn receipt_matching_accepts_legacy_receipt_without_new_metadata() {
+        let expected = receipt_match_fixture();
+        let mut legacy = expected.clone();
+        legacy.model.compatibility_key.clear();
+        legacy.model.family_key.clear();
+        legacy.model.quantization_signature.clear();
+        legacy.runtime.capability_signature.clear();
+        let (kind, warnings) = classify_receipt_match(&legacy, &expected).expect("legacy exact");
+        assert_eq!(kind, ReceiptMatchKind::Exact);
+        assert!(warnings.iter().any(|warning| warning.contains("Legacy")));
+    }
+
+    #[test]
+    #[ignore = "requires the local Qwen3.5 Q4/Q6 GGUF fixtures"]
+    fn qwen35_local_fixtures_share_introspected_family_but_not_quantization() {
+        let q4 = std::env::var_os("LLAMA_MONITOR_QWEN35_Q4").expect("Q4 fixture path");
+        let q6 = std::env::var_os("LLAMA_MONITOR_QWEN35_Q6").expect("Q6 fixture path");
+        let q4 = std::path::PathBuf::from(q4);
+        let q6 = std::path::PathBuf::from(q6);
+        let q4_meta = crate::llama::gguf_meta::read_gguf_metadata(&q4).expect("read Q4 GGUF");
+        let q6_meta = crate::llama::gguf_meta::read_gguf_metadata(&q6).expect("read Q6 GGUF");
+        let q4_json = serde_json::to_value(q4_meta).expect("serialize Q4 metadata");
+        let q6_json = serde_json::to_value(q6_meta).expect("serialize Q6 metadata");
+        for key in [
+            "architecture",
+            "param_count",
+            "block_count",
+            "head_count",
+            "head_count_kv",
+            "key_length",
+            "embedding_length",
+            "feed_forward_length",
+            "mtp_depth",
+        ] {
+            assert_eq!(q4_json.get(key), q6_json.get(key), "family field {key}");
+        }
+        let q4_header = crate::llama::gguf_meta::read_gguf_header_inventory(
+            &q4,
+            crate::llama::gguf_meta::MAX_INSPECTION_HEADER_BYTES,
+        )
+        .expect("read Q4 header");
+        let q6_header = crate::llama::gguf_meta::read_gguf_header_inventory(
+            &q6,
+            crate::llama::gguf_meta::MAX_INSPECTION_HEADER_BYTES,
+        )
+        .expect("read Q6 header");
+        assert_ne!(q4_header.quant_types, q6_header.quant_types);
     }
 
     #[cfg(unix)]

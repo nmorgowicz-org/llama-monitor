@@ -5192,8 +5192,19 @@
                     <div class="spawn-save-preset-row" id="spawn-save-preset-row" style="margin-top:14px;">
                         <input type="text" id="spawn-preset-name-input" class="spawn-preset-name-input" placeholder="Preset name…" maxlength="80">
                         <button type="button" class="btn-wizard-secondary" id="spawn-save-preset-btn">Save as Preset</button>
-                        <span id="spawn-saved-preset-name" style="font-size:12px;color:var(--color-success);display:none;"></span>
-                    </div>
+ <span id="spawn-saved-preset-name" style="font-size:12px;color:var(--color-success);display:none;"></span>
+ </div>
+ <section class="spawn-calibration-card" id="spawn-calibration-card" hidden aria-live="polite">
+  <div class="wizard-section-title">Hardware evidence</div>
+  <div class="wizard-section-desc">Reuse measured llama.cpp results for this saved local GGUF. Exact matches are preferred; compatible or related evidence is labeled.</div>
+  <div class="spawn-calibration-actions">
+   <button type="button" class="btn-wizard-secondary" id="spawn-calibration-check-btn">Check calibration evidence</button>
+   <button type="button" class="btn-wizard-secondary" id="spawn-calibration-start-btn" hidden>Calibrate this model</button>
+   <button type="button" class="btn-wizard-secondary" id="spawn-calibration-apply-btn" hidden>Apply selected candidate</button>
+  </div>
+  <div class="spawn-calibration-status" id="spawn-calibration-status" role="status"></div>
+  <div class="spawn-calibration-matches" id="spawn-calibration-matches"></div>
+ </section>
                     <div>
                         <div class="wizard-section-title" style="margin-top:24px;">Ready to launch</div>
                         <div class="wizard-section-desc">

@@ -46,6 +46,7 @@ import {
 } from './spawn-wizard-binary-prereq.js';
 import {
   applyWizardSuggestion,
+  applyCalibrationPatch,
   autoTuneWizard,
   runBatchSweep,
   runDepthSweep,
@@ -483,7 +484,7 @@ function _initViewMode() {
 //  - Step validation before advancing
 
 import { openDeferredFileBrowser, openModelFileBrowser } from './file-browser-launcher.js';
-import { showToast } from './toast.js';
+import { showToast, showToastWithActions, resolveNotification } from './toast.js';
 import Router, { routeForCurrentView } from './router.js';
 import { scheduleEstimate, cancelEstimate, buildEstimateBody, rapidEstimatePolicyFromWizardHardware } from './vram-estimate.js';
 import { openEvidenceDrawer, openEstimateEvidenceDrawer, evidenceFromCommandPreview } from './evidence-drawer.js';
@@ -738,6 +739,12 @@ export const wizardState = {
   vram: { available: 0 },
   spawn: { inFlight: false, error: '' },
   savedPresetId: null, // ID of preset saved from this wizard run (to avoid duplicates)
+  calibration: {
+    matches: [],
+    selectedMatch: null,
+    jobId: null,
+    polling: false,
+  },
   // Snapshot for the "Switch to repo selection" recovery flow (plan §6.2). Set by
   // snapshotPendingRestore(), applied by _applyPendingRestore() on arrival at step 2, discarded
   // after apply, on wizard close, or after PENDING_RESTORE_TIMEOUT_MS idle.
@@ -790,6 +797,7 @@ let _escapeHatchDescriptors = null; // cached from /api/rapid-mlx/escape-hatch-f
 
 export function initSpawnWizard() {
   cacheDom();
+  window.refreshWizardCalibrationOffer = refreshWizardCalibrationOffer;
   applyReducedMotion();
   bindEvents();
   bindHfSearchControls();
@@ -888,6 +896,7 @@ export function openSpawnWizard(opts = {}) {
     // "Use as template": pre-populate hardware/params from the example preset so
     // the user only needs to pick a model. Settings are applied but not locked.
     const t = opts.templatePreset;
+    if (t.id) wizardState.savedPresetId = t.id;
     if (t.context_size)      wizardState.hardware.contextSize    = t.context_size;
     if (t.ctk || t.ctv)      wizardState.hardware.kvDtypeUserSet = true;
     if (t.ctk)               wizardState.hardware.cacheTypeK     = t.ctk;
@@ -1123,6 +1132,224 @@ function resetWizardState() {
   wizardState.access.bindHost = '127.0.0.1';
   wizardState.access.apiKey = '';
   wizardState.savedPresetId = null;
+  wizardState.calibration.matches = [];
+  wizardState.calibration.selectedMatch = null;
+  wizardState.calibration.jobId = null;
+  wizardState.calibration.polling = false;
+}
+
+function calibrationWorkload() {
+  const kind = wizardState.useCase === 'agentic' ? 'agents' : 'interactive';
+  return {
+    kind,
+    prompt_tokens: 512,
+    generation_tokens: 256,
+    parallel_requests: 1,
+    minimum_context: Math.max(4096, Number(wizardState.hardware.contextSize) || 0),
+    objective: 'balanced',
+    fixture_id: 'calibration-v1-wizard',
+  };
+}
+
+function calibrationHeaders(json = false) {
+  const headers = window.authHeaders ? { ...window.authHeaders() } : {};
+  if (json) headers['Content-Type'] = 'application/json';
+  return headers;
+}
+
+function currentCalibrationCandidate(match) {
+  const receipt = match?.receipt;
+  const id = receipt?.selected_candidate;
+  return receipt?.candidate_results?.find(result => result.candidate?.id === id)
+    || receipt?.candidate_results?.[0]
+    || null;
+}
+
+function renderCalibrationMatches(matches) {
+  const container = dom.calibrationMatches;
+  if (!container) return;
+  container.replaceChildren();
+  wizardState.calibration.matches = matches;
+  const preferred = matches.find(match => match.match_kind === 'exact')
+    || matches.find(match => match.match_kind === 'compatible')
+    || matches.find(match => match.match_kind === 'related')
+    || null;
+  wizardState.calibration.selectedMatch = preferred;
+  matches.forEach((match, index) => {
+    const receipt = match.receipt || {};
+    const article = document.createElement('article');
+    article.className = 'spawn-calibration-match';
+    article.dataset.matchIndex = String(index);
+    article.classList.toggle('is-selected', match === preferred);
+    const heading = document.createElement('div');
+    heading.className = 'spawn-calibration-match-heading';
+    const badge = document.createElement('span');
+    badge.className = `spawn-calibration-badge spawn-calibration-badge--${match.match_kind || 'related'}`;
+    badge.textContent = match.match_kind === 'exact'
+      ? 'Measured on this model'
+      : match.match_kind === 'compatible'
+        ? 'Compatible model evidence'
+        : 'Related model evidence';
+    const source = document.createElement('span');
+    source.className = 'spawn-calibration-match-source';
+    source.textContent = receipt.fingerprint?.model?.library_relative_id || 'local GGUF';
+    heading.append(badge, source);
+    article.appendChild(heading);
+    const details = document.createElement('div');
+    details.className = 'spawn-calibration-match-details';
+    details.textContent = `Candidate: ${receipt.selected_candidate || 'measured result'} · Job ${receipt.job_id || 'unknown'}`;
+    article.appendChild(details);
+    (match.warnings || []).forEach(warning => {
+      const note = document.createElement('p');
+      note.className = 'spawn-calibration-match-warning';
+      note.textContent = warning;
+      article.appendChild(note);
+    });
+    article.addEventListener('click', () => {
+      wizardState.calibration.selectedMatch = match;
+      container.querySelectorAll('.spawn-calibration-match').forEach(item => item.classList.remove('is-selected'));
+      article.classList.add('is-selected');
+      if (dom.calibrationApplyBtn) {
+        dom.calibrationApplyBtn.hidden = !currentCalibrationCandidate(match);
+        dom.calibrationApplyBtn.textContent = match.match_kind === 'related'
+          ? 'Review related candidate'
+          : 'Apply selected candidate';
+      }
+    });
+    container.appendChild(article);
+  });
+  if (dom.calibrationApplyBtn) {
+    dom.calibrationApplyBtn.hidden = !preferred || !currentCalibrationCandidate(preferred);
+    dom.calibrationApplyBtn.textContent = preferred?.match_kind === 'related'
+      ? 'Review related candidate'
+      : 'Apply selected candidate';
+  }
+}
+
+export async function refreshWizardCalibrationOffer() {
+  const card = dom.calibrationCard;
+  if (!card) return;
+  const eligible = wizardState.engine.selected === 'llama_cpp'
+    && wizardState.model.source !== 'hf'
+    && String(wizardState.model.path || '').toLowerCase().endsWith('.gguf');
+  card.hidden = !eligible || wizardState.viewMode !== 'pro';
+  if (!eligible || wizardState.viewMode !== 'pro') return;
+  if (!wizardState.savedPresetId) {
+    if (dom.calibrationStatus) dom.calibrationStatus.textContent = 'Save this preset first to compare or calibrate it.';
+    if (dom.calibrationCheckBtn) dom.calibrationCheckBtn.disabled = true;
+    if (dom.calibrationStartBtn) dom.calibrationStartBtn.hidden = true;
+    return;
+  }
+  if (dom.calibrationCheckBtn) dom.calibrationCheckBtn.disabled = false;
+}
+
+async function checkWizardCalibrationEvidence() {
+  if (!wizardState.savedPresetId) return;
+  if (dom.calibrationStatus) dom.calibrationStatus.textContent = 'Checking exact and compatible receipts…';
+  if (dom.calibrationStartBtn) dom.calibrationStartBtn.hidden = true;
+  try {
+    const response = await fetch('/api/calibrations/match', {
+      method: 'POST',
+      headers: calibrationHeaders(true),
+      body: JSON.stringify({ preset_id: wizardState.savedPresetId, workload: calibrationWorkload(), budget: 'balanced' }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok === false) throw new Error(data.error || 'Calibration evidence lookup failed');
+    const matches = Array.isArray(data.matches) ? data.matches : [];
+    renderCalibrationMatches(matches);
+    if (dom.calibrationStatus) {
+      dom.calibrationStatus.textContent = matches.length
+        ? `${matches.length} measured evidence result${matches.length === 1 ? '' : 's'} found.`
+        : 'No matching evidence found. You can opt in to a bounded calibration.';
+    }
+    const hasReusableEvidence = matches.some(match => match.match_kind === 'exact' || match.match_kind === 'compatible');
+    if (dom.calibrationStartBtn) dom.calibrationStartBtn.hidden = hasReusableEvidence;
+    if (matches.length && !hasReusableEvidence && dom.calibrationStatus) {
+      dom.calibrationStatus.textContent = 'Related evidence found for review only. You can calibrate this exact model or explicitly review the related candidate.';
+    }
+  } catch (error) {
+    if (dom.calibrationStatus) dom.calibrationStatus.textContent = error.message || 'Calibration evidence lookup failed.';
+  }
+}
+
+async function startWizardCalibration() {
+  if (!wizardState.savedPresetId) return;
+  const workload = calibrationWorkload();
+  if (dom.calibrationStartBtn) dom.calibrationStartBtn.disabled = true;
+  if (dom.calibrationStatus) dom.calibrationStatus.textContent = 'Preparing bounded calibration…';
+  try {
+    const preflightResponse = await fetch('/api/calibrations/preflight', {
+      method: 'POST',
+      headers: calibrationHeaders(true),
+      body: JSON.stringify({ preset_id: wizardState.savedPresetId, workload, budget: 'balanced' }),
+    });
+    const preflightData = await preflightResponse.json().catch(() => ({}));
+    if (!preflightResponse.ok || preflightData.ok === false) throw new Error(preflightData.error || 'Calibration preflight failed');
+    const startResponse = await fetch('/api/calibrations', {
+      method: 'POST',
+      headers: calibrationHeaders(true),
+      body: JSON.stringify({
+        preset_id: wizardState.savedPresetId,
+        expected_preset_fingerprint: preflightData.preflight.preset_fingerprint,
+        workload,
+        budget: 'balanced',
+        kv_quality_floor: 'q8_0',
+        allow_stop_active_server: false,
+        exact_confirmation: 'CALIBRATE',
+      }),
+    });
+    const startData = await startResponse.json().catch(() => ({}));
+    if (!startResponse.ok || startData.ok === false) throw new Error(startData.error || 'Calibration could not be queued');
+    const jobId = startData.job?.id;
+    wizardState.calibration.jobId = jobId || null;
+    if (dom.calibrationStatus) dom.calibrationStatus.textContent = `Calibration queued${jobId ? ` (${jobId})` : ''}. You can continue setup.`;
+    const notificationId = jobId ? `calibration-${jobId}` : 'calibration-wizard-active';
+    showToastWithActions(
+      'Calibration queued',
+      'info',
+      'The bounded llama.cpp calibration will continue while you finish setup.',
+      [{ id: 'open-wizard', label: 'Open wizard', primary: true, handler: () => Router.navigate('/spawn/start') }],
+      { notificationId },
+    );
+    if (jobId) pollWizardCalibration(jobId, notificationId);
+  } catch (error) {
+    if (dom.calibrationStatus) dom.calibrationStatus.textContent = error.message || 'Calibration could not be queued.';
+    showToast('Calibration unavailable', 'warning', error.message || 'Calibration could not be queued.');
+  } finally {
+    if (dom.calibrationStartBtn) dom.calibrationStartBtn.disabled = false;
+  }
+}
+
+async function pollWizardCalibration(jobId, notificationId) {
+  try {
+    const response = await fetch(`/api/calibrations/${encodeURIComponent(jobId)}`, { headers: calibrationHeaders() });
+    const data = await response.json().catch(() => ({}));
+    const job = data.job;
+    if (!response.ok || !job) throw new Error(data.error || 'Calibration job disappeared');
+    const terminal = ['complete', 'failed', 'cancelled'].includes(job.state);
+    if (!terminal) {
+      setTimeout(() => pollWizardCalibration(jobId, notificationId), 5000);
+      return;
+    }
+    resolveNotification(notificationId, `Calibration ${job.state}.`);
+    showToast('Calibration finished', job.state === 'complete' ? 'success' : 'warning', `Job ${jobId} is ${job.state}.`);
+    if (dom.calibrationCard && !dom.calibrationCard.hidden) checkWizardCalibrationEvidence();
+  } catch (error) {
+    resolveNotification(notificationId, error.message || 'Calibration status unavailable.');
+  }
+}
+
+export function applySelectedWizardCalibration() {
+  const match = wizardState.calibration.selectedMatch;
+  const result = currentCalibrationCandidate(match);
+  if (!match || !result) return;
+  if (match.match_kind === 'related' && !window.confirm('This evidence uses a different GGUF weight quantization. Review and apply anyway?')) return;
+  applyCalibrationPatch(result.candidate?.typed_patch || {});
+  if (dom.calibrationStatus) dom.calibrationStatus.textContent = match.match_kind === 'exact'
+    ? 'Measured candidate applied to the wizard controls.'
+    : match.match_kind === 'related'
+      ? 'Related candidate applied after confirmation; review the quantization warning before saving or launching.'
+      : 'Compatible candidate applied; review the warning before saving or launching.';
 }
 
 export function closeSpawnWizard() {
@@ -1339,6 +1566,12 @@ function cacheDom() {
   dom.presetParamsTable  = document.getElementById('preset-params-table');
   dom.savePresetBtn      = document.getElementById('spawn-save-preset-btn');
   dom.savedPresetName    = document.getElementById('spawn-saved-preset-name');
+  dom.calibrationCard    = document.getElementById('spawn-calibration-card');
+  dom.calibrationCheckBtn = document.getElementById('spawn-calibration-check-btn');
+  dom.calibrationStartBtn = document.getElementById('spawn-calibration-start-btn');
+  dom.calibrationApplyBtn = document.getElementById('spawn-calibration-apply-btn');
+  dom.calibrationStatus   = document.getElementById('spawn-calibration-status');
+  dom.calibrationMatches  = document.getElementById('spawn-calibration-matches');
   dom.presetNameInput    = document.getElementById('spawn-preset-name-input');
   dom.portInput        = document.getElementById('spawn-port');
   dom.bindHostSelect   = document.getElementById('spawn-bind-host');
@@ -1732,6 +1965,9 @@ function bindEvents() {
   dom.vramAutosizeBtn?.addEventListener('click', triggerAutoSize);
 
   dom.savePresetBtn?.addEventListener('click', saveAsPreset);
+  dom.calibrationCheckBtn?.addEventListener('click', checkWizardCalibrationEvidence);
+  dom.calibrationStartBtn?.addEventListener('click', startWizardCalibration);
+  dom.calibrationApplyBtn?.addEventListener('click', applySelectedWizardCalibration);
   dom.spawnServerBtn?.addEventListener('click', spawnServer);
 
 
@@ -2271,6 +2507,7 @@ export function showStep(index) {
   }
   if (index === 2) {
     _renderPresetParamsStep();
+    refreshWizardCalibrationOffer();
     _renderSpawnConfigCard();
   }
 

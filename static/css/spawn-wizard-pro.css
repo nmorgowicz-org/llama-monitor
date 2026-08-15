@@ -129,6 +129,88 @@
     line-height: 1.45;
 }
 
+.spawn-calibration-card {
+    margin-top: 16px;
+    padding: 14px;
+    border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+}
+
+.spawn-calibration-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.spawn-calibration-actions button[hidden] {
+    display: none;
+}
+
+.spawn-calibration-status,
+.spawn-calibration-match-details,
+.spawn-calibration-match-warning {
+    color: var(--color-text-muted, #9ca3af);
+    font-size: 0.78rem;
+    line-height: 1.45;
+}
+
+.spawn-calibration-status {
+    margin-top: 10px;
+}
+
+.spawn-calibration-matches {
+    display: grid;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.spawn-calibration-match {
+    padding: 10px;
+    border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.spawn-calibration-match.is-selected {
+    border-color: var(--color-accent, #60a5fa);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+
+.spawn-calibration-match-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.spawn-calibration-badge {
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.spawn-calibration-badge--exact { color: var(--color-success, #4ade80); }
+.spawn-calibration-badge--compatible { color: var(--color-accent, #60a5fa); }
+.spawn-calibration-badge--related { color: var(--color-warning, #fbbf24); }
+
+.spawn-calibration-match-source {
+    overflow: hidden;
+    color: var(--color-text-muted, #9ca3af);
+    font-size: 0.7rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.spawn-calibration-match-warning {
+    margin: 5px 0 0;
+    color: var(--color-warning, #fbbf24);
+}
+
+[data-theme="light"] .spawn-calibration-card {
+    background: color-mix(in srgb, var(--color-accent) 5%, white);
+}
+
 @media (max-width: 820px) {
     .pro-layout {
         flex-direction: column;

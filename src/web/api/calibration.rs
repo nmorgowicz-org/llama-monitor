@@ -5,7 +5,7 @@ use warp::Filter;
 
 use crate::calibration::executor;
 use crate::calibration::{
-    StartCalibrationRequest,
+    CalibrationBudget, CalibrationWorkload, StartCalibrationRequest,
     executor::{ApplyCalibrationRequest, RollbackCalibrationRequest},
 };
 use crate::config::AppConfig;
@@ -25,6 +25,8 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .map(box_reply)
         .or(api_start(state.clone(), config.clone()).map(box_reply))
         .unify()
+        .or(api_match(state.clone(), config.clone()).map(box_reply))
+        .unify()
         .or(api_list(config.clone()).map(box_reply))
         .unify()
         .or(api_resume(state.clone(), config.clone()).map(box_reply))
@@ -42,6 +44,58 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .or(api_forget(config).map(box_reply))
         .unify()
         .boxed()
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+struct CalibrationMatchRequest {
+    preset_id: String,
+    workload: CalibrationWorkload,
+    budget: CalibrationBudget,
+}
+
+fn api_match(
+    state: AppState,
+    config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "calibrations" / "match")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(safe_json_body::<CalibrationMatchRequest>())
+        .and(with_app_config(config.clone()))
+        .and_then(
+            move |auth: Option<String>, request: CalibrationMatchRequest, cfg: Arc<AppConfig>| {
+                let state = state.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok::<Box<dyn warp::Reply>, warp::Rejection>(Box::new(
+                            unauthorized_api_token(),
+                        ));
+                    }
+                    let response = match executor::matching_receipts(
+                        &cfg,
+                        &state,
+                        &request.preset_id,
+                        &request.workload,
+                        request.budget,
+                    )
+                    .await
+                    {
+                        Ok(matches) => warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({"ok": true, "matches": matches})),
+                            warp::http::StatusCode::OK,
+                        ),
+                        Err(error) => warp::reply::with_status(
+                            warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": error.to_string()}),
+                            ),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ),
+                    };
+                    Ok::<Box<dyn warp::Reply>, warp::Rejection>(Box::new(response))
+                }
+            },
+        )
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

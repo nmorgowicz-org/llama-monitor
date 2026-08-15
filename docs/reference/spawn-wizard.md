@@ -253,6 +253,25 @@ Rapid-MLX advanced settings (KV dtype, prompt storage, workload scenario, sampli
 reasoning mode, Web UI) when applicable. When reasoning mode is ON and requested KV dtype is
 not int8, the summary shows "INT4 → INT8 (reasoning profile)" to make the override visible.
 
+### Calibration evidence in Pro review
+
+When a local llama.cpp GGUF is available and the wizard is in Pro view, the
+Launch review can check saved Calibration receipts. Exact evidence is labeled
+**Measured on this model**. If no exact artifact receipt exists, the wizard may
+show **Compatible model evidence** when introspected family/shape,
+weight-quantization signature, hardware/workload, and normalized runtime
+capabilities match; a different llama.cpp build is shown as a warning. A
+family/shape match with a different weight quantization is shown only as
+**Related model evidence**, requires an explicit confirmation, and is never an
+automatic recommendation. Candidates are applied through the existing wizard
+controls/events, not a parallel calibration state object.
+
+The optional **Calibrate this model** action is available only after the local
+path is known and the wizard preset has been saved. It queues a bounded
+llama.cpp job without blocking ordinary spawn. Progress remains visible in the
+global notification center after the wizard closes. Rapid-MLX never consumes
+llama.cpp calibration evidence.
+
 ### Step 2: Launch
 
 Network, security, and advanced launch flags, followed by spawn submission and start-up

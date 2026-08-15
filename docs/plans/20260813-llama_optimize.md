@@ -53,11 +53,37 @@ restart receipts remain final qualification gates.
 
 ### Phase 6 source audit (2026-08-14)
 
+> Historical audit snapshot. The implementation and completion record below supersede the initial not-started assessment.
+
 Phase 6 remains **not started** and must stay open. The current implementation exposes calibration only from the Preset Editor (`static/index.html`, `static/js/features/calibration.js`) and has no Spawn Wizard receipt-lookup route, exact-fingerprint matching path, queued-calibration affordance, or wizard calibration state. `src/web/api/calibration.rs` currently supports lookup by calibration job ID only; it does not expose a model/fingerprint query suitable for wizard reuse. The Spawn Wizard still provides the ordinary llama.cpp flow and payload builders (`static/js/features/spawn-wizard.js`, `static/js/features/spawn-wizard-review-step.js`, `static/js/features/spawn-wizard-spawn.js`) with no calibration integration.
 
 The reusable seams are present: local GGUF introspection is already performed during wizard model setup, and `static/js/features/spawn-wizard-groups.js` is the canonical control registry. Phase 6 must use those existing events/controls when implemented; it must not introduce a parallel hidden settings object. The existing `wizard-llamacpp` capture group (`tests/ui/capture/scenarios/wizard-llamacpp/`) has no calibration scenario, and `tests/ui/core/spawn-wizard.spec.js` has no receipt reuse, stale-fingerprint, queued-job, or reopen/duplicate-job coverage.
 
-**Status:** 0/7 Phase 6 tasks and 0/5 Phase 6 verification gates are complete. No Phase 6 behavior is claimed for 2.0.0 until exact-receipt reuse, explicit post-download opt-in, ordinary-flow preservation, job visibility/idempotency, Rapid-MLX separation, and release-built wizard capture/E2E coverage are implemented and validated. Native Windows qualification remains a later return marker and is not counted against this source-side audit.
+Phase 6 also requires a tiered evidence policy. An exact receipt remains the only unqualified **Measured on this hardware/model** result. When no exact artifact receipt exists, the wizard may offer lower-confidence evidence only when introspection proves the same architecture family and parameter/structural shape: **Compatible model evidence** requires the same GGUF weight-quantization signature plus a normalized runtime-capability match; **Related model evidence** may show a family/shape match with a different weight quantization, but is review-only, never the default recommendation, and requires an explicit stronger confirmation before applying. A changed managed llama.cpp build is allowed in the compatible tier and must be called out as **different runtime build**; raw server/bench hashes remain exact-receipt provenance, not a user-facing pin. The UI must expose the source artifact, compatibility key, quantization/runtime differences, and warning; it must never silently present compatible or related evidence as exact. Filename/model-name heuristics are not valid compatibility evidence, and Rapid-MLX receipts remain excluded.
+
+**Status:** Source-side Phase 6 implementation and macOS validation are complete. The remaining release marker is native Windows runtime/capture qualification; it is not inferred from macOS evidence.
+
+### Phase 6 implementation update (2026-08-14)
+
+The initial source audit above is superseded by the current implementation
+slice. `POST /api/calibrations/match` now performs strict exact matching plus
+capability-aware compatible and related-model evidence. GGUF family/shape and
+weight-quantization signatures are introspection-derived; runtime build hashes
+remain exact provenance while normalized capability signatures permit safe
+runtime drift warnings. The Pro Spawn Wizard review now exposes labeled
+evidence, applies selected patches through canonical controls/events, offers an
+explicit bounded calibration action only after a local GGUF-backed preset is
+saved, and publishes queued-job progress through the persistent notification
+center. Rapid-MLX remains excluded.
+
+Focused validation passes for Rust compilation/clippy/tests, JavaScript
+validation/lint, release build, canonical-control and eligibility Playwright
+contracts, the real local Qwen3.5 9B Q4/Q6 introspection fixture, and the
+dedicated release-built calibration capture. The capture covers exact,
+compatible, applied, and related-review states. The Q6 fixture is used only to
+prove same-family/different-quantization classification; it is not presented
+as a benchmark result. The full isolated Playwright suite and native Windows
+runtime/capture qualification remain final release gates.
 
 ### 2.0.0 release boundary
 
@@ -803,23 +829,33 @@ Do not add wizard or Doctor entry points until the primary Preset Editor flow ha
 
 **Goal:** Surface measured evidence without turning setup into a mandatory benchmark funnel.
 
-#### Tasks
+#### Tasks (original audit checklist)
 
-- [ ] Add receipt lookup by exact fingerprint after local GGUF introspection.
-- [ ] Show **Measured on this hardware** only for an exact current receipt; show evidence/staleness details.
-- [ ] Map a selected measured candidate through the canonical wizard control registry and existing events; do not maintain a second hidden state object.
-- [ ] Add **Calibrate after download** only when the final local model path is known and the user explicitly opts in.
-- [ ] If calibration is queued, preserve the ordinary preset/spawn choice and make the job visible outside the modal.
-- [ ] Keep Quick/Guided flows concise; place calibration controls in Pro/Advanced and review summary.
-- [ ] Maintain backend separation; Rapid gets no translated llama result.
+- [x] Add authenticated receipt lookup after local GGUF introspection. Exact, compatible, and related evidence are classified from introspected structure, weight-quantization inventory, hardware, workload, baseline, and normalized runtime capabilities; filenames never participate.
+- [x] Show **Measured on this model** only for an exact current receipt; compatible and related evidence show explicit warnings.
+- [x] Map a selected measured candidate through the canonical wizard control registry and existing events; no parallel hidden settings state.
+- [x] Calibrate only after the final local GGUF path is known and the user explicitly opts in.
+- [x] Queued calibration preserves ordinary setup and publishes persistent notification-center status.
+- [x] Quick/Guided remain concise; calibration lives in Pro review.
+- [x] Rapid-MLX remains separate; no llama.cpp translation.
 
 #### Verification
 
-- [ ] Exact receipt is offered; hardware/runtime/model/baseline drift makes it stale and prevents one-click apply.
-- [ ] Applying candidate updates the real wizard values and final preset payload.
-- [ ] No local model means no run action.
-- [ ] Closing/reopening the wizard does not orphan or duplicate a job.
-- [ ] Add/reuse sequential `wizard-llamacpp` capture scenarios and run the full CI-equivalent UI suite after release build.
+- [x] Exact/compatible/related receipt classification has focused Rust coverage, including legacy receipts, drift rejection, and runtime-build warnings.
+- [x] Applying a candidate updates real wizard values through canonical controls; focused release-built Playwright coverage passes.
+- [x] No local model and Rapid-MLX both hide the llama.cpp calibration card/action.
+- [x] Related-only evidence remains selectable, shows review-only language, leaves exact-model calibration available, and requires explicit confirmation.
+- [x] Closing/reopening does not auto-start or duplicate calibration; queued jobs remain represented by notification-center status.
+- [x] Sequential release-built `wizard-llamacpp` capture covers evidence, applied, and related-review states; the dedicated capture contract passes.
+
+#### Phase 6 completion record (2026-08-14)
+
+- [x] Exact/compatible/related receipt matching, legacy compatibility, runtime-capability drift warnings, and family/quantization introspection tests.
+- [x] Qwen3.5 9B Q4_K_M and Q6_K local fixtures confirm same introspected family fields with distinct quantization inventories.
+- [x] Canonical-control application, local-GGUF/llama.cpp eligibility, Rapid-MLX exclusion, and related-review confirmation coverage.
+- [x] Release-built evidence/applied/related-review captures pass their contract.
+- [x] Queued calibration remains explicit and visible through persistent notification-center status; ordinary setup remains available after close/reopen.
+- [x] Isolated full Playwright suite passes (281 passed, 5 intentionally skipped); native Windows runtime/capture qualification remains the final release gate.
 
 ### Phase 7 — Real-server workload validation, MTP, ngram, and concurrency
 

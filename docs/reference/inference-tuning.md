@@ -473,6 +473,17 @@ bounded and Thorough refinement is deferred. Rapid-MLX benchmark output remains
 informational-only until a separate backend-owned factor catalog and receipt
 qualification exists.
 
+#### Spawn Wizard receipt reuse
+
+Spawn Wizard calls `POST /api/calibrations/match` with a saved llama.cpp preset,
+workload, and budget. Results are tiered: exact receipts require the complete
+artifact/runtime fingerprint; compatible evidence requires the same
+introspected family/shape, GGUF weight-quantization signature,
+hardware/workload, and normalized runtime capabilities; related evidence may
+have a different weight quantization and is review-only. Runtime build changes
+are disclosed rather than treated as a user-facing version pin. Rapid-MLX
+receipts never cross into this llama.cpp evidence path.
+
 ### Built-in tuning and benchmark endpoints
 
 The app exposes several POST endpoints (all require api-token auth) that automate
