@@ -60,6 +60,7 @@ export default async function ({ page, baseUrl }) {
   await page.locator('#spawn-calibration-check-btn').click();
   await page.waitForSelector('.spawn-calibration-match', { timeout: 10000 });
   await sleep(250);
+  // INTENT: Show exact and compatible saved-calibration evidence in the Pro review step.
   await captureShot(page, 'spawn-wizard-calibration-evidence.png', {
     fullPage: true,
     runtimeTag: 'llamacpp-local',
@@ -67,6 +68,7 @@ export default async function ({ page, baseUrl }) {
   });
   await page.locator('#spawn-calibration-apply-btn').click();
   await sleep(150);
+  // INTENT: Show the calibration candidate applied to the wizard controls.
   await captureShot(page, 'spawn-wizard-calibration-applied.png', {
     fullPage: true,
     runtimeTag: 'llamacpp-local',
@@ -82,6 +84,7 @@ export default async function ({ page, baseUrl }) {
   await page.locator('#spawn-calibration-check-btn').click();
   await page.waitForSelector('.spawn-calibration-match', { timeout: 10000 });
   await sleep(250);
+  // INTENT: Show related-model evidence as an explicit review-only choice.
   await captureShot(page, 'spawn-wizard-calibration-related-review.png', {
     fullPage: true,
     runtimeTag: 'llamacpp-local',
