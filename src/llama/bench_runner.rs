@@ -19,7 +19,14 @@ use tokio::process::Command;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 pub const BENCH_MAX_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
+/// Default repetitions for standalone benchmark helpers and Thorough runs.
 pub const BENCH_REPETITIONS: u32 = 3;
+/// Quick calibration intentionally samples each candidate once; finalists are
+/// remeasured by the Balanced profile.
+pub const QUICK_BENCH_REPETITIONS: u32 = 1;
+/// Balanced calibration uses two samples for finalists, avoiding the old
+/// three-sample cost on every candidate.
+pub const BALANCED_BENCH_REPETITIONS: u32 = 2;
 
 static BENCH_LEASE: OnceLock<Arc<Semaphore>> = OnceLock::new();
 
@@ -320,6 +327,31 @@ fn base_args(
     ubatch_size: u32,
     n_cpu_moe: Option<i32>,
 ) -> Vec<String> {
+    base_args_with_repetitions(
+        model_path,
+        ngl,
+        flash_attn,
+        ctk,
+        ctv,
+        batch_size,
+        ubatch_size,
+        n_cpu_moe,
+        BENCH_REPETITIONS,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn base_args_with_repetitions(
+    model_path: &str,
+    ngl: i32,
+    flash_attn: &str,
+    ctk: &str,
+    ctv: &str,
+    batch_size: u32,
+    ubatch_size: u32,
+    n_cpu_moe: Option<i32>,
+    repetitions: u32,
+) -> Vec<String> {
     let mut args: Vec<String> = vec![
         "-m".into(),
         model_path.into(),
@@ -338,7 +370,7 @@ fn base_args(
         "-o".into(),
         "json".into(),
         "-r".into(),
-        BENCH_REPETITIONS.to_string(),
+        repetitions.to_string(),
     ];
     if let Some(n) = n_cpu_moe
         && n > 0
@@ -392,6 +424,26 @@ pub async fn run_bench_receipt(
     args: &[String],
     timeout: Duration,
 ) -> Result<BenchRunReceipt, String> {
+    run_bench_receipt_with_deadline(bench_bin, cwd, args, Some(timeout)).await
+}
+
+/// Run a calibration-owned benchmark without an arbitrary wall-clock kill.
+/// The executor still owns cancellation and `kill_on_drop` cleanup, while a
+/// legitimate long-context trial is allowed to finish and emit JSON.
+pub async fn run_bench_receipt_unbounded(
+    bench_bin: &Path,
+    cwd: &Path,
+    args: &[String],
+) -> Result<BenchRunReceipt, String> {
+    run_bench_receipt_with_deadline(bench_bin, cwd, args, None).await
+}
+
+async fn run_bench_receipt_with_deadline(
+    bench_bin: &Path,
+    cwd: &Path,
+    args: &[String],
+    deadline: Option<Duration>,
+) -> Result<BenchRunReceipt, String> {
     let _lease = bench_lease()
         .acquire_owned()
         .await
@@ -434,33 +486,36 @@ pub async fn run_bench_receipt(
         let (err, err_truncated) = err_result?;
         Ok::<_, String>((out, err, out_truncated, err_truncated))
     };
-    let (stdout, stderr, stdout_truncated, stderr_truncated) =
-        match tokio::time::timeout(timeout, capture).await {
-            Ok(result) => result?,
-            Err(_) => {
-                #[cfg(unix)]
-                if let Some(pid) = child.id() {
-                    // The child owns a dedicated process group, so descendants
-                    // are terminated without broad name-based process kills.
-                    unsafe {
-                        libc::kill(-(pid as i32), libc::SIGKILL);
-                    }
+    let capture_result = match deadline {
+        Some(timeout) => tokio::time::timeout(timeout, capture).await,
+        None => Ok(capture.await),
+    };
+    let (stdout, stderr, stdout_truncated, stderr_truncated) = match capture_result {
+        Ok(result) => result?,
+        Err(_) => {
+            #[cfg(unix)]
+            if let Some(pid) = child.id() {
+                // The child owns a dedicated process group, so descendants
+                // are terminated without broad name-based process kills.
+                unsafe {
+                    libc::kill(-(pid as i32), libc::SIGKILL);
                 }
-                let _ = child.kill().await;
-                return Ok(BenchRunReceipt {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    wall_time: started.elapsed(),
-                    exit_code: None,
-                    stdout_truncated: false,
-                    stderr_truncated: false,
-                    failure: Some(BenchFailureKind::Timeout),
-                    tool_sha256,
-                    telemetry_before,
-                    telemetry_after: capture_telemetry(),
-                });
             }
-        };
+            let _ = child.kill().await;
+            return Ok(BenchRunReceipt {
+                stdout: String::new(),
+                stderr: String::new(),
+                wall_time: started.elapsed(),
+                exit_code: None,
+                stdout_truncated: false,
+                stderr_truncated: false,
+                failure: Some(BenchFailureKind::Timeout),
+                tool_sha256,
+                telemetry_before,
+                telemetry_after: capture_telemetry(),
+            });
+        }
+    };
     let status = child
         .wait()
         .await
@@ -544,10 +599,51 @@ pub async fn run_sweep_with_tokens(
     prompt_tokens: u32,
     generation_tokens: u32,
 ) -> Result<Vec<SweepPoint>, String> {
+    run_sweep_with_tokens_repetitions(
+        bench_bin,
+        cwd,
+        model_path,
+        ngl,
+        flash_attn,
+        ctk,
+        ctv,
+        batch_size,
+        ubatch_size,
+        depths,
+        n_cpu_moe,
+        prompt_tokens,
+        generation_tokens,
+        BENCH_REPETITIONS,
+    )
+    .await
+}
+
+/// Run a token-shaped sweep with an explicit repetition profile.
+/// Calibration uses this to screen once and only repeat finalists.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_sweep_with_tokens_repetitions(
+    bench_bin: &Path,
+    cwd: &Path,
+    model_path: &str,
+    ngl: i32,
+    flash_attn: &str,
+    ctk: &str,
+    ctv: &str,
+    batch_size: u32,
+    ubatch_size: u32,
+    depths: &[u64],
+    n_cpu_moe: Option<i32>,
+    prompt_tokens: u32,
+    generation_tokens: u32,
+    repetitions: u32,
+) -> Result<Vec<SweepPoint>, String> {
+    if repetitions == 0 {
+        return Err("Benchmark repetitions must be non-zero".into());
+    }
     if depths.is_empty() {
         return Err("No depths requested".into());
     }
-    let mut args = base_args(
+    let mut args = base_args_with_repetitions(
         model_path,
         ngl,
         flash_attn,
@@ -556,6 +652,7 @@ pub async fn run_sweep_with_tokens(
         batch_size,
         ubatch_size,
         n_cpu_moe,
+        repetitions,
     );
     args.push("-p".into());
     args.push(prompt_tokens.to_string());
@@ -571,17 +668,12 @@ pub async fn run_sweep_with_tokens(
     );
 
     // Each depth requires a prefill of that many tokens; scale the budget.
-    let max_depth = depths.iter().copied().max().unwrap_or(0);
     // Long Thinking workloads spend most of their wall time in decode. The
     // previous depth-only timeout could kill a valid 8K generation before
     // llama-bench emitted JSON, which surfaced as a misleading EOF parse
     // error. Keep the short-workload behavior while reserving time for the
     // requested generation length.
-    let timeout_seconds = 300_u64
-        .saturating_add(max_depth / 256)
-        .saturating_add(u64::from(generation_tokens) / 16);
-    let timeout = Duration::from_secs(timeout_seconds);
-    let receipt = run_bench_receipt(bench_bin, cwd, &args, timeout).await?;
+    let receipt = run_bench_receipt_unbounded(bench_bin, cwd, &args).await?;
     let points = parse_sweep_json(&receipt.stdout)?;
     validate_wall_clock_plausibility(&points, prompt_tokens, generation_tokens, receipt.wall_time)?;
     Ok(points)
@@ -691,6 +783,13 @@ pub async fn probe_batch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn calibration_repetition_profiles_are_bounded() {
+        assert_eq!(QUICK_BENCH_REPETITIONS, 1);
+        assert_eq!(BALANCED_BENCH_REPETITIONS, 2);
+        assert_eq!(BENCH_REPETITIONS, 3);
+    }
 
     #[test]
     fn parses_pp_and_tg_by_depth() {

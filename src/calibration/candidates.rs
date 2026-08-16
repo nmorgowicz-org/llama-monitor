@@ -13,8 +13,14 @@ use super::design::{OrthogonalArray, generate};
 
 pub const BALANCED_MAX_SCREEN_TRIALS: usize = 48;
 pub const BALANCED_MAX_OA_ROWS: usize = 25;
-pub const BALANCED_MAX_VERIFICATION_CANDIDATES: usize = 2;
-const BALANCED_BATCH_LEVELS: [u32; 5] = [512, 1024, 1536, 2048, 4096];
+/// Final confirmation includes the baseline plus the two strongest screen
+/// survivors. The baseline is required at the full workload after screening.
+pub const BALANCED_MAX_VERIFICATION_CANDIDATES: usize = 3;
+pub const QUICK_MAX_VERIFICATION_CANDIDATES: usize = 2;
+/// Dense-Qwen default screen ladder. The Phase 4 receipt found no trustworthy
+/// improvement over 512/512 and marked 4096 high-noise, so 1536/4096 remain
+/// explicit Thorough-mode follow-ups rather than default Balanced rows.
+const BALANCED_BATCH_LEVELS: [u32; 3] = [512, 1024, 2048];
 
 /// The deliberately small, typed factor surface used by Balanced v1.
 ///
@@ -321,7 +327,12 @@ fn numeric_u64_levels<F>(
 where
     F: Fn(u64) -> LlamaCppCalibrationPatch,
 {
-    let baseline = baseline.max(minimum);
+    // The bounded Quick/Balanced planner measures context factors only through
+    // 131K. A saved preset may legitimately request a larger server context;
+    // keep that effective preset value in the baseline candidate while
+    // clamping only the generated factor levels so the planner cannot panic on
+    // an inverted `clamp(min, max)` range.
+    let baseline = baseline.min(131_072).max(minimum);
     let low = minimum.min(baseline);
     let quarter = low.saturating_add(baseline.saturating_sub(low) / 4);
     let half = low.saturating_add(baseline.saturating_sub(low) / 2);
@@ -587,7 +598,22 @@ mod tests {
     fn balanced_budget_fails_closed() {
         assert!(validate_balanced_budget(49, 9, 2).is_err());
         assert!(validate_balanced_budget(0, 26, 2).is_err());
-        assert!(validate_balanced_budget(0, 25, 3).is_err());
-        assert!(validate_balanced_budget(21, 25, 2).is_err());
+        assert!(validate_balanced_budget(0, 25, 4).is_err());
+        assert!(validate_balanced_budget(21, 25, 3).is_err());
+    }
+
+    #[test]
+    fn oversized_preset_context_clamps_factor_levels_without_panicking() {
+        let levels = numeric_u64_levels(200_000, 8_192, |context_size| LlamaCppCalibrationPatch {
+            context_size: Some(context_size),
+            ..Default::default()
+        });
+
+        assert_eq!(levels.len(), 5);
+        assert!(
+            levels
+                .iter()
+                .all(|patch| { patch.context_size.is_some_and(|value| value <= 131_072) })
+        );
     }
 }

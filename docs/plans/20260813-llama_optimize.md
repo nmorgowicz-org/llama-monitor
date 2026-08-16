@@ -102,7 +102,7 @@ The 2.0.0 release-blocking scope is deliberately bounded:
 The following are explicitly **not** 2.0.0 release blockers and remain separately gated follow-ups:
 
 - Thorough/overnight search, multi-pass refinement above the Balanced limits, and automatic context-ceiling exploration;
-- Phase 7 multidimensional real-server search for MTP, ngram, and concurrency (2.0 still performs a bounded post-apply validation using the existing typed live-benchmark path);
+- Phase 7 bounded pre-spawn real-server qualification is part of 2.0; broader overnight search and multi-user optimization remain deferred;
 - automatic multi-GPU placement;
 - broad Doctor architecture consolidation beyond the minimum Calibration receipt findings/link;
 - Phase 9 Rapid-MLX calibration;
@@ -850,6 +850,62 @@ Do not add wizard or Doctor entry points until the primary Preset Editor flow ha
 
 #### Phase 6 completion record (2026-08-14)
 
+### Phase 7 — Pre-spawn real-server qualification (updated 2026-08-15)
+
+> Authoritative specification: [20260815-phase7-real_server_qualification.md](20260815-phase7-real_server_qualification.md). The historical draft below is retained only for provenance.
+
+**Implementation status (2026-08-15):** The bounded code slice is implemented
+and validated: typed request/receipt contracts, calibration-job persistence,
+isolated loopback lifecycle, latency/response probes, independent
+tool-correctness probing, capability-backed MTP/n-gram execution with an
+explicit no-spec baseline, process-memory telemetry, Preset Editor controls,
+Spawn Wizard defaults, release-built screenshots, and focused Playwright
+coverage. DFLASH remains fail-closed because this managed llama.cpp lane has no
+verified capability signal; this omits only the DFLASH-specific receipt and
+does not reject a DFLASH-capable preset. Representative hardware receipts and
+Windows qualification remain the external release gates.
+
+**Goal:** Qualify a saved Spawn Wizard/Preset Editor preset with a calibration-owned loopback server before normal model launch. This complements Quick/Balanced `llama-bench`; it does not require a second user session or simultaneous model residency.
+
+**2.0 scope:** Promote this bounded pre-spawn server slice into 2.0.0. The default lane is single-user `--parallel 1`, but concurrency remains an explicit opt-in for unified-memory systems (Apple Silicon, DGX Spark, and similar hardware) with sufficient capacity. Concurrency is never silently enabled and never allowed to invalidate the single-user MTP result.
+
+#### Execution model
+
+- Start from the saved preset after Quick/Balanced produces an initial candidate. Users may adjust `batch`/`ubatch`, KV, context, GPU layers, and chat-template/tool settings before qualification.
+- Resolve exact managed runtime, model fingerprint, workload fixture, capability evidence, and expected VRAM before starting the isolated loopback server.
+- Start the server before normal user spawn on an isolated loopback port. Candidates changing load-time settings get fresh server processes; identical load-time configurations may reuse one server.
+- If a server is already active, defer by default. Stopping and restoring it is an explicit disruptive fallback, not the normal pre-spawn path.
+- Every run is cancellable, journaled, receipt-backed, and serialized behind the existing calibration/GPU lease.
+
+#### Independently selectable workload tracks
+
+- **Automated qualification bundle:** `--parallel 1` generation, TTFT, prompt/decode throughput, wall time, memory/VRAM, correctness markers, and bounded tool behavior.
+- **Latency/memory:** TTFT, prompt processing, generation speed, startup/load time, peak/steady memory, and context behavior from the same single-user server run.
+- **Tool correctness:** a separate selectable track using deterministic constrained-tool fixtures. It can be rerun after chat-template, grammar/schema, or tool-parser changes and is an independent pass/fail gate.
+- **MTP:** only when GGUF introspection and managed runtime help prove exact MTP/NextN capability. Default `--parallel 1`; compare against an explicit no-spec baseline and record effective acceptance/speculation.
+- **DFLASH:** only when metadata and runtime evidence prove DFLASH supported and active; a requested flag alone is not evidence.
+- **N-gram:** conditional staged screening, followed by tuning only meaningful knobs for promising variants.
+- **Concurrency:** opt-in track beginning with `--parallel 1`; expand only after VRAM preflight and explicit user selection. Unified-memory hardware is a first-class target.
+
+#### Rapid-MLX / future MLX boundary
+
+Phase 7's server contract is backend-neutral at the workload layer, but its
+calibration factors and command builders remain backend-owned. The initial 2.0
+implementation is llama.cpp-only. Rapid-MLX and a future MLX/MTP loader may
+reuse workload fixtures, track selection, correctness scoring, TTFT/memory
+measurement, and receipt presentation only after a separate capability and
+factor-catalog qualification. No llama.cpp `batch`, KV, MTP, DFLASH, or n-gram
+recommendation may be translated into Rapid-MLX or a future MLX backend.
+
+#### Phase 7 acceptance gates
+
+- [x] Fake server covers health/load failures, bounded response parsing, tool/schema failures, failed probes, and readiness/port cleanup; cancellation, restart/restore, and concurrency lifecycle are covered by the managed process path and existing calibration tests.
+- [x] Unsupported or inert MTP/DFLASH/n-gram flags cannot enter a design; active capability evidence is recorded. DFLASH is explicitly fail-closed.
+- [x] Tool correctness is independent from speed; faster incorrect candidates never qualify.
+- [x] `--parallel 1` remains the default recommendation; concurrency receipts are clearly opt-in and hardware-scoped.
+- [ ] Representative receipts show repeatable benefit over no-spec baselines without correctness regression.
+- [ ] Failed, unsupported, or declined tracks degrade to Quick/Balanced results rather than blocking launch.
+
 - [x] Exact/compatible/related receipt matching, legacy compatibility, runtime-capability drift warnings, and family/quantization introspection tests.
 - [x] Qwen3.5 9B Q4_K_M and Q6_K local fixtures confirm same introspected family fields with distinct quantization inventories.
 - [x] Canonical-control application, local-GGUF/llama.cpp eligibility, Rapid-MLX exclusion, and related-review confirmation coverage.
@@ -857,7 +913,9 @@ Do not add wizard or Doctor entry points until the primary Preset Editor flow ha
 - [x] Queued calibration remains explicit and visible through persistent notification-center status; ordinary setup remains available after close/reopen.
 - [x] Isolated full Playwright suite passes (281 passed, 5 intentionally skipped); native Windows runtime/capture qualification remains the final release gate.
 
-### Phase 7 — Real-server workload validation, MTP, ngram, and concurrency
+### Phase 7 legacy draft (superseded)
+
+> Retained for provenance only. The updated pre-spawn, selectable-track design above is authoritative.
 
 **Goal:** Extend beyond raw llama-bench only where the real server driver is necessary.
 
@@ -1092,3 +1150,22 @@ the preflight guard remains the backend state authority for active inference.
 Remaining Phase 5 return markers are native Windows `.exe` execution and the
 final cross-platform qualification pass. Those do not reopen the completed
 macOS/source-side Phase 4 or Phase 5 gates.
+## Runtime-reduction policy (approved 2026-08-16)
+
+The previous 2,648-second deadline was a safety ceiling derived from 131,072 context and 8,192 generation tokens. It prevented false EOF failures after the earlier 1,324-second ceiling, but it was still capable of killing a legitimate long trial. Calibration-owned `llama-bench` sweeps now run without an arbitrary wall-clock deadline; the job executor remains cancellable and process-group cleanup remains enforced. Bounded deadlines remain available for short standalone probes.
+
+The calibration funnel now uses profile-aware repetitions: Quick screens each candidate once, then confirms at most the baseline plus the strongest survivor with two repetitions; Balanced screens once, then confirms the baseline plus the two strongest survivors with two repetitions; the standalone/Thorough default remains three. Balanced candidate screening uses a bounded dense-model workload (512 prompt, 1,024 generation, 32k context ceiling), then confirms finalists at the user-selected full workload. The default dense-Qwen batch ladder is `512`, `1024`, `2048` with `ubatch=512`; `1536` and `4096` remain explicit Thorough follow-ups because Phase 4 found no trustworthy improvement and marked `4096` high-noise. Flash Attention remains `auto`, q8_0 KV remains fixed, and thread/thread-batch are not independently crossed in this default funnel.
+
+This is a screening policy, not a claim that short workloads predict every model. Full-context and 32k-output server qualification remain finalist-only evidence. The policy is scoped to the dense Qwen3.5/3.6/3.8 findings and must not be silently generalized to MoE models; a future MoE-specific catalog requires separate evidence.
+
+### Runtime-reduction validation record (2026-08-16)
+
+- [x] `cargo fmt --all -- --check`
+- [x] `cargo clippy -- -D warnings`
+- [x] `cargo test -- --test-threads=1` — 1,316 passed, 14 ignored
+- [x] `npm run validate-js`
+- [x] `npm run lint`
+- [x] `git diff --check`
+- [x] `cargo build --release`
+- [x] `cargo check --target x86_64-pc-windows-gnu`
+- [ ] New PR CI run — pending push; historical PR 314 Playwright reports are expired, but failed job logs were retrieved for diagnosis.

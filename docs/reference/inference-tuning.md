@@ -314,6 +314,20 @@ entirely on-GPU and are very fast.
 
 ## Loader choice: llama.cpp vs MLX
 
+### llama.cpp model load mode
+
+The Pro Spawn Wizard and Preset Editor expose llama.cpp's typed `load_mode` policy:
+
+- `mmap` is the default and keeps normal memory-mapped loading behavior.
+- `none` replaces the legacy `--no-mmap` spelling for users who explicitly need it.
+- `mlock` and `mmap+mlock` pin mapped pages; use only with sufficient RAM.
+- `dio` is an opt-in direct-I/O mode supported only by compatible llama.cpp builds.
+
+Older presets containing `no_mmap` are migrated to an equivalent typed mode and
+retain the legacy field for compatibility. Non-default modes are launch policy,
+not benchmark recommendations, and should be qualified separately with a
+matching no-spec control.
+
 - **Dense ≥27B:** llama.cpp ≈ MLX (both bandwidth-bound; the gap is near zero above
   27B — MLX only wins big *under ~14B*). Quant choice moves throughput ~20%; loader
   choice moves it a couple t/s.
@@ -418,6 +432,18 @@ llama-bench -m <moe.gguf> -ngl 99 -fa 1 --n-cpu-moe 48 -n 64 -r 1   # then 40, 3
   sweeps, `-r 2+` for numbers you'll publish.
 
 ### Calibration (bounded v1)
+
+Phase 7 adds an optional `server_qualification` request to the calibration
+start payload. The default lane is `parallel_requests: 1` with the
+`latency_memory` track. `tool_correctness` is independently selectable;
+concurrency requires explicit `allow_concurrency: true`. MTP and n-gram tracks
+run only when managed-runtime capability evidence is present and include an
+explicit no-spec baseline; DFLASH remains capability-gated and fail-closed
+until a verified llama.cpp signal is available; this only omits the
+DFLASH-specific receipt and does not block a DFLASH-capable preset from launch.
+MTP qualification is likewise a bounded compatibility/smoke check: it preserves
+the preset's existing `n_max`/`p_min` values and does not attempt to optimize
+speculative decoding across workload-specific prompts.
 
 Calibration is the evidence-first path for llama.cpp tuning. The current
 release boundary exposes bounded, explicitly confirmed Quick and Balanced

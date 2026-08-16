@@ -16,6 +16,7 @@ pub mod argv;
 pub mod candidates;
 pub mod design;
 pub mod executor;
+pub mod server_qualification;
 
 pub const CALIBRATION_SCHEMA_VERSION: u32 = 1;
 pub const CALIBRATION_FACTOR_CATALOG_VERSION: u32 = 1;
@@ -180,6 +181,8 @@ pub struct StartCalibrationRequest {
     pub max_context: Option<u64>,
     pub allow_stop_active_server: bool,
     pub exact_confirmation: Option<String>,
+    #[serde(default)]
+    pub server_qualification: Option<server_qualification::QualificationRequest>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -255,6 +258,8 @@ pub struct CalibrationReceipt {
     pub preset_id: String,
     pub preset_fingerprint: String,
     pub apply_history: Vec<CalibrationApplyRecord>,
+    #[serde(default)]
+    pub server_qualification: Option<server_qualification::QualificationReceipt>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -345,6 +350,8 @@ pub struct CalibrationJobManifest {
     pub fingerprint: CalibrationFingerprint,
     #[serde(default)]
     pub baseline: CalibrationBaseline,
+    #[serde(default)]
+    pub server_qualification: Option<server_qualification::QualificationRequest>,
 }
 
 #[cfg(test)]

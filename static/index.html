@@ -2699,6 +2699,16 @@
                                 </div>
                             </div>
                             <div class="pe-toggles">
+                                <div class="pe-field" style="min-width:220px;">
+                                    <label class="pe-label" for="modal-load-mode" title="How llama.cpp maps model weights. mmap is the safe default; none avoids mmap; mlock pins mapped pages; dio uses direct I/O where supported.">Model load mode</label>
+                                    <select class="pe-input" id="modal-load-mode">
+                                        <option value="mmap" selected>mmap (default)</option>
+                                        <option value="none">none (no mmap)</option>
+                                        <option value="mlock">mlock</option>
+                                        <option value="mmap+mlock">mmap + mlock</option>
+                                        <option value="dio">dio</option>
+                                    </select>
+                                </div>
                                 <label class="pe-toggle-item" title="Disable memory-mapped I/O. Required for models >16GB or on network storage.">
                                     <input type="checkbox" id="modal-no-mmap">
                                     <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
@@ -2895,6 +2905,31 @@
                                     </select>
                                     <div class="pe-field-hint">Set to the same level as Thread Priority above. Mismatched priorities hurt time-to-first-token on busy systems even if decode is fast.</div>
                                 </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-verbosity" title="-lv/--verbosity controls llama-server diagnostic logging. Level 4 keeps speculative-decoding acceptance details visible in the server log tail.">Server Log Verbosity (-lv)</label>
+                                    <input class="pe-input" id="modal-verbosity" type="number" min="0" max="9" value="4">
+                                    <div class="pe-field-hint">Default 4 preserves speculative-decoding diagnostics and acceptance telemetry.</div>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label"><input type="checkbox" id="modal-no-cont-batching"> Disable continuous batching</label>
+                                    <div class="pe-field-hint">Opt-in only; required by some speculative-decoding workflows.</div>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label"><input type="checkbox" id="modal-swa-full"> Full SWA cache</label>
+                                    <div class="pe-field-hint">Opt-in only; may increase memory use or cause context OOM.</div>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-ctx-checkpoints">Context checkpoints</label>
+                                    <input class="pe-input" id="modal-ctx-checkpoints" type="number" min="0" step="1" placeholder="default 32">
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-checkpoint-min-step">Checkpoint minimum step</label>
+                                    <input class="pe-input" id="modal-checkpoint-min-step" type="number" min="0" step="1" placeholder="default 8192">
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-cache-reuse">Cache reuse threshold</label>
+                                    <input class="pe-input" id="modal-cache-reuse" type="number" min="0" step="1" placeholder="disabled">
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2933,6 +2968,10 @@
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-repeat-penalty" title="Penalty for repetition. Higher = less repetition. Empty = server default (1.0).">Repeat Penalty</label>
                                     <input type="number" class="pe-input" id="modal-repeat-penalty" step="any" placeholder="default 1.0">
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-repeat-last-n" title="How many recent tokens llama-server considers for repetition penalties. 64 is a common Qwen starting point.">Repeat Last N (--repeat-last-n)</label>
+                                    <input type="number" class="pe-input" id="modal-repeat-last-n" min="0" step="1" placeholder="default 64">
                                 </div>
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-presence-penalty" title="OpenAI-style presence penalty. Empty = disabled.">Presence Penalty</label>
@@ -3590,6 +3629,16 @@
         </div>
         <div class="modal-body calibration-modal-body">
             <p class="calibration-description" id="calibration-modal-description">Measure a bounded set of llama.cpp alternatives on this hardware. Your preset and active session stay unchanged.</p>
+            <fieldset class="calibration-track-options" id="calibration-track-options">
+                <legend>Server qualification tracks</legend>
+                <label><input type="checkbox" id="calibration-track-tool" checked> Tool correctness</label>
+                <label><input type="checkbox" id="calibration-track-concurrency"> Opt-in concurrency</label>
+                <label class="calibration-concurrency-count" id="calibration-concurrency-count" hidden>
+                    Parallel requests
+                    <input type="number" id="calibration-parallel-requests" min="2" max="8" value="2" inputmode="numeric">
+                </label>
+                <p class="calibration-track-note">Latency/memory always runs with one request. MTP, DFLASH, and n-gram appear only when the managed runtime proves support.</p>
+            </fieldset>
             <div class="calibration-status" id="calibration-status" role="status" aria-live="polite">Preparing preflight…</div>
             <div class="calibration-candidates" id="calibration-candidates" hidden></div>
             <div class="calibration-error" id="calibration-error" role="alert" hidden></div>
@@ -4608,6 +4657,41 @@
                                 <div class="field-hint">Higher priority reduces inference interruptions. Use 1 on shared/laptop systems, 2 on dedicated desktops or GPU rigs.</div>
                             </div>
                             <div class="hardware-field">
+                                <label for="spawn-verbosity" title="-lv/--verbosity controls llama-server diagnostic logging. Level 4 keeps speculative-decoding acceptance details visible in the server log tail.">Server Log Verbosity (-lv)</label>
+                                <input type="number" id="spawn-verbosity" min="0" max="9" value="4">
+                                <div class="field-hint">Default 4 preserves speculative-decoding diagnostics and acceptance telemetry.</div>
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-ctx-checkpoints">Context checkpoints</label>
+                                <input type="number" id="spawn-ctx-checkpoints" min="0" step="1" value="32">
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-checkpoint-min-step">Checkpoint minimum step</label>
+                                <input type="number" id="spawn-checkpoint-min-step" min="0" step="1" value="8192">
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-cache-reuse">Cache reuse threshold</label>
+                                <input type="number" id="spawn-cache-reuse" min="0" step="1" placeholder="disabled">
+                            </div>
+                            <div class="hardware-field">
+                                <label><input type="checkbox" id="spawn-no-cont-batching"> Disable continuous batching</label>
+                            </div>
+                            <div class="hardware-field">
+                                <label><input type="checkbox" id="spawn-swa-full"> Full SWA cache</label>
+                                <div class="field-hint">Opt-in only; may increase memory use or cause context OOM.</div>
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-load-mode" title="How llama.cpp loads model weights. mmap is the safe default; choose none only when you have a specific reason.">Model load mode</label>
+                                <select id="spawn-load-mode">
+                                    <option value="mmap" selected>mmap (default)</option>
+                                    <option value="none">none (no mmap)</option>
+                                    <option value="mlock">mlock</option>
+                                    <option value="mmap+mlock">mmap + mlock</option>
+                                    <option value="dio">dio</option>
+                                </select>
+                                <div class="field-hint">Opt-in; non-default modes can change startup memory behavior.</div>
+                            </div>
+                            <div class="hardware-field">
                                 <label for="spawn-threads" title="-t: CPU thread count for inference. On Apple Silicon, Apple recommends 1 (Metal GPU handles compute). Never exceed your chip's P-core count. Leave blank for server default.">Threads (-t)</label>
                                 <input type="number" id="spawn-threads" min="-1" max="64" placeholder="default" title="CPU thread count for inference (-t). -1 or blank = server default.">
                                 <div class="field-hint" id="spawn-threads-hint">Blank = server default. Apple Silicon: use 1 — GPU handles inference.</div>
@@ -4908,6 +4992,11 @@
                                 <label for="spawn-repeat-penalty">Repeat penalty</label>
                                 <input type="number" id="spawn-repeat-penalty" min="0.5" max="2" step="0.05" placeholder="server default">
                                 <div class="field-hint">Penalises recently used tokens. 1.0 = off. 1.1–1.2 reduces loops without harming quality.</div>
+                            </div>
+                            <div class="sampling-field">
+                                <label for="spawn-repeat-last-n">Repeat last N</label>
+                                <input type="number" id="spawn-repeat-last-n" min="0" step="1" placeholder="server default 64">
+                                <div class="field-hint">History window used by repeat penalties. 64 is a common starting point for Qwen models.</div>
                             </div>
                             <div class="sampling-field">
                                 <label for="spawn-presence-penalty" title="Flat penalty added to logit of any token that has appeared. OpenAI-style presence_penalty. Use ~1.5 for EXAONE 4.5, 0 to disable.">Presence penalty</label>

@@ -228,23 +228,44 @@ pub async fn generate_snapshot(binary: &Path) -> Result<CapabilitySnapshot> {
     Ok(snapshot)
 }
 
+fn recognizable_version_line(text: &str) -> Option<String> {
+    text.lines().map(str::trim).find_map(|trimmed| {
+        if (trimmed.starts_with("llama-server") && trimmed.contains("version"))
+            || trimmed.starts_with("llama.cpp")
+        {
+            Some(trimmed.to_string())
+        } else {
+            None
+        }
+    })
+}
+
 async fn probe_version(binary: &Path) -> Result<String> {
+    // Recent llama.cpp builds no longer print a version banner in `--help`.
+    // Prefer the dedicated probe, then fall back to recognizable help text;
+    // capability extraction must not be disabled merely because version text
+    // moved between commands.
+    if let Ok(output) = run_probe_command(binary, &["--version"]).await {
+        let text = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if let Some(line) = text.lines().map(str::trim).find(|line| !line.is_empty()) {
+            return Ok(line.to_string());
+        }
+    }
+
     let output = run_probe_command(binary, &["--help"]).await?;
     let text = format!(
         "{}\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("llama-server") && trimmed.contains("version") {
-            return Ok(trimmed.to_string());
-        }
-        if trimmed.starts_with("llama.cpp") {
-            return Ok(trimmed.to_string());
-        }
+    if let Some(line) = recognizable_version_line(&text) {
+        return Ok(line);
     }
-    bail!("llama-server --help did not contain version line");
+    Ok("llama-server version unknown".into())
 }
 
 async fn probe_help(binary: &Path) -> Result<(String, Vec<String>)> {
@@ -473,6 +494,17 @@ mod tests {
         let hash2 = hash_help("--host --port --cache-prompt");
         assert_eq!(hash1, hash2);
         assert_ne!(hash1, hash_help("--host --port"));
+    }
+
+    #[test]
+    fn version_probe_accepts_help_without_a_version_banner() {
+        let help = "Usage: llama-server [OPTIONS]\nOptions:\n  --model PATH\n  --load-mode MODE";
+        assert_eq!(recognizable_version_line(help), None);
+        assert_eq!(
+            "llama-server version unknown",
+            recognizable_version_line(help)
+                .unwrap_or_else(|| "llama-server version unknown".to_string())
+        );
     }
 
     #[test]

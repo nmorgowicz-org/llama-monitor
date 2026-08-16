@@ -1,14 +1,18 @@
 export const COMMUNITY_TEMPLATES = {
   qwen: {
     name: 'qwen-froggeric-fixed',
-    display: "froggeric's Fixed Template",
+    display: "froggeric's Fixed Template v22",
     installEndpoint: '/api/chat-template/install-hf',
     repo: 'froggeric/Qwen-Fixed-Chat-Templates',
     file: 'chat_template.jinja',
-    description: 'Fixes tool calling, KV cache invalidation & agentic loop bugs for Qwen 3.5 / 3.6',
-    sourceUrl: 'https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates',
+    revision: '9f14778c92c3b5ed3e0738085694c0d3452802dd',
+    version: 'qwen3.8-froggeric-v22',
+    description: 'froggeric Fixed Chat Template v22 for Qwen models; fixes tool calling, KV cache invalidation & agentic loop bugs',
+    sourceUrl: 'https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates/blob/9f14778c92c3b5ed3e0738085694c0d3452802dd/chat_template.jinja',
     provenance: 'community',
-    transformed: true, // Uses -no_json transform at install time
+    // v22 is consumed as published. The historical v21.3 -no_json transform
+    // must not be reused for this pinned release.
+    transformed: false,
   },
   // Google's official template is listed first (and is what getDefaultTemplateForFamily()
   // picks) because it's the priority recommendation. jscott3201's agentic fork is kept as
@@ -78,7 +82,12 @@ export function communityFamilyFromGgufArchitecture(arch) {
 export function buildCommunityTemplateInstallRequest(template, force = false) {
   const body = template.url
     ? { url: template.url, name: template.name }
-    : { repo: template.repo, file: template.file, name: template.name };
-  if (force) body.force = true;
+    : {
+      repo: template.repo,
+      file: template.file,
+      name: template.name,
+      ...(template.revision ? { revision: template.revision } : {}),
+    };
+  if (force || template.revision) body.force = true;
   return { endpoint: template.installEndpoint, body };
 }

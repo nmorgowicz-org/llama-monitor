@@ -1,4 +1,5 @@
 use crate::inference::InferenceBackend;
+use crate::inference::llama_cpp::LoadMode;
 use crate::inference::rapid_mlx::RapidMlxConfig;
 use anyhow::Result;
 use std::path::Path;
@@ -10,7 +11,7 @@ use std::path::Path;
 ///     existing presets default to prefix_cache_enabled=false (safe default).
 /// v3: Phase 7A — all Phase 7 config fields (KV/cache, batching, GPU, Web UI, safety);
 ///     existing presets load with None/defaults (safe degraded mode).
-pub const PRESET_SCHEMA_VERSION: u32 = 3;
+pub const PRESET_SCHEMA_VERSION: u32 = 4;
 
 /// Forward-migrate a preset from any known version to current.
 /// Returns `true` if migration was applied, `false` if already current.
@@ -61,6 +62,17 @@ pub fn migrate_preset(preset: &mut ModelPreset) -> bool {
         preset.schema_version = Some(3);
         migrated = true;
     }
+    // v3 -> v4: make the model loading policy explicit while retaining the
+    // legacy boolean for older readers. `no_mmap=true` maps to `none`.
+    if preset.schema_version.unwrap_or(3) < 4 && preset.load_mode.is_none() {
+        preset.load_mode = Some(if preset.no_mmap {
+            LoadMode::None
+        } else {
+            LoadMode::Mmap
+        });
+        preset.schema_version = Some(4);
+        migrated = true;
+    }
     if preset.schema_version.unwrap_or(0) < PRESET_SCHEMA_VERSION {
         preset.schema_version = Some(PRESET_SCHEMA_VERSION);
         migrated = true;
@@ -75,6 +87,10 @@ fn null_as_zero_u32<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u32, D::Er
 fn null_as_zero_u64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
     use serde::Deserialize;
     Ok(Option::<u64>::deserialize(d)?.unwrap_or(0))
+}
+
+fn default_verbosity() -> Option<i32> {
+    Some(4)
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -108,6 +124,24 @@ pub struct ModelPreset {
     pub ubatch_size: u32,
     #[serde(default)]
     pub no_mmap: bool,
+    /// Explicit llama.cpp model loading policy. Legacy presets may omit this
+    /// and are migrated from `no_mmap` at the persistence boundary.
+    #[serde(default)]
+    pub load_mode: Option<LoadMode>,
+    /// llama-server log verbosity. Keep level 4 by default so speculative
+    /// decoding diagnostics remain visible in the server log tail.
+    #[serde(default = "default_verbosity")]
+    pub verbosity: Option<i32>,
+    #[serde(default)]
+    pub no_cont_batching: bool,
+    #[serde(default)]
+    pub swa_full: bool,
+    #[serde(default)]
+    pub ctx_checkpoints: Option<u32>,
+    #[serde(default)]
+    pub checkpoint_min_step: Option<u32>,
+    #[serde(default)]
+    pub cache_reuse: Option<u32>,
     #[serde(default)]
     pub ngram_spec: bool,
     #[serde(default, deserialize_with = "null_as_zero_u32")]
@@ -123,6 +157,8 @@ pub struct ModelPreset {
     pub min_p: Option<f64>,
     #[serde(default)]
     pub repeat_penalty: Option<f64>,
+    #[serde(default)]
+    pub repeat_last_n: Option<u32>,
     #[serde(default)]
     pub presence_penalty: Option<f64>,
     // CPU MOE
@@ -1038,7 +1074,7 @@ mod tests {
         let mut preset: ModelPreset = serde_json::from_value(json).unwrap();
         let migrated = migrate_preset(&mut preset);
         assert!(migrated);
-        assert_eq!(preset.schema_version, Some(3));
+        assert_eq!(preset.schema_version, Some(PRESET_SCHEMA_VERSION));
         // Safe default: prefix_cache_enabled=false
         assert!(!preset.rapid_mlx.as_ref().unwrap().prefix_cache_enabled);
     }
@@ -1059,7 +1095,7 @@ mod tests {
         let mut preset: ModelPreset = serde_json::from_value(json).unwrap();
         let migrated = migrate_preset(&mut preset);
         assert!(migrated);
-        assert_eq!(preset.schema_version, Some(3));
+        assert_eq!(preset.schema_version, Some(PRESET_SCHEMA_VERSION));
         // Safe default: prefix_cache_enabled=false
         assert!(!preset.rapid_mlx.as_ref().unwrap().prefix_cache_enabled);
     }
@@ -1131,7 +1167,7 @@ mod tests {
         let json = serde_json::to_value(&preset).unwrap();
         let loaded: ModelPreset = serde_json::from_value(json).unwrap();
 
-        assert_eq!(loaded.schema_version, Some(3));
+        assert_eq!(loaded.schema_version, Some(PRESET_SCHEMA_VERSION));
         let rapid = loaded.rapid_mlx.unwrap();
         assert_eq!(rapid.kv_cache_dtype, Some(KvCacheConfig::Int8));
         assert_eq!(rapid.turboquant_mode, Some(TurboQuantMode::K8V4));
@@ -1165,7 +1201,7 @@ mod tests {
         let mut preset: ModelPreset = serde_json::from_value(json).unwrap();
         let migrated = migrate_preset(&mut preset);
         assert!(migrated);
-        assert_eq!(preset.schema_version, Some(3));
+        assert_eq!(preset.schema_version, Some(PRESET_SCHEMA_VERSION));
 
         let rapid = preset.rapid_mlx.unwrap();
         assert!(rapid.kv_cache_dtype.is_none());

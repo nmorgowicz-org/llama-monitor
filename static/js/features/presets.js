@@ -1324,7 +1324,8 @@ export function openPresetModal(mode, section, seedPreset = null) {
         _presetRapidMlxPrefillExplicit = p.rapid_mlx?.prefill_step_size != null;
         _schedulePresetRapidMlxProfile();
         numOrEmpty('modal-gpu-layers', p.gpu_layers);
-        setChk('modal-no-mmap', p.no_mmap);
+  setChk('modal-no-mmap', p.no_mmap);
+  setOpt('modal-load-mode', p.load_mode || (p.no_mmap ? 'none' : 'mmap'));
         setChk('modal-mlock', p.mlock);
         // Context & KV
         setVal('modal-context-size', p.context_size || 128000);
@@ -1340,7 +1341,13 @@ export function openPresetModal(mode, section, seedPreset = null) {
         const cacheIdleHint = document.getElementById('cache-idle-slots-hint');
         if (cacheIdleHint) cacheIdleHint.style.display = (p.parallel_slots || 1) > 1 ? '' : 'none';
         setOpt('modal-prio', p.prio != null ? String(p.prio) : '');
-        setOpt('modal-prio-batch', p.prio_batch != null ? String(p.prio_batch) : '');
+ setOpt('modal-prio-batch', p.prio_batch != null ? String(p.prio_batch) : '');
+        numOrEmpty('modal-verbosity', p.verbosity ?? 4);
+        setChk('modal-no-cont-batching', p.no_cont_batching);
+        setChk('modal-swa-full', p.swa_full);
+        numOrEmpty('modal-ctx-checkpoints', p.ctx_checkpoints);
+        numOrEmpty('modal-checkpoint-min-step', p.checkpoint_min_step);
+        numOrEmpty('modal-cache-reuse', p.cache_reuse);
         setOpt('modal-cache-idle-slots', p.cache_idle_slots == null ? '' : p.cache_idle_slots ? 'true' : 'false');
         numOrEmpty('modal-threads', p.threads);
         numOrEmpty('modal-threads-batch', p.threads_batch);
@@ -1350,6 +1357,7 @@ export function openPresetModal(mode, section, seedPreset = null) {
         numOrEmpty('modal-top-k', p.top_k);
         numOrEmpty('modal-min-p', p.min_p);
         numOrEmpty('modal-repeat-penalty', p.repeat_penalty);
+        numOrEmpty('modal-repeat-last-n', p.repeat_last_n);
         numOrEmpty('modal-presence-penalty', p.presence_penalty);
         setOpt('modal-enable-thinking', p.enable_thinking == null ? '' : String(!!p.enable_thinking));
         setOpt('modal-preserve-thinking', p.preserve_thinking == null ? '' : String(!!p.preserve_thinking));
@@ -2458,7 +2466,8 @@ function _buildFormPreset(existing) {
         mmproj: strVal('modal-mmproj') || null,
         chat_template_file: strVal('modal-chat-template-file') || null,
         gpu_layers: intOrNull('modal-gpu-layers'),
-        no_mmap: document.getElementById('modal-no-mmap').checked,
+    no_mmap: document.getElementById('modal-no-mmap').checked,
+    load_mode: strVal('modal-load-mode') || null,
         mlock: document.getElementById('modal-mlock').checked,
         context_size: parseInt(document.getElementById('modal-context-size').value) || 128000,
         ctk: strVal('modal-ctk') || 'q8_0',
@@ -2472,6 +2481,12 @@ function _buildFormPreset(existing) {
         parallel_slots: parseInt(document.getElementById('modal-parallel-slots').value) || 1,
         prio: intOrNull('modal-prio'),
         prio_batch: intOrNull('modal-prio-batch'),
+        verbosity: intOrNull('modal-verbosity') ?? 4,
+        no_cont_batching: document.getElementById('modal-no-cont-batching').checked,
+        swa_full: document.getElementById('modal-swa-full').checked,
+        ctx_checkpoints: intOrNull('modal-ctx-checkpoints'),
+        checkpoint_min_step: intOrNull('modal-checkpoint-min-step'),
+        cache_reuse: intOrNull('modal-cache-reuse'),
         cache_idle_slots: nullableBoolOpt('modal-cache-idle-slots'),
         threads: intOrNull('modal-threads'),
         threads_batch: intOrNull('modal-threads-batch'),
@@ -2480,6 +2495,7 @@ function _buildFormPreset(existing) {
         top_k: intOrNull('modal-top-k'),
         min_p: floatOrNull('modal-min-p'),
         repeat_penalty: floatOrNull('modal-repeat-penalty'),
+        repeat_last_n: intOrNull('modal-repeat-last-n'),
         presence_penalty: floatOrNull('modal-presence-penalty'),
         enable_thinking: nullableBoolOpt('modal-enable-thinking'),
         preserve_thinking: nullableBoolOpt('modal-preserve-thinking'),
@@ -2535,10 +2551,10 @@ const CHANGE_LABELS = {
     flash_attn: 'Flash Attn', kv_unified: 'KV Unified', cache_mode: 'Prompt Cache Mode', cache_ram_mib: 'Prefix Cache RAM',
     fit_enabled: 'Fit to VRAM', fit_target: 'Fit Target',
     batch_size: 'Batch Size', ubatch_size: 'Micro-batch', parallel_slots: 'Parallel Slots',
-    prio: 'Thread Priority', prio_batch: 'Batch Priority', cache_idle_slots: 'Cache Idle Slots',
+    prio: 'Thread Priority', prio_batch: 'Batch Priority', verbosity: 'Server Log Verbosity', cache_idle_slots: 'Cache Idle Slots',
     threads: 'Threads (-t)', threads_batch: 'Batch Threads (-tb)',
     temperature: 'Temperature', top_p: 'Top-P', top_k: 'Top-K',
-    min_p: 'Min-P', repeat_penalty: 'Repeat Penalty', presence_penalty: 'Presence Penalty',
+ min_p: 'Min-P', repeat_penalty: 'Repeat Penalty', repeat_last_n: 'Repeat Last N', presence_penalty: 'Presence Penalty',
     enable_thinking: 'Thinking Mode', preserve_thinking: 'Preserve Thinking',
     tool_call_format: 'Tool Call Format',
     reasoning: 'Reasoning', reasoning_budget: 'Reasoning Budget',

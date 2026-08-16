@@ -25,7 +25,14 @@ const GROUPS = [
     controls: [
       'spawn-batch-size', 'spawn-parallel-slots', 'spawn-ubatch-size', 'spawn-flash-attn',
       'spawn-prio', 'spawn-threads', 'spawn-threads-batch',
+      'spawn-no-cont-batching', 'spawn-swa-full', 'spawn-load-mode',
     ],
+  },
+  {
+    supersection: 'advanced-tuning', id: 'diagnostics', title: 'Diagnostics',
+    description: 'Server log detail used for troubleshooting and speculative-decoding telemetry.',
+    critical: false, view: 'both',
+    controls: ['spawn-verbosity'],
   },
   {
     supersection: 'advanced-tuning', id: 'moe-multigpu', title: 'MoE & multi-GPU',
@@ -37,7 +44,10 @@ const GROUPS = [
     supersection: 'advanced-tuning', id: 'prompt-cache', title: 'Prompt cache',
     description: 'Persistent KV prefix-cache mode and size bound.',
     critical: false, view: 'both',
-    controls: ['spawn-cache-mode', 'spawn-cache-ram'],
+    controls: [
+      'spawn-cache-mode', 'spawn-cache-ram', 'spawn-ctx-checkpoints',
+      'spawn-checkpoint-min-step', 'spawn-cache-reuse',
+    ],
   },
   {
     supersection: 'advanced-tuning', id: 'fit-memory', title: 'Auto-fit & memory',

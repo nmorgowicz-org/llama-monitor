@@ -5,7 +5,10 @@
 //! `llama-bench` run, durable journal transitions, cancellation, and a
 //! redacted receipt. It never stops an active server or mutates a preset.
 
-use super::candidates::{balanced_candidates, quick_candidates};
+use super::candidates::{
+    BALANCED_MAX_VERIFICATION_CANDIDATES, QUICK_MAX_VERIFICATION_CANDIDATES, balanced_candidates,
+    quick_candidates,
+};
 use super::jobs::{
     JournalEvent, JournalEventKind, append_event, append_trial_result, mark_recovered_crash,
     read_events, read_manifest, read_trial_results, recover_snapshot, suspected_crash_trials,
@@ -13,6 +16,9 @@ use super::jobs::{
 };
 use super::paths::is_safe_calibration_id;
 use super::paths::{RegularFileError, require_regular_file};
+use super::server_qualification::{
+    self, QualificationCapabilities, QualificationReceipt, QualificationRequest, QualificationTrack,
+};
 use super::{
     CalibrationApplyRecord, CalibrationBaseline, CalibrationBaselineValue, CalibrationBudget,
     CalibrationCandidate, CalibrationCandidateResult, CalibrationFingerprint,
@@ -27,7 +33,10 @@ use crate::inference::llama_cpp_capabilities::ExecutableIdentity;
 use crate::inference::llama_cpp_tools::{
     LlamaCppTool, OptionalFitParams, ResolvedTool, ToolHelpEvidence, probe_help, resolve_tool,
 };
-use crate::llama::bench_runner::{SweepPoint, llama_bench_path, run_sweep_with_tokens};
+use crate::llama::bench_runner::{
+    BALANCED_BENCH_REPETITIONS, QUICK_BENCH_REPETITIONS, SweepPoint, llama_bench_path,
+    run_sweep_with_tokens_repetitions,
+};
 use crate::presets::{self, ModelPreset};
 use crate::state::AppState;
 use anyhow::{Context, Result, anyhow, bail};
@@ -45,6 +54,14 @@ const METHOD_VERSION_QUICK: &str = "calibration-v1-quick-single-trial";
 const METHOD_VERSION_BALANCED: &str = "calibration-v1-balanced-bounded-search";
 const CONFIRMATION: &str = "CALIBRATE";
 const RESUME_CONFIRMATION: &str = "RESUME_CALIBRATION";
+
+fn verification_count(budget: &CalibrationBudget) -> u32 {
+    match budget {
+        CalibrationBudget::Quick => QUICK_MAX_VERIFICATION_CANDIDATES as u32,
+        CalibrationBudget::Balanced => BALANCED_MAX_VERIFICATION_CANDIDATES as u32,
+        CalibrationBudget::Thorough => 0,
+    }
+}
 const MAX_DIAGNOSTICS: usize = 24;
 
 static JOBS: LazyLock<Mutex<BTreeMap<String, RuntimeJob>>> =
@@ -119,6 +136,7 @@ pub struct CalibrationReceiptView {
     pub preset_id: String,
     pub preset_fingerprint: String,
     pub apply_history: Vec<super::CalibrationApplyRecord>,
+    pub server_qualification: Option<QualificationReceipt>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -278,8 +296,7 @@ pub fn preflight(
         bench_help_flags: Vec::new(),
         bench_help_exit_code: None,
         fit_params_help_sha256: None,
-        planned_trials: candidate_ids.len() as u32
-            + u32::from(budget == CalibrationBudget::Balanced) * 2,
+        planned_trials: candidate_ids.len() as u32 + verification_count(&budget),
         candidate_ids,
         requires_server_stop: true,
         supported_budget: match budget {
@@ -421,6 +438,7 @@ pub async fn start(
             bench_path: bench_path.to_string_lossy().into_owned(),
             fingerprint: calibration_fingerprint.clone(),
             baseline: baseline.clone(),
+            server_qualification: request.server_qualification.clone(),
         },
     )?;
     append_event(
@@ -458,6 +476,7 @@ pub async fn start(
     tokio::spawn(run_job(
         id,
         config,
+        state.clone(),
         preset,
         request.workload,
         candidates,
@@ -466,6 +485,7 @@ pub async fn start(
         calibration_fingerprint,
         baseline,
         request.budget,
+        request.server_qualification,
         runtime,
         Vec::new(),
     ));
@@ -562,6 +582,7 @@ pub fn resume(
     tokio::spawn(run_job(
         id.to_string(),
         config,
+        state.clone(),
         preset,
         manifest.workload,
         manifest.candidates,
@@ -570,6 +591,7 @@ pub fn resume(
         manifest.fingerprint,
         manifest.baseline,
         manifest.budget,
+        manifest.server_qualification,
         runtime,
         prior_results,
     ));
@@ -726,6 +748,7 @@ pub fn get_receipt_view(config: &AppConfig, id: &str) -> Result<Option<Calibrati
             preset_id: receipt.preset_id,
             preset_fingerprint: receipt.preset_fingerprint,
             apply_history: receipt.apply_history,
+            server_qualification: receipt.server_qualification,
         }),
     )
 }
@@ -892,6 +915,7 @@ pub fn cancel(config: &AppConfig, id: &str) -> Result<Option<CalibrationJobSnaps
 async fn run_job(
     id: String,
     config: Arc<AppConfig>,
+    state: AppState,
     preset: ModelPreset,
     workload: super::CalibrationWorkload,
     candidates: Vec<CalibrationCandidate>,
@@ -900,6 +924,7 @@ async fn run_job(
     fingerprint: CalibrationFingerprint,
     baseline: CalibrationBaseline,
     budget: CalibrationBudget,
+    server_qualification: Option<QualificationRequest>,
     runtime: RuntimeJob,
     mut candidate_results: Vec<CalibrationCandidateResult>,
 ) {
@@ -926,6 +951,9 @@ async fn run_job(
         .iter()
         .map(|result| result.candidate.id.clone())
         .collect::<std::collections::BTreeSet<_>>();
+    // Balanced screens candidates with a bounded dense-model workload, then
+    // remeasures only finalists at the user's full workload below.
+    let screen_workload = screening_workload(&workload, budget == CalibrationBudget::Balanced);
     for candidate in candidates {
         if finished_ids.contains(&candidate.id) {
             continue;
@@ -976,9 +1004,9 @@ async fn run_job(
         } else {
             candidate_preset.ubatch_size
         };
-        let depths = vec![workload.minimum_context.max(1)];
+        let depths = vec![screen_workload.minimum_context.max(1)];
         let model_path_string = model_path.to_string_lossy().into_owned();
-        let bench = run_sweep_with_tokens(
+        let bench = run_sweep_with_tokens_repetitions(
             &bench_path,
             &config.llama_server_cwd,
             &model_path_string,
@@ -990,8 +1018,9 @@ async fn run_job(
             ubatch_size,
             &depths,
             candidate_preset.n_cpu_moe,
-            workload.prompt_tokens,
-            workload.generation_tokens,
+            screen_workload.prompt_tokens,
+            screen_workload.generation_tokens,
+            QUICK_BENCH_REPETITIONS,
         );
         let result = tokio::select! {
             result = bench => Some(result),
@@ -1040,8 +1069,14 @@ async fn run_job(
         });
     }
 
-    if budget == CalibrationBudget::Balanced {
-        let verification_candidates = select_verification_candidates(&candidate_results);
+    if matches!(
+        budget,
+        CalibrationBudget::Quick | CalibrationBudget::Balanced
+    ) {
+        let verification_candidates = select_verification_candidates(
+            &candidate_results,
+            verification_count(&budget) as usize,
+        );
         for candidate in verification_candidates {
             if runtime.cancel.load(Ordering::Acquire) {
                 let _ = finish_cancelled(&runtime);
@@ -1081,6 +1116,7 @@ async fn run_job(
                 &bench_path,
                 &runtime,
                 &trial_id,
+                BALANCED_BENCH_REPETITIONS,
             )
             .await;
             let Some(measurement) = measurement else {
@@ -1130,6 +1166,42 @@ async fn run_job(
         .find(|result| result.candidate.id == "baseline")
         .map(|result| result.measurement.clone())
         .unwrap_or_default();
+    let server_qualification = match server_qualification {
+        Some(_)
+            if *state.local_server_running.lock().unwrap()
+                || *state.server_running.lock().unwrap() =>
+        {
+            let _ = update_snapshot(&runtime, |snapshot| {
+                snapshot
+                    .diagnostics
+                    .push("Server qualification deferred: an active server appeared".into());
+                snapshot.diagnostics.truncate(MAX_DIAGNOSTICS);
+            });
+            None
+        }
+        Some(request) => match qualify_selected_candidate(
+            &config,
+            &preset,
+            selected_candidate.as_deref(),
+            &candidate_results,
+            &request,
+        )
+        .await
+        {
+            Ok(receipt) => Some(receipt),
+            Err(error) => {
+                let _ = update_snapshot(&runtime, |snapshot| {
+                    snapshot.diagnostics.push(format!(
+                        "Server qualification degraded: {}",
+                        sanitize_error(&error)
+                    ));
+                    snapshot.diagnostics.truncate(MAX_DIAGNOSTICS);
+                });
+                None
+            }
+        },
+        None => None,
+    };
     let receipt = CalibrationReceipt {
         schema_version: super::CALIBRATION_SCHEMA_VERSION,
         method_version: if budget == CalibrationBudget::Balanced {
@@ -1152,6 +1224,7 @@ async fn run_job(
         preset_id: preset.id.clone(),
         preset_fingerprint: fingerprint.baseline_config_hash.clone(),
         apply_history: Vec::new(),
+        server_qualification,
     };
     let receipt_path = config
         .app_paths
@@ -1448,7 +1521,7 @@ pub async fn apply_with_validation(
         applied.ubatch_size
     };
     let depth = workload.minimum_context.clamp(1, 4096);
-    let measurement = match run_sweep_with_tokens(
+    let measurement = match run_sweep_with_tokens_repetitions(
         &bench_path,
         &config.llama_server_cwd,
         &model_path.to_string_lossy(),
@@ -1462,6 +1535,7 @@ pub async fn apply_with_validation(
         applied.n_cpu_moe,
         workload.prompt_tokens.min(512),
         workload.generation_tokens.min(256),
+        QUICK_BENCH_REPETITIONS,
     )
     .await
     {
@@ -1538,34 +1612,181 @@ fn select_winner(results: &[CalibrationCandidateResult]) -> Option<String> {
         .map(|result| result.candidate.id.clone())
 }
 
-/// Select the measured Balanced candidates that are eligible for a second,
-/// independent verification pass. Baseline is excluded because it is the
-/// control; only successful finite decode measurements can consume the two
-/// verification slots. Ordering is deterministic for equal medians.
+/// Select candidates for the independent finalist verification pass.
+/// The measured baseline is always included as the control, followed by
+/// the strongest successful non-baseline survivors. Ordering is
+/// deterministic for equal medians, and the caller's limit bounds the
+/// total number of confirmation runs.
 #[allow(dead_code)]
 fn select_verification_candidates(
     results: &[CalibrationCandidateResult],
+    limit: usize,
 ) -> Vec<CalibrationCandidate> {
-    let mut eligible = results
+    let mut selected = results
         .iter()
-        .filter(|result| {
-            result.candidate.id != "baseline"
+        .find(|result| {
+            result.candidate.id == "baseline"
                 && result.measurement.status == Some(TrialStatus::Ok)
                 && !median(&result.measurement.tg_tps_samples).is_nan()
         })
+        .map(|result| vec![result.candidate.clone()])
+        .unwrap_or_default();
+    let mut eligible = results
+        .iter()
+        .filter(|result| result.candidate.id != "baseline")
+        .filter(|result| result.measurement.status == Some(TrialStatus::Ok))
+        .filter(|result| !median(&result.measurement.tg_tps_samples).is_nan())
         .collect::<Vec<_>>();
     eligible.sort_by(|left, right| {
         median(&right.measurement.tg_tps_samples)
             .total_cmp(&median(&left.measurement.tg_tps_samples))
             .then_with(|| left.candidate.id.cmp(&right.candidate.id))
     });
-    eligible
-        .into_iter()
-        .take(super::candidates::BALANCED_MAX_VERIFICATION_CANDIDATES)
-        .map(|result| result.candidate.clone())
-        .collect()
+    selected.extend(
+        eligible
+            .into_iter()
+            .take(limit.saturating_sub(selected.len()))
+            .map(|result| result.candidate.clone()),
+    );
+    selected
 }
 
+async fn qualify_selected_candidate(
+    config: &AppConfig,
+    preset: &ModelPreset,
+    selected_candidate: Option<&str>,
+    candidate_results: &[CalibrationCandidateResult],
+    request: &QualificationRequest,
+) -> Result<QualificationReceipt> {
+    let candidate = selected_candidate
+        .and_then(|id| {
+            candidate_results
+                .iter()
+                .find(|result| result.candidate.id == id)
+        })
+        .ok_or_else(|| anyhow!("server qualification has no selected candidate"))?;
+    let mut candidate_preset = preset.clone();
+    apply_patch_to_preset(&mut candidate_preset, &candidate.candidate.typed_patch);
+    let model_path = resolve_model_path(config, &candidate_preset.model_path)?;
+    let capabilities = qualification_capabilities(&model_path, &config.llama_server_path).await;
+    let mut receipt =
+        run_preset_qualification(config, &candidate_preset, request, &capabilities).await?;
+    if request
+        .tracks
+        .iter()
+        .any(|track| matches!(track, QualificationTrack::Mtp | QualificationTrack::Ngram))
+        && (capabilities.mtp || capabilities.ngram)
+    {
+        let mut baseline_preset = candidate_preset.clone();
+        disable_speculation(&mut baseline_preset);
+        let baseline_request = QualificationRequest {
+            tracks: std::collections::BTreeSet::from([QualificationTrack::LatencyMemory]),
+            parallel_requests: 1,
+            allow_concurrency: false,
+            ..request.clone()
+        };
+        let baseline =
+            run_preset_qualification(config, &baseline_preset, &baseline_request, &capabilities)
+                .await?;
+        receipt.baseline = Some(Box::new(baseline));
+    }
+    Ok(receipt)
+}
+
+async fn run_preset_qualification(
+    config: &AppConfig,
+    preset: &ModelPreset,
+    request: &QualificationRequest,
+    capabilities: &QualificationCapabilities,
+) -> Result<QualificationReceipt> {
+    let port = allocate_qualification_port().await?;
+    let launch_request = crate::inference::launch::request_from_preset(preset, Some(port))?;
+    let crate::inference::launch::LocalLaunchRequest::LlamaCpp(mut server_config) = launch_request
+    else {
+        bail!("server qualification requires a llama.cpp preset");
+    };
+    server_config.parallel_slots = request.parallel_requests;
+    server_config.benchmark_mode = true;
+    let adapter = crate::inference::llama_cpp::LlamaCppAdapter::new(
+        config.clone(),
+        *server_config,
+        crate::gpu::env::GpuEnv::default(),
+    );
+    let launch = adapter.build_launch().await?;
+    server_qualification::run_managed_server_with_capabilities(launch, request, capabilities).await
+}
+
+fn disable_speculation(preset: &mut ModelPreset) {
+    preset.ngram_spec = false;
+    preset.draft_model.clear();
+    preset.spec_type = None;
+    preset.spec_default = false;
+    preset.spec_draft_n_max = None;
+    preset.spec_draft_n_min = None;
+    preset.spec_draft_p_split = None;
+    preset.spec_draft_p_min = None;
+    preset.spec_draft_ngl = None;
+    preset.spec_draft_device = None;
+    preset.spec_draft_cpu_moe = false;
+    preset.spec_draft_n_cpu_moe = None;
+    preset.spec_draft_type_k = None;
+    preset.spec_draft_type_v = None;
+    preset.spec_ngram_mod_n_min = None;
+    preset.spec_ngram_mod_n_max = None;
+    preset.spec_ngram_mod_n_match = None;
+    preset.spec_ngram_simple_size_n = None;
+    preset.spec_ngram_simple_size_m = None;
+    preset.spec_ngram_simple_min_hits = None;
+    preset.spec_ngram_map_k_size_n = None;
+    preset.spec_ngram_map_k_size_m = None;
+    preset.spec_ngram_map_k_min_hits = None;
+    preset.spec_ngram_map_k4v_size_n = None;
+    preset.spec_ngram_map_k4v_size_m = None;
+    preset.spec_ngram_map_k4v_min_hits = None;
+}
+
+async fn qualification_capabilities(
+    model_path: &Path,
+    server_path: &Path,
+) -> QualificationCapabilities {
+    let Ok(snapshot) =
+        crate::inference::llama_cpp_capabilities::generate_snapshot(server_path).await
+    else {
+        return QualificationCapabilities::default();
+    };
+    let mtp = crate::llama::gguf_meta::read_gguf_metadata(model_path)
+        .ok()
+        .and_then(|metadata| metadata.mtp_depth)
+        .is_some_and(|depth| depth > 0)
+        && matches!(
+            snapshot.speculation.draft_model,
+            crate::inference::llama_cpp_capabilities::FeatureState::Available
+        );
+    let ngram = matches!(
+        snapshot.speculation.ngram_spec,
+        crate::inference::llama_cpp_capabilities::FeatureState::Available
+    );
+    let mut evidence = std::collections::BTreeSet::new();
+    if mtp {
+        evidence.insert("mtp".into());
+    }
+    if ngram {
+        evidence.insert("ngram".into());
+    }
+    QualificationCapabilities {
+        mtp,
+        dflash: false,
+        ngram,
+        evidence,
+    }
+}
+
+async fn allocate_qualification_port() -> Result<u16> {
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
+    Ok(listener.local_addr()?.port())
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn run_candidate_measurement(
     config: &AppConfig,
     candidate_preset: &ModelPreset,
@@ -1574,6 +1795,7 @@ async fn run_candidate_measurement(
     bench_path: &Path,
     runtime: &RuntimeJob,
     trial_id: &str,
+    repetitions: u32,
 ) -> Option<CalibrationMeasurement> {
     let ngl = candidate_preset.gpu_layers.unwrap_or(99);
     let flash_attn = calibration_flash_attn(candidate_preset);
@@ -1590,7 +1812,7 @@ async fn run_candidate_measurement(
     };
     let depths = vec![workload.minimum_context.max(1)];
     let model_path_string = model_path.to_string_lossy().into_owned();
-    let bench = run_sweep_with_tokens(
+    let bench = run_sweep_with_tokens_repetitions(
         bench_path,
         &config.llama_server_cwd,
         &model_path_string,
@@ -1604,6 +1826,7 @@ async fn run_candidate_measurement(
         candidate_preset.n_cpu_moe,
         workload.prompt_tokens,
         workload.generation_tokens,
+        repetitions,
     );
     let result = tokio::select! {
         result = bench => Some(result),
@@ -1648,6 +1871,23 @@ fn find_preset(state: &AppState, id: &str) -> Result<ModelPreset> {
 }
 
 const MAX_CALIBRATION_WORKLOAD_TOKENS: u32 = 32_768;
+const SCREEN_PROMPT_TOKENS: u32 = 512;
+const SCREEN_GENERATION_TOKENS: u32 = 1_024;
+const SCREEN_CONTEXT_TOKENS: u64 = 32_768;
+
+fn screening_workload(
+    workload: &super::CalibrationWorkload,
+    bounded: bool,
+) -> super::CalibrationWorkload {
+    if !bounded {
+        return workload.clone();
+    }
+    let mut screen = workload.clone();
+    screen.prompt_tokens = screen.prompt_tokens.min(SCREEN_PROMPT_TOKENS);
+    screen.generation_tokens = screen.generation_tokens.min(SCREEN_GENERATION_TOKENS);
+    screen.minimum_context = screen.minimum_context.min(SCREEN_CONTEXT_TOKENS);
+    screen
+}
 
 fn validate_workload(workload: &super::CalibrationWorkload) -> Result<()> {
     if workload.prompt_tokens == 0 || workload.prompt_tokens > MAX_CALIBRATION_WORKLOAD_TOKENS {
@@ -2317,19 +2557,42 @@ mod tests {
                 ..Default::default()
             },
         };
-        let selected = select_verification_candidates(&[
-            candidate("baseline", 100.0),
-            candidate("b", 120.0),
-            candidate("a", 120.0),
-            candidate("c", 130.0),
-        ]);
+        let selected = select_verification_candidates(
+            &[
+                candidate("baseline", 100.0),
+                candidate("b", 120.0),
+                candidate("a", 120.0),
+                candidate("c", 130.0),
+            ],
+            3,
+        );
         assert_eq!(
             selected
                 .iter()
                 .map(|candidate| candidate.id.as_str())
                 .collect::<Vec<_>>(),
-            ["c", "a"]
+            ["baseline", "c", "a"]
         );
+    }
+
+    #[test]
+    fn screening_workload_caps_only_balanced_screen_dimensions() {
+        let workload = CalibrationWorkload {
+            prompt_tokens: 4_096,
+            generation_tokens: 8_192,
+            minimum_context: 131_072,
+            ..Default::default()
+        };
+
+        let screen = screening_workload(&workload, true);
+        assert_eq!(screen.prompt_tokens, 512);
+        assert_eq!(screen.generation_tokens, 1_024);
+        assert_eq!(screen.minimum_context, 32_768);
+        assert_eq!(screen.parallel_requests, workload.parallel_requests);
+        assert_eq!(screen.fixture_id, workload.fixture_id);
+
+        let quick = screening_workload(&workload, false);
+        assert_eq!(quick, workload);
     }
 
     #[test]
@@ -2381,6 +2644,7 @@ mod tests {
             preset_id: "preset".into(),
             preset_fingerprint: "fingerprint".into(),
             apply_history: Vec::new(),
+            server_qualification: None,
         };
         let encoded = serde_json::to_string(&view).expect("serialize public receipt");
         assert!(!encoded.contains("model_path"));
@@ -2714,6 +2978,7 @@ mod tests {
                 )
             },
             baseline: Default::default(),
+            server_qualification: None,
         };
         write_manifest(&manifest_path, &manifest).expect("write manifest");
         write_snapshot(

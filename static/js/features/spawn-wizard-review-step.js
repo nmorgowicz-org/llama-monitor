@@ -301,7 +301,13 @@ export async function renderSummary() {
   if (!rapid && hw.kvUnified != null) rows.push({ label: 'KV unified', value: hw.kvUnified ? 'On' : 'Off' });
   if (!rapid && hw.fitEnabled != null) rows.push({ label: 'Fit', value: hw.fitEnabled ? 'On' : 'Off' });
   if (!rapid && hw.mlock) rows.push({ label: 'mlock', value: 'Yes' });
-  if (!rapid && hw.prio != null) rows.push({ label: 'Priority', value: ['Normal', 'Medium', 'High', 'Realtime'][hw.prio] ?? String(hw.prio) });
+ if (!rapid && hw.prio != null) rows.push({ label: 'Priority', value: ['Normal', 'Medium', 'High', 'Realtime'][hw.prio] ?? String(hw.prio) }); if (!rapid && hw.verbosity != null) rows.push({ label: 'Log verbosity', value: String(hw.verbosity) });
+ if (!rapid && hw.loadMode) rows.push({ label: 'Load mode', value: hw.loadMode });
+ if (!rapid && hw.ctxCheckpoints != null) rows.push({ label: 'Context checkpoints', value: String(hw.ctxCheckpoints) });
+ if (!rapid && hw.checkpointMinStep != null) rows.push({ label: 'Checkpoint minimum step', value: String(hw.checkpointMinStep) });
+ if (!rapid && hw.cacheReuse != null) rows.push({ label: 'Cache reuse threshold', value: String(hw.cacheReuse) });
+ if (!rapid && hw.noContBatching) rows.push({ label: 'Continuous batching', value: 'Disabled' });
+ if (!rapid && hw.swaFull) rows.push({ label: 'Full SWA cache', value: 'Enabled' });
   if (!rapid && hw.nCpuMoe > 0 && arch.nExperts > 0) rows.push({ label: 'MoE CPU offload', value: `${hw.nCpuMoe} of ${arch.nLayers} layers` });
   if (!rapid && hw.tensorSplit) rows.push({ label: 'Tensor split', value: hw.tensorSplit });
   if (!rapid && arch.mmprojBytes > 0) rows.push({ label: 'mmproj', value: formatGB(arch.mmprojBytes) });
@@ -457,6 +463,7 @@ function _syncSamplingFields() {
   setVal('spawn-top-k', h.topK);
   setVal('spawn-min-p', h.minP);
   setVal('spawn-repeat-penalty', h.repeatPenalty);
+  setVal('spawn-repeat-last-n', h.repeatLastN);
   setVal('spawn-presence-penalty', h.presencePenalty);
   setVal('spawn-max-tokens', h.maxTokens);
   if (dom.bindHostSelect) dom.bindHostSelect.value = wizardState.access.bindHost || '127.0.0.1';
@@ -597,6 +604,7 @@ export function _bindSamplingFields() {
   bind('spawn-top-k', 'topK', true);
   bind('spawn-min-p', 'minP');
   bind('spawn-repeat-penalty', 'repeatPenalty');
+  bind('spawn-repeat-last-n', 'repeatLastN', true);
   bind('spawn-presence-penalty', 'presencePenalty');
   bind('spawn-max-tokens', 'maxTokens', true);
   _bindThinkingFields();
@@ -845,7 +853,14 @@ export function _renderPresetParamsStep() {
         ...(h.kvUnified != null ? [{ label: 'KV unified', value: h.kvUnified ? 'On' : 'Off' }] : []),
         ...(h.fitEnabled != null ? [{ label: 'Fit', value: h.fitEnabled ? 'On' : 'Off' }] : []),
         ...(h.mlock ? [{ label: 'mlock', value: 'Yes' }] : []),
-        ...(h.prio != null ? [{ label: 'Priority', value: ['Normal', 'Medium', 'High', 'Realtime'][h.prio] ?? String(h.prio) }] : []),
+      ...(h.prio != null ? [{ label: 'Priority', value: ['Normal', 'Medium', 'High', 'Realtime'][h.prio] ?? String(h.prio) }] : []),
+      ...(h.loadMode ? [{ label: 'Load mode', value: h.loadMode }] : []),
+      ...(h.verbosity != null ? [{ label: 'Log verbosity', value: String(h.verbosity) }] : []),
+      ...(h.ctxCheckpoints != null ? [{ label: 'Context checkpoints', value: String(h.ctxCheckpoints) }] : []),
+      ...(h.checkpointMinStep != null ? [{ label: 'Checkpoint minimum step', value: String(h.checkpointMinStep) }] : []),
+      ...(h.cacheReuse != null ? [{ label: 'Cache reuse threshold', value: String(h.cacheReuse) }] : []),
+      ...(h.noContBatching ? [{ label: 'Continuous batching', value: 'Disabled' }] : []),
+      ...(h.swaFull ? [{ label: 'Full SWA cache', value: 'Enabled' }] : []),
         ...(h.nCpuMoe > 0 && arch.nExperts > 0 ? [{ label: 'MoE CPU offload', value: `${h.nCpuMoe} of ${arch.nLayers} layers` }] : []),
         ...(h.tensorSplit ? [{ label: 'Tensor split', value: h.tensorSplit }] : []),
         ...(h.fitTarget ? [{ label: '--fit-target', value: `${h.fitTarget} MB` }] : []),

@@ -202,6 +202,13 @@ pub fn request_from_preset(
             } else {
                 preset.no_mmap
             },
+            load_mode: preset.load_mode.map(|mode| mode.with_mlock(preset.mlock)),
+            verbosity: preset.verbosity.or(Some(4)),
+            no_cont_batching: preset.no_cont_batching,
+            swa_full: preset.swa_full,
+            ctx_checkpoints: preset.ctx_checkpoints.or(Some(32)),
+            checkpoint_min_step: preset.checkpoint_min_step,
+            cache_reuse: preset.cache_reuse,
             port: port_override.or(preset.port).unwrap_or(8001),
             ngram_spec: preset.ngram_spec,
             parallel_slots: preset.parallel_slots,
@@ -210,6 +217,7 @@ pub fn request_from_preset(
             top_k: preset.top_k,
             min_p: preset.min_p,
             repeat_penalty: preset.repeat_penalty,
+            repeat_last_n: preset.repeat_last_n,
             presence_penalty: preset.presence_penalty,
             n_cpu_moe: preset.n_cpu_moe,
             gpu_layers: preset.gpu_layers,

@@ -897,6 +897,11 @@ Rescans `models_dir`.
 
 ### Calibration routes
 
+Calibration start requests may include optional `server_qualification` tracks;
+the default is single-user `parallel_requests: 1`. Qualification receipts are
+returned with the authenticated calibration receipt and never replace an
+active user server.
+
 `POST /api/calibrations/match` accepts a saved llama.cpp `preset_id`, workload,
 and budget and returns tiered receipt evidence for Spawn Wizard. Exact results
 match the complete artifact/runtime fingerprint. Compatible results match the

@@ -660,8 +660,15 @@ export const wizardState = {
     cacheMode: 'custom',
     kvUnified: null,
     flashAttn: 'on',
-    mlock: false,
-    prio: null,
+  mlock: false,
+  loadMode: 'mmap',
+  prio: null,
+  verbosity: 4,
+  ctxCheckpoints: 32,
+  checkpointMinStep: 8192,
+  cacheReuse: null,
+  noContBatching: false,
+  swaFull: false,
     threads: null,
     threadsBatch: null,
     // MTP
@@ -906,12 +913,20 @@ export function openSpawnWizard(opts = {}) {
     if (t.parallel_slots)    wizardState.hardware.parallelSlots  = t.parallel_slots;
     if (t.gpu_layers != null) wizardState.hardware.gpuLayers     = String(t.gpu_layers);
     if (t.threads != null)   wizardState.hardware.threads        = t.threads;
-    if (t.threads_batch != null) wizardState.hardware.threadsBatch = t.threads_batch;
+ if (t.threads_batch != null) wizardState.hardware.threadsBatch = t.threads_batch;
+    if (t.verbosity != null) wizardState.hardware.verbosity = t.verbosity;
+    if (t.load_mode) wizardState.hardware.loadMode = t.load_mode;
+ if (t.ctx_checkpoints != null) wizardState.hardware.ctxCheckpoints = t.ctx_checkpoints;
+ if (t.checkpoint_min_step != null) wizardState.hardware.checkpointMinStep = t.checkpoint_min_step;
+ if (t.cache_reuse != null) wizardState.hardware.cacheReuse = t.cache_reuse;
+ if (t.no_cont_batching != null) wizardState.hardware.noContBatching = !!t.no_cont_batching;
+ if (t.swa_full != null) wizardState.hardware.swaFull = !!t.swa_full;
     if (t.temperature != null)   wizardState.hardware.temperature   = t.temperature;
     if (t.top_p != null)         wizardState.hardware.topP          = t.top_p;
     if (t.top_k != null)         wizardState.hardware.topK          = t.top_k;
     if (t.min_p != null)         wizardState.hardware.minP          = t.min_p;
-    if (t.repeat_penalty != null) wizardState.hardware.repeatPenalty = t.repeat_penalty;
+ if (t.repeat_penalty != null) wizardState.hardware.repeatPenalty = t.repeat_penalty;
+ if (t.repeat_last_n != null) wizardState.hardware.repeatLastN = t.repeat_last_n;
     if (t.presence_penalty != null) wizardState.hardware.presencePenalty = t.presence_penalty;
     if (t.max_tokens != null)    wizardState.hardware.maxTokens     = t.max_tokens;
     if (t.seed != null)          wizardState.hardware.seed          = t.seed;
@@ -1046,7 +1061,14 @@ function resetWizardState() {
   wizardState.hardware.flashAttn = '';
   wizardState.hardware.kvUnified = null;
   wizardState.hardware.mlock = false;
+  wizardState.hardware.loadMode = isUnifiedMemory() ? 'mmap' : 'none';
   wizardState.hardware.prio = null;
+  wizardState.hardware.verbosity = 4;
+  wizardState.hardware.ctxCheckpoints = 32;
+  wizardState.hardware.checkpointMinStep = 8192;
+  wizardState.hardware.cacheReuse = null;
+  wizardState.hardware.noContBatching = false;
+  wizardState.hardware.swaFull = false;
   wizardState.hardware.nCpuMoe = 0;
   wizardState.hardware.tensorSplit = '';
   wizardState.hardware.fitEnabled = null;
@@ -1057,7 +1079,8 @@ function resetWizardState() {
   wizardState.hardware.topP = null;
   wizardState.hardware.topK = null;
   wizardState.hardware.minP = null;
-  wizardState.hardware.repeatPenalty = null;
+ wizardState.hardware.repeatPenalty = null;
+ wizardState.hardware.repeatLastN = null;
   wizardState.hardware.presencePenalty = null;
   wizardState.hardware.maxTokens = null;
   wizardState.hardware.seed = null;
@@ -1293,9 +1316,18 @@ async function startWizardCalibration() {
         expected_preset_fingerprint: preflightData.preflight.preset_fingerprint,
         workload,
         budget: 'balanced',
-        kv_quality_floor: 'q8_0',
-        allow_stop_active_server: false,
-        exact_confirmation: 'CALIBRATE',
+    kv_quality_floor: 'q8_0',
+    allow_stop_active_server: false,
+    exact_confirmation: 'CALIBRATE',
+    server_qualification: {
+      tracks: ['latency_memory', 'tool_correctness'],
+      parallel_requests: 1,
+      allow_concurrency: false,
+      prompt: 'Reply with one short sentence describing a calibration check.',
+      generation_tokens: 256,
+      timeout_ms: 30000,
+      capability_evidence: [],
+    },
       }),
     });
     const startData = await startResponse.json().catch(() => ({}));
@@ -1507,7 +1539,14 @@ function cacheDom() {
   dom.flashAttnSelect    = document.getElementById('spawn-flash-attn');
   dom.mlockCheck         = document.getElementById('spawn-mlock');
   dom.mlockLabel         = dom.mlockCheck?.closest('label');
+  dom.loadModeSelect     = document.getElementById('spawn-load-mode');
   dom.prioSelect         = document.getElementById('spawn-prio');
+  dom.verbosityInput     = document.getElementById('spawn-verbosity');
+  dom.ctxCheckpointsInput = document.getElementById('spawn-ctx-checkpoints');
+  dom.checkpointMinStepInput = document.getElementById('spawn-checkpoint-min-step');
+  dom.cacheReuseInput = document.getElementById('spawn-cache-reuse');
+  dom.noContBatchingCheck = document.getElementById('spawn-no-cont-batching');
+  dom.swaFullCheck = document.getElementById('spawn-swa-full');
   dom.threadsInput       = document.getElementById('spawn-threads');
   dom.threadsBatchInput  = document.getElementById('spawn-threads-batch');
   dom.specDraftNMinInput = document.getElementById('spawn-spec-draft-n-min');
@@ -1797,6 +1836,9 @@ function bindEvents() {
     dom.cacheTypeKSelect, dom.cacheTypeVSelect, dom.nCpuMoeInput,
     dom.tensorSplitInput, dom.specTypeSelect, dom.draftModelInput,
     dom.kvUnifiedSelect, dom.flashAttnSelect, dom.mlockCheck, dom.prioSelect,
+    dom.verbosityInput, dom.loadModeSelect,
+    dom.ctxCheckpointsInput, dom.checkpointMinStepInput, dom.cacheReuseInput,
+    dom.noContBatchingCheck, dom.swaFullCheck,
     dom.threadsInput, dom.threadsBatchInput,
     dom.fitEnableSelect, dom.fitTargetInput, dom.cacheRamInput, dom.cacheModeSelect,
     dom.specDraftNMinInput, dom.specDraftPMinInput,
@@ -2441,9 +2483,16 @@ export function showStep(index) {
     // wizardState.hardware.contextSize — it can't reach dom.contextSizeInput
     // because that field doesn't exist until this step's DOM is active. Sync
     // it here so the pill choice is actually reflected once the user arrives.
-    if (dom.contextSizeInput && wizardState.hardware.contextSize > 0) {
-      dom.contextSizeInput.value = wizardState.hardware.contextSize;
-    }
+      if (dom.contextSizeInput && wizardState.hardware.contextSize > 0) {
+        dom.contextSizeInput.value = wizardState.hardware.contextSize;
+      }
+      if (dom.loadModeSelect) dom.loadModeSelect.value = wizardState.hardware.loadMode || 'mmap';
+      if (dom.verbosityInput) dom.verbosityInput.value = String(wizardState.hardware.verbosity ?? 4);
+      if (dom.ctxCheckpointsInput) dom.ctxCheckpointsInput.value = wizardState.hardware.ctxCheckpoints ?? '';
+      if (dom.checkpointMinStepInput) dom.checkpointMinStepInput.value = wizardState.hardware.checkpointMinStep ?? '';
+      if (dom.cacheReuseInput) dom.cacheReuseInput.value = wizardState.hardware.cacheReuse ?? '';
+      if (dom.noContBatchingCheck) dom.noContBatchingCheck.checked = !!wizardState.hardware.noContBatching;
+      if (dom.swaFullCheck) dom.swaFullCheck.checked = !!wizardState.hardware.swaFull;
     if (!rapid) {
       updateCtxModelMaxHint();
       updateCtxQuickPickActive();
@@ -3643,7 +3692,14 @@ function readHardwareState() {
   }
   if (dom.flashAttnSelect) h.flashAttn = dom.flashAttnSelect.value || '';
   if (dom.mlockCheck) h.mlock = dom.mlockCheck.checked;
-  if (dom.prioSelect) { const v = dom.prioSelect.value; h.prio = v !== '' ? Number(v) : null; }
+ if (dom.prioSelect) { const v = dom.prioSelect.value; h.prio = v !== '' ? Number(v) : null; }
+ if (dom.verbosityInput) { const v = dom.verbosityInput.value; h.verbosity = v !== '' ? Number(v) : 4; }
+ if (dom.loadModeSelect) h.loadMode = dom.loadModeSelect.value || 'mmap';
+ if (dom.ctxCheckpointsInput) { const v = dom.ctxCheckpointsInput.value; h.ctxCheckpoints = v !== '' ? Number(v) : null; }
+ if (dom.checkpointMinStepInput) { const v = dom.checkpointMinStepInput.value; h.checkpointMinStep = v !== '' ? Number(v) : null; }
+ if (dom.cacheReuseInput) { const v = dom.cacheReuseInput.value; h.cacheReuse = v !== '' ? Number(v) : null; }
+ if (dom.noContBatchingCheck) h.noContBatching = dom.noContBatchingCheck.checked;
+ if (dom.swaFullCheck) h.swaFull = dom.swaFullCheck.checked;
   if (dom.threadsInput) { const v = dom.threadsInput.value; h.threads = v !== '' ? Number(v) : null; }
   if (dom.threadsBatchInput) { const v = dom.threadsBatchInput.value; h.threadsBatch = v !== '' ? Number(v) : null; }
   if (dom.specDraftNMinInput) { const v = dom.specDraftNMinInput.value; h.mtpDraftNMin = v !== '' ? Number(v) : null; }

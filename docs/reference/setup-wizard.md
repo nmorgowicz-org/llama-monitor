@@ -138,7 +138,7 @@ override unset. The preset editor exposes the same lookup through its
 
 | Model family | Recommended template | Source |
 |---|---|---|
-| Qwen 3.5 / 3.6 | froggeric's Fixed Template | HuggingFace |
+| Qwen models | froggeric's Fixed Template v22 (`qwen3.8-froggeric-v22`) | HuggingFace, pinned to `9f14778c92c3b5ed3e0738085694c0d3452802dd` |
 | Gemma 4 | Google's official template | HuggingFace (`google/gemma-4-31B-it`) |
 
 Google's official template is the priority default for Gemma 4 — it improves thinking

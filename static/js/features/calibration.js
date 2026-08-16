@@ -120,6 +120,67 @@ function renderBaseline(baseline) {
     section.hidden = false;
 }
 
+function renderServerQualification(receipt) {
+  const body = document.querySelector('.calibration-modal-body');
+  if (!body || !receipt) return;
+  let section = document.getElementById('calibration-server-qualification');
+  if (!section) {
+    section = document.createElement('section');
+    section.id = 'calibration-server-qualification';
+    section.className = 'calibration-baseline';
+    const title = document.createElement('h3');
+    title.textContent = 'Real-server qualification';
+    section.appendChild(title);
+    const details = document.createElement('dl');
+    details.id = 'calibration-server-qualification-values';
+    details.className = 'calibration-baseline-values';
+    section.appendChild(details);
+    body.insertBefore(section, document.getElementById('calibration-candidates'));
+  }
+  const details = document.getElementById('calibration-server-qualification-values');
+  details.replaceChildren();
+  receipt.tracks?.forEach((track) => {
+    const term = document.createElement('dt');
+    term.textContent = track.track.replaceAll('_', ' ');
+    const value = document.createElement('dd');
+    const latency = track.latency;
+    const tool = track.tool;
+    value.textContent = latency?.time_to_first_token_ms != null
+      ? `${track.status}; TTFT ${latency.time_to_first_token_ms.toFixed(0)} ms`
+      : tool?.tool_call_observed
+        ? `${track.status}; tool call observed`
+        : track.status;
+    details.append(term, value);
+  });
+  if (receipt.memory?.process_rss_peak_bytes != null) {
+    const term = document.createElement('dt');
+    term.textContent = 'process RSS peak';
+    const value = document.createElement('dd');
+    value.textContent = `${(receipt.memory.process_rss_peak_bytes / (1024 ** 2)).toFixed(0)} MiB`;
+    details.append(term, value);
+  }
+  if (receipt.server_log_tail?.trim()) {
+    const term = document.createElement('dt');
+    term.textContent = 'server log tail';
+    const value = document.createElement('dd');
+    const pre = document.createElement('pre');
+    pre.className = 'calibration-server-log-tail';
+    pre.textContent = receipt.server_log_tail;
+    value.appendChild(pre);
+    details.append(term, value);
+  }
+  if (receipt.baseline?.tracks?.length) {
+    const baselineLatency = receipt.baseline.tracks.find((track) => track.latency)?.latency;
+    if (baselineLatency?.time_to_first_token_ms != null) {
+      const term = document.createElement('dt');
+      term.textContent = 'no-spec baseline TTFT';
+      const value = document.createElement('dd');
+      value.textContent = `${baselineLatency.time_to_first_token_ms.toFixed(0)} ms`;
+      details.append(term, value);
+    }
+  }
+}
+
 async function requestJson(url, options = {}) {
     const response = await fetch(url, options);
     const data = await response.json().catch(() => ({}));
@@ -149,7 +210,8 @@ async function openCalibration() {
     currentJobId = null;
     currentReceipt = null;
     lastApply = null;
-    document.getElementById('calibration-baseline')?.remove();
+  document.getElementById('calibration-baseline')?.remove();
+  document.getElementById('calibration-server-qualification')?.remove();
     try {
         const data = await requestJson('/api/calibrations/preflight', {
             method: 'POST',
@@ -164,6 +226,32 @@ async function openCalibration() {
         setError(error.message || String(error));
         setStatus('Preflight could not be completed.');
     }
+}
+
+function updateCalibrationConcurrencyControls() {
+  const checkbox = document.getElementById('calibration-track-concurrency');
+  const count = document.getElementById('calibration-concurrency-count');
+  if (count) count.hidden = !checkbox?.checked;
+}
+
+function selectedServerQualification() {
+  const concurrency = document.getElementById('calibration-track-concurrency')?.checked === true;
+  const tool = document.getElementById('calibration-track-tool')?.checked !== false;
+  const parallel = concurrency
+    ? Math.max(2, Math.min(8, Number(document.getElementById('calibration-parallel-requests')?.value || 2)))
+    : 1;
+  const tracks = ['latency_memory'];
+  if (tool) tracks.push('tool_correctness');
+  if (concurrency) tracks.push('concurrency');
+  return {
+    tracks,
+    parallel_requests: parallel,
+    allow_concurrency: concurrency,
+    prompt: 'Reply with one short sentence describing a calibration check.',
+    generation_tokens: 256,
+    timeout_ms: 30000,
+    capability_evidence: [],
+  };
 }
 
 async function startCalibration() {
@@ -186,7 +274,8 @@ async function startCalibration() {
                 },
                 budget: 'quick', kv_quality_floor: 'q8_0',
                 allow_stop_active_server: false,
-                exact_confirmation: currentPreflight.confirmation,
+    exact_confirmation: currentPreflight.confirmation,
+    server_qualification: selectedServerQualification(),
             }),
         });
         currentJobId = data.job.id;
@@ -208,10 +297,11 @@ async function pollCalibration() {
         setStatus(`${job.phase || job.state}: ${job.completed_trials || 0}/${job.planned_trials || 0} trial(s)`);
         if (job.state === 'complete') {
             const receipt = await requestJson(`/api/calibrations/${encodeURIComponent(currentJobId)}/receipt`, { headers: apiHeaders() });
-            currentReceipt = receipt.receipt;
-            renderBaseline(currentReceipt.baseline);
-            renderCandidates(currentReceipt.candidate_results || []);
-            document.getElementById('calibration-apply').disabled = !currentReceipt.selected_candidate;
+        currentReceipt = receipt.receipt;
+        renderBaseline(currentReceipt.baseline);
+        renderCandidates(currentReceipt.candidate_results || []);
+        renderServerQualification(currentReceipt.server_qualification);
+        document.getElementById('calibration-apply').disabled = !currentReceipt.selected_candidate;
             return;
         }
         if (['cancelled', 'failed'].includes(job.state)) {
@@ -311,7 +401,9 @@ async function rollbackCalibration() {
 }
 
 export function initCalibrationUi() {
-    document.getElementById('preset-modal-calibrate')?.addEventListener('click', openCalibration);
+  document.getElementById('calibration-track-concurrency')?.addEventListener('change', updateCalibrationConcurrencyControls);
+  updateCalibrationConcurrencyControls();
+  document.getElementById('preset-modal-calibrate')?.addEventListener('click', openCalibration);
     document.getElementById('calibration-start')?.addEventListener('click', startCalibration);
     document.getElementById('calibration-apply')?.addEventListener('click', applyCalibration);
     document.getElementById('calibration-rollback')?.addEventListener('click', rollbackCalibration);

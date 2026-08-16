@@ -108,6 +108,44 @@ pub struct SpecDecodeConfig {
     pub spec_ngram_map_k4v_min_hits: Option<u32>,
 }
 
+/// Explicit llama.cpp model loading policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum LoadMode {
+    #[serde(rename = "mmap")]
+    Mmap,
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "mlock")]
+    Mlock,
+    #[serde(rename = "mmap+mlock")]
+    MmapMlock,
+    #[serde(rename = "dio")]
+    Dio,
+}
+
+impl LoadMode {
+    pub const fn as_flag(self) -> &'static str {
+        match self {
+            Self::Mmap => "mmap",
+            Self::None => "none",
+            Self::Mlock => "mlock",
+            Self::MmapMlock => "mmap+mlock",
+            Self::Dio => "dio",
+        }
+    }
+
+    pub const fn with_mlock(self, mlock: bool) -> Self {
+        if !mlock {
+            return self;
+        }
+        match self {
+            Self::Mmap => Self::MmapMlock,
+            Self::None => Self::Mlock,
+            other => other,
+        }
+    }
+}
+
 /// Phase 6: cross-backend prompt-cache mode (llama.cpp side).
 ///
 /// `Custom` is the serde default (not `Auto`) so that configs saved before this field existed
@@ -147,6 +185,14 @@ pub struct ServerConfig {
     pub batch_size: u32,
     pub ubatch_size: u32,
     pub no_mmap: bool,
+    #[serde(default)]
+    pub load_mode: Option<LoadMode>,
+    pub verbosity: Option<i32>,
+    pub no_cont_batching: bool,
+    pub swa_full: bool,
+    pub ctx_checkpoints: Option<u32>,
+    pub checkpoint_min_step: Option<u32>,
+    pub cache_reuse: Option<u32>,
     pub port: u16,
     pub ngram_spec: bool,
     pub parallel_slots: u32,
@@ -160,6 +206,7 @@ pub struct ServerConfig {
     pub min_p: Option<f64>,
     #[serde(default)]
     pub repeat_penalty: Option<f64>,
+    pub repeat_last_n: Option<u32>,
     #[serde(default)]
     pub presence_penalty: Option<f64>,
     #[serde(default)]
@@ -410,13 +457,32 @@ impl LlamaCppAdapter {
         cmd.arg("--no-warmup");
         cmd.arg("--jinja");
         cmd.arg("--no-context-shift");
-        cmd.arg("--ctx-checkpoints").arg("32");
+        cmd.arg("--ctx-checkpoints")
+            .arg(self.config.ctx_checkpoints.unwrap_or(32).to_string());
+        if let Some(step) = self.config.checkpoint_min_step {
+            cmd.arg("--checkpoint-min-step").arg(step.to_string());
+        }
+        if let Some(reuse) = self.config.cache_reuse {
+            cmd.arg("--cache-reuse").arg(reuse.to_string());
+        }
+        if self.config.no_cont_batching {
+            cmd.arg("--no-cont-batching");
+        }
+        if self.config.swa_full {
+            cmd.arg("--swa-full");
+        }
         cmd.arg("--keep").arg("-1");
 
-        if self.config.no_mmap {
+        if let Some(mode) = self.config.load_mode {
+            cmd.arg("--load-mode").arg(mode.as_flag());
+        } else if self.config.no_mmap {
+            // Compatibility for pre-v4 presets and older llama.cpp binaries.
             cmd.arg("--no-mmap");
         }
-        if self.config.mlock {
+        if let Some(verbosity) = self.config.verbosity {
+            cmd.arg("-lv").arg(verbosity.to_string());
+        }
+        if self.config.load_mode.is_none() && self.config.mlock {
             cmd.arg("--mlock");
         }
 
@@ -505,7 +571,12 @@ impl LlamaCppAdapter {
             cmd.arg("--spec-draft-p-min").arg(format!("{:.4}", v));
         }
         if let Some(v) = s.spec_draft_ngl {
-            cmd.arg("--spec-draft-ngl").arg(v.to_string());
+            let value = if v < 0 {
+                "all".to_string()
+            } else {
+                v.to_string()
+            };
+            cmd.arg("--spec-draft-ngl").arg(value);
         }
         if let Some(ref v) = s.spec_draft_device {
             cmd.arg("--spec-draft-device").arg(v);
@@ -590,6 +661,9 @@ impl LlamaCppAdapter {
         }
         if let Some(rp) = self.config.repeat_penalty {
             cmd.arg("--repeat-penalty").arg(format!("{:.2}", rp));
+        }
+        if let Some(last_n) = self.config.repeat_last_n {
+            cmd.arg("--repeat-last-n").arg(last_n.to_string());
         }
         if let Some(pp) = self.config.presence_penalty {
             cmd.arg("--presence-penalty").arg(format!("{:.4}", pp));
@@ -1107,6 +1181,76 @@ mod tests {
                 "--metrics",
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn draft_all_maps_to_named_llama_server_value() {
+        let args = launch_args(ServerConfig {
+            model_path: "/models/mtp.gguf".into(),
+            port: 8080,
+            spec: SpecDecodeConfig {
+                spec_draft_ngl: Some(-1),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await;
+
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--spec-draft-ngl", "all"])
+        );
+        assert!(
+            !args
+                .windows(2)
+                .any(|pair| pair == ["--spec-draft-ngl", "-1"])
+        );
+    }
+
+    #[tokio::test]
+    async fn verbosity_is_emitted_for_server_launch() {
+        let args = launch_args(ServerConfig {
+            model_path: "/models/test.gguf".into(),
+            port: 8080,
+            verbosity: Some(4),
+            ..Default::default()
+        })
+        .await;
+        assert!(args.windows(2).any(|pair| pair == ["-lv", "4"]));
+    }
+
+    #[tokio::test]
+    async fn repeat_last_n_is_emitted_for_server_launch() {
+        let args = launch_args(ServerConfig {
+            model_path: "/models/test.gguf".into(),
+            port: 8080,
+            repeat_last_n: Some(64),
+            ..Default::default()
+        })
+        .await;
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--repeat-last-n", "64"])
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_load_mode_replaces_legacy_mmap_flags() {
+        let args = launch_args(ServerConfig {
+            model_path: "/models/test.gguf".into(),
+            port: 8080,
+            no_mmap: true,
+            mlock: true,
+            load_mode: Some(LoadMode::MmapMlock),
+            ..Default::default()
+        })
+        .await;
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--load-mode", "mmap+mlock"])
+        );
+        assert!(!args.iter().any(|arg| arg == "--no-mmap"));
+        assert!(!args.iter().any(|arg| arg == "--mlock"));
     }
 
     #[tokio::test]

@@ -444,6 +444,12 @@ export function buildSpawnPayload() {
 
   // MTP requires parallel=1 when active.
   const parallelSlots = (mtpActive || (hasDraft && specType.includes('draft-mtp'))) ? 1 : h.parallelSlots;
+  const selectedLoadMode = h.loadMode || (isUnifiedMemory() ? 'mmap' : 'none');
+  const loadMode = h.mlock && selectedLoadMode === 'mmap'
+    ? 'mmap+mlock'
+    : h.mlock && selectedLoadMode === 'none'
+      ? 'mlock'
+      : selectedLoadMode;
 
   // Resolve mmproj local path: prefer mmprojPath (local file), fall back to
   // mmprojHfFile only if it looks like an absolute path (i.e. was set from
@@ -483,6 +489,7 @@ export function buildSpawnPayload() {
     // identical tok/s on M5 Max), and avoids slow loads + committing RAM. On discrete GPUs
     // --no-mmap sidesteps slow Windows mmap paths, so default it on there.
     no_mmap: !isUnifiedMemory(),
+    load_mode: loadMode,
     ngram_spec: false,
     spec_type: specType,
     spec_draft_n_max: _u32(mtpNMax, 1),
@@ -493,6 +500,12 @@ export function buildSpawnPayload() {
     flash_attn: h.flashAttn || '',
     mlock: h.mlock || false,
     prio: h.prio != null ? h.prio : null,
+    verbosity: h.verbosity != null ? h.verbosity : 4,
+    ctx_checkpoints: h.ctxCheckpoints != null ? h.ctxCheckpoints : 32,
+    checkpoint_min_step: h.checkpointMinStep != null ? h.checkpointMinStep : 8192,
+    cache_reuse: h.cacheReuse != null ? h.cacheReuse : null,
+    no_cont_batching: !!h.noContBatching,
+    swa_full: !!h.swaFull,
     threads: _threadsValue(h.threads),
     threads_batch: _threadsValue(h.threadsBatch),
     fit_enabled: h.fitEnabled,
@@ -505,6 +518,7 @@ export function buildSpawnPayload() {
     top_k: h.topK != null ? h.topK : null,
     min_p: h.minP != null ? h.minP : null,
     repeat_penalty: h.repeatPenalty != null ? h.repeatPenalty : null,
+    repeat_last_n: h.repeatLastN != null ? h.repeatLastN : null,
     presence_penalty: h.presencePenalty != null && h.presencePenalty > 0 ? h.presencePenalty : null,
     max_tokens: h.maxTokens != null ? h.maxTokens : null,
     seed: h.seed != null ? h.seed : null,
@@ -555,4 +569,3 @@ function showErrorText(t) { if (dom.errorText) dom.errorText.textContent = t || 
 function showSuccessText(t) { if (dom.successText) dom.successText.textContent = t || ''; }
 function clearStatusMessages() { if (dom.errorText) dom.errorText.textContent = ''; if (dom.successText) dom.successText.textContent = ''; }
 export function resetSpawnStatus() { wizardState.spawn = { inFlight:false, error:'' }; setStatusText('Ready to spawn.'); setProgress(0); clearStatusMessages(); }
-
