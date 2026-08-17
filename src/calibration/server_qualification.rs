@@ -27,7 +27,10 @@ use tokio::{
 use crate::inference::supervisor::SupervisedLaunch;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
-const HEALTH_TIMEOUT: Duration = Duration::from_secs(20);
+// CUDA-backed llama-server startup can exceed 20 seconds on Windows while
+// loading DLLs and initializing the GPU. Keep readiness bounded, but allow a
+// cold native startup enough time to reach /health.
+const HEALTH_TIMEOUT: Duration = Duration::from_secs(180);
 const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_SERVER_LOG_BYTES: usize = 256 * 1024;
 const MAX_REQUEST_TIMEOUT_MS: u64 = 5 * 60 * 1000;
@@ -237,8 +240,11 @@ impl ManagedServer {
             log_task,
         };
         if let Err(error) = server.wait_ready().await {
-            let _ = server.stop().await;
-            return Err(error);
+            let (_, server_log) = server.stop().await;
+            if server_log.trim().is_empty() {
+                return Err(error);
+            }
+            return Err(error.context(format!("qualification server stderr: {server_log}")));
         }
         Ok(server)
     }
@@ -359,7 +365,17 @@ pub async fn run_against_endpoint_with_capabilities(
                 }
             }
             QualificationTrack::Mtp if capabilities.supports(QualificationTrack::Mtp) => {
-                let latency = measure_completion(&client, &endpoint, request).await;
+                let mut latency = measure_completion(&client, &endpoint, request).await;
+                // Windows can briefly lose a loopback connection while the
+                // CUDA-backed server finishes its first request. Retry once
+                // against the same managed endpoint before recording failure.
+                if latency.status == QualificationStatus::Failed {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    let retry = measure_completion(&client, &endpoint, request).await;
+                    if retry.status == QualificationStatus::Completed {
+                        latency = retry;
+                    }
+                }
                 QualificationTrackResult {
                     track: *track,
                     status: latency.status,

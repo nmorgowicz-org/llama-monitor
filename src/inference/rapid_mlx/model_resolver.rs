@@ -1867,6 +1867,10 @@ fn create_file_symlink(src: &Path, dest: &Path) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
+    fn test_overlay_root(path: &Path) {
+        init_template_overlay_root(path);
+    }
+
     #[test]
     fn gguf_is_preserved_but_never_launchable() {
         let source = source_from_legacy_model_path("/models/finetune.gguf").unwrap();
@@ -2425,6 +2429,7 @@ mod tests {
     fn template_overlay_creates_symlinks_and_template() {
         // Create a fake model directory with some files
         let model_dir = tempfile::tempdir().unwrap();
+        test_overlay_root(model_dir.path());
         fs::write(model_dir.path().join("config.json"), b"{}").unwrap();
         fs::write(model_dir.path().join("tokenizer.json"), b"{}").unwrap();
         fs::write(model_dir.path().join("model.safetensors"), b"weights").unwrap();
@@ -2467,6 +2472,7 @@ mod tests {
     #[test]
     fn template_overlay_does_not_mutate_original_model_dir() {
         let model_dir = tempfile::tempdir().unwrap();
+        test_overlay_root(model_dir.path());
         fs::write(model_dir.path().join("config.json"), b"{}").unwrap();
 
         let template_dir = tempfile::tempdir().unwrap();
@@ -2495,6 +2501,7 @@ mod tests {
     fn template_overlay_path_is_deterministic() {
         // Same model dir should always produce the same overlay path
         let model_dir = tempfile::tempdir().unwrap();
+        test_overlay_root(model_dir.path());
         let model_path = model_dir.path().to_string_lossy().into_owned();
         let template_dir = tempfile::tempdir().unwrap();
         fs::write(template_dir.path().join("template.jinja"), b"template").unwrap();

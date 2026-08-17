@@ -579,7 +579,12 @@ impl LlamaCppAdapter {
             cmd.arg("--spec-draft-ngl").arg(value);
         }
         if let Some(ref v) = s.spec_draft_device {
-            cmd.arg("--spec-draft-device").arg(v);
+            // `gpu` is a legacy app-level placeholder, not a llama.cpp device
+            // identifier. Leave it unset unless the user supplied an explicit
+            // upstream device name such as CUDA0.
+            if !v.eq_ignore_ascii_case("gpu") {
+                cmd.arg("--spec-draft-device").arg(v);
+            }
         }
         if s.spec_draft_cpu_moe {
             cmd.arg("--spec-draft-cpu-moe");

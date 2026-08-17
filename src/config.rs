@@ -28,7 +28,7 @@ pub(crate) fn harden_file_permissions(path: &std::path::Path) {
             let _ = std::fs::set_permissions(path, perms);
         }
     }
-    #[cfg(windows)]
+    #[cfg(all(windows, not(test)))]
     {
         // Build the user identity string. Prefer USERDOMAIN\USERNAME for domain
         // accounts; fall back to USERNAME alone for local accounts.
@@ -73,6 +73,14 @@ pub(crate) fn harden_file_permissions(path: &std::path::Path) {
                 path.display()
             );
         }
+    }
+
+    // Unit tests use disposable temporary files. Applying ACL rewrites to each
+    // test artifact makes the temp directory non-reopenable on some Windows
+    // runners; production callers still take the hardened path above.
+    #[cfg(all(windows, test))]
+    {
+        let _ = path;
     }
 }
 

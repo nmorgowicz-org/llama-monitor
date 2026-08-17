@@ -264,8 +264,12 @@ mod tests {
     #[test]
     fn missing_optional_fit_helper_degrades_without_hiding_bench() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let server = temp.path().join("llama-server");
-        let bench = temp.path().join("llama-bench");
+        let server = sibling_tool_path_for(
+            &temp.path().join("llama-server.exe"),
+            LlamaCppTool::Server,
+            true,
+        );
+        let bench = sibling_tool_path_for(&server, LlamaCppTool::Bench, true);
         std::fs::write(&server, b"server").expect("server fixture");
         std::fs::write(&bench, b"bench").expect("bench fixture");
         let resolved = resolve_tool(&server, LlamaCppTool::Bench).expect("bench sibling");

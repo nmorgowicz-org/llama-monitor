@@ -1,12 +1,15 @@
 # Local LLM Foundry 2.0 Calibration UX and Windows validation handoff
 
-**Status:** Approved execution handoff. Premium Calibration UX is the next source-side work item before the final Windows pass.
+**Status:** Native Windows Calibration qualification completed on 2026-08-17; broader migration/package and visual-parity receipts remain tracked in the Phase 12/13 ledgers.
 
 **Audience:** A fresh Codex session with no conversational context.
 
 **Repository:** nmorgowicz-org/local-llm-foundry
 **Branch:** feat/rapid-mlx-integration
 **Release:** Local LLM Foundry 2.0.0
+
+**Source baseline (reviewed 2026-08-17):** `ffe25d8` (`feat(ui): complete Calibration 2.0 surface`).
+This is a local baseline only; native Windows evidence must use the final pushed commit after Phase F.
 
 **Authority documents**
 
@@ -17,6 +20,8 @@
 
 This handoff adds the missing product-quality layer: Calibration must feel like a premium 2.0 feature, then the completed surface must be qualified on native Windows with evidence a context-free session can verify.
 
+Current native result: the CUDA 13.3 Windows managed runtime completed Quick and Balanced calibration, apply/rollback, cancellation cleanup, and the real-server `latency_memory`, `mtp`, and `ngram` tracks using the Qwen3.5 GGUF and Froggeric v22.1 template. Evidence is recorded in `docs/plans/evidence/20260813-llama-optimize/phase-10/windows/README.md`.
+
 ## 1. Current truth and release boundary
 
 The typed backend and basic UI already exist. Do not replace the calibration contracts or introduce a second settings object.
@@ -25,7 +30,7 @@ Implemented source-side capabilities include typed llama.cpp-only Quick/Balanced
 
 The current UI is functional but not 2.0-ready. It is a small modal with status text, simple candidate rows, baseline/default tables, qualification details, and apply/rollback buttons. It lacks a visual run timeline, live progress treatment, premium recommendation hierarchy, interactive comparisons, and clear drill-down of evidence. Do not close the Calibration UX gate until this document's UI and evidence gates pass.
 
-The pushed CI run 31973233872 was green, including UI, Linux/macOS release smoke, Windows GNU smoke, Windows-target clippy, lint, and checks. Any UI change requires a new release-built local suite and fresh remote CI; that run is not evidence for new UI code.
+The pushed CI run 31973233872 was green, including UI, Linux/macOS release smoke, Windows GNU smoke, Windows-target clippy, lint, and checks. Any UI change requires a new release-built local suite and fresh remote CI; that run is not evidence for new UI code. Older Windows receipts tied to commits such as `3069a1b` are historical platform evidence only and do not qualify the current Calibration UI.
 
 ## 2. Product objective
 
@@ -231,11 +236,13 @@ Use a disposable configured root and real managed Windows llama-server.exe, llam
 - Filename heuristics never become model/capability evidence.
 - Rapid-MLX never enters the llama.cpp catalog.
 
-Store Windows Calibration evidence under:
+Store Windows Calibration evidence under the Calibration-owned Phase 10 directory:
 
 ~~~
 docs/plans/evidence/20260813-llama-optimize/phase-10/windows/
 ~~~
+
+Keep broader application-home, migration, runtime, packaging, and visual-parity receipts in their existing Phase 12/13 directories under `docs/plans/evidence/20260811-local-llm-foundry/`. Do not duplicate receipts across phase directories; link between ledgers when one receipt supports multiple gates.
 
 Use separate files for machine manifest, managed-binary help, preflight, complete receipt, cancellation/cleanup, resume, apply/rollback, and degraded or failure states. Include hashes and repository-relative paths; never tokens or full user-home paths.
 
@@ -279,4 +286,16 @@ exit codes, visual parity decisions, and blockers before closing the phase.
 
 ## Current implementation status (2026-08-17)
 
-Source-side Calibration UX is complete for the current llama.cpp contract. The release-built surface includes the hero identity/evidence treatment, Quick/Balanced bounded-run choice, live progress/ETA, sortable/filterable candidate comparison with expandable details, recommendation/provenance badges, latency/tool/speculation qualification cards, baseline/help-default provenance, safe derived-preset preview, and source-preserving apply/rollback messaging. Focused Calibration Playwright passes (6/6), JavaScript validation/lint, release build, and fresh Puppeteer captures pass. Windows-native validation and the narrow/light/reduced-motion capture matrix remain final handoff gates; Rapid-MLX and broad MoE optimization remain out of scope.
+Source-side Calibration UX is complete for the current llama.cpp contract. The release-built surface includes the hero identity/evidence treatment, Quick/Balanced bounded-run choice, live progress/ETA, sortable/filterable candidate comparison with expandable details, recommendation/provenance badges, latency/tool/speculation qualification cards, baseline/help-default provenance, safe derived-preset preview, and source-preserving apply/rollback messaging. Focused Calibration Playwright, JavaScript validation/lint, release build, full Rust tests, Clippy, and release-contract checks pass.
+
+### Windows validation result
+
+Native Windows validation completed on 2026-08-17 using a disposable profile, native x86_64 executable, managed llama.cpp `b10470`, CUDA 13.3, RTX 5090, the Qwen3.5 GGUF, and Froggeric v22.1. Quick and Balanced calibration passed; Balanced selected `balanced-l9-r04` (batch 1024, ubatch 512, context 57344). Apply/rollback, cancellation cleanup, and the final real-server qualification passed. Qualification tracks `latency_memory`, `mtp`, and `ngram` all completed without diagnostics. Evidence: `docs/plans/evidence/20260813-llama-optimize/phase-10/windows/README.md`.
+
+The Windows launch path initially exposed an invalid upstream argument: the app-level `spec_draft_device=gpu` value became `--spec-draft-device gpu`, which llama.cpp rejects. The launcher now omits that legacy abstract value while preserving explicit upstream device names. The proven MTP configuration remains `--spec-draft-ngl all`, `n_max=3`, and `p_min=0.20`; no invented CUDA device flag is required. Qualification readiness is bounded at 180 seconds for cold model startup, and managed-server stderr is retained when readiness fails. A single bounded retry handles transient Windows loopback failure during the MTP probe.
+
+### Visual and Mac handoff notes
+
+Release-built Windows captures for preset editor, chat-template controls, lifecycle dialogs, evidence drawer, light/dark themes, narrow layout, and reduced motion were visually reviewed and look good. The chat-template screenshot uses a seeded macOS-style path only as fixture data; it is not a Windows runtime path and is not a portability issue. Rapid-MLX live runtime and Rapid-MLX-specific scenarios correctly remain Apple-Silicon/macOS-only; Windows skips are platform evidence, not failures. Calibration capture remains explicit opt-in so screenshots cannot launch a benchmark implicitly.
+
+For Luna on macOS: do not change the cross-platform chat-template contract or add a CUDA-specific draft-device value. Keep the portable MTP settings and verify any Mac-side runtime-specific device handling independently against the managed llama.cpp help output. Broad MoE optimization and live Rapid-MLX calibration remain out of scope for this handoff.
