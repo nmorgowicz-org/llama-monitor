@@ -7,7 +7,11 @@
 - Target release: 2.0.0
 - Source snapshot: 2026-08-11
 
-## Execution status (verified through 2026-08-13)
+## Execution status (verified through 2026-08-17)
+
+### Current qualification addendum (2026-08-17)
+
+Native Windows Calibration qualification is complete, including managed Quick/Balanced runs, apply/rollback, cancellation cleanup, real-server latency/memory, MTP, and n-gram tracks, plus release-built UI captures. The remaining 2.0 gates are the broader Windows migration/runtime/package matrix, fresh screenshot parity, fresh remote CI, release artifact/update probes, and final security/release-contract sign-off. Broad MoE and Rapid-MLX calibration remain deferred and are not 2.0 blockers.
 
 | Phase | Status | Evidence / remaining gate |
 |---|---|---|
