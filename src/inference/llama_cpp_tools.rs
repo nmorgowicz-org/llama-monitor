@@ -80,7 +80,15 @@ pub fn sibling_tool_path(server_path: &Path, tool: LlamaCppTool) -> PathBuf {
 
 /// Resolve a managed sibling and reject symlinks/special files before hashing.
 pub fn resolve_tool(server_path: &Path, tool: LlamaCppTool) -> Result<ResolvedTool> {
-    let path = sibling_tool_path(server_path, tool);
+    // Respect an explicitly supplied Windows executable path even when the
+    // resolver is exercised from a non-Windows host (cross-target checks and
+    // portability tests do this). Native Windows callers still use `.exe` via
+    // `cfg!(windows)` when the configured server path has no suffix.
+    let windows_path = cfg!(windows)
+        || server_path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"));
+    let path = sibling_tool_path_for(server_path, tool, windows_path);
     let metadata = std::fs::symlink_metadata(&path)
         .with_context(|| format!("managed {} is unavailable", tool.stem()))?;
     if metadata.file_type().is_symlink() {
