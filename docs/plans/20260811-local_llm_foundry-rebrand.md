@@ -23,7 +23,7 @@
 | 9 — runtime, agent, updater, tray, and platform identities | Complete | Runtime compatibility, updater, remote-path/task migration, CA continuity, entropy hardening, and Token Ingot tray integration are validated; native Windows proofs remain explicit return markers. |
 | 10 — documentation, API, CLI, migration, and historical policy | Complete | Current docs/templates, upgrade guide, brand usage policy, compatibility notes, historical allowlist, and 42-file relative-link validation pass. Fresh screenshot promotion remains Phase 13. |
 | 11 — CI, release-please, packaging, dual assets, and repository rename | In progress | Source and GitHub cutover gates pass: repository renamed, old URL redirects, git continuity verified, and PR #314 carries `feat!:` with a compact 20-entry override. Windows-target clippy/build and release-smoke jobs pass. The two UI races from CI run `31603543480` are fixed locally; a fresh remote run, generated 2.0.0 release, and real artifact/update probes remain open. |
-| 11.5 — bounded llama.cpp Calibration v1 | In progress — Phase 5 release evidence boundary | Rapid-MLX benchmark output is informational-only and cannot emit llama.cpp tuning patches. Typed contracts, active-root persistence, durable recovery, authenticated preflight/start/poll/cancel, deterministic typed Quick and Balanced candidate planning, fail-closed Balanced budgets, sequential bounded Quick execution with per-candidate receipts/winner selection, db-admin transactional apply with optimistic conflict checks and derived-preset default, bounded post-apply llama-bench validation with immediate rollback on failure, durable fingerprint-guarded rollback with private pre-apply snapshots, and the Preset Editor Calibrate flow now pass full Rust/JS validation, release build, six focused release-built Playwright cases, and an opt-in real-local-GGUF capture reaching the real backend for preflight and capturing preflight/running/results/apply/rollback states with bounded lifecycle responses intercepted. Nick accepted the six fresh Calibration screenshots on 2026-08-13. A native bounded L9/L25 design generator, capability-gated typed factor catalog, and cross-platform regular-file classifier are now implemented with focused tests and attribution. The pinned upstream source/license ledger, offline self-test, and macOS managed-binary capability receipt are recorded in the Phase 11 evidence directory; the upstream regular-file portability caveat, native Windows capability receipt, deterministic fake-runtime post-apply receipts, interrupted-job resume, Balanced executor/analysis wiring, Phase 6, native Windows qualification, and Phase 10 gates remain open. |
+| 11.5 — bounded llama.cpp Calibration v1 | Source-side 2.0 scope complete; native Windows return markers remain | Rapid-MLX benchmark output is informational-only and cannot emit llama.cpp tuning patches. Typed contracts, active-root persistence, durable recovery, authenticated preflight/start/poll/cancel, deterministic typed Quick and Balanced candidate planning, fail-closed Balanced budgets, bounded Quick execution with per-candidate receipts/winner selection, transactional apply with optimistic conflict checks and derived-preset default, post-apply validation/rollback, exact/compatible/related Spawn Wizard reuse, the bounded loopback server qualification contract, and the minimum receipt-backed Phase 8 finding policy are implemented. Focused tests, the full Rust/JS/release gates, release-built Calibration captures, the macOS managed-binary capability receipt, the macOS representative dense-Qwen server receipt, and the Phase 5–8 evidence ledger are recorded under `docs/plans/evidence/20260813-llama-optimize/`. Native Windows `.exe` execution/process cleanup, native capture, and final Phase 10 qualification remain open; broad MoE/Rapid-MLX calibration and overnight search remain deferred and are not 2.0 blockers. |
 | 12–14 — cross-platform, security, final qualification, and launch | Not started; Windows handoff prepared | Native Windows work is intentionally deferred to the Windows machine. Phase 12 now qualifies Calibration with the rebrand release candidate. Use `docs/plans/20260812-local_llm_foundry-windows-validation-handoff.md`; do not close these phases from macOS cross-compilation alone. |
 
 ### Current CI qualification incident and local resolution (2026-08-12)
@@ -128,7 +128,7 @@ acceptance gates, not implementation uncertainty.
 | 8 | Source-level closure remains valid; the two CI timing races from run `31603543480` are fixed and verified locally (focused Gemma 20/20, Rapid reachability 10/10; full suite 267 passed, 5 skipped, 3 flaky retries). External CI closure remains open until a fresh remote run is green. |
 | 9 | Complete 2026-08-11: runtime identity centralization, deterministic canonical-first assets, checksum URL retention, exact process/task compatibility, legacy install-path preservation, CA continuity, entropy hardening, Token Ingot tray integration, and current-exe update paths pass source-level gates. Native Windows task/tray/mixed-version proofs remain explicit return markers. |
 | 10 | Complete 2026-08-12: current docs/templates, upgrade guide, brand usage policy, CLI/API/runtime compatibility notes, historical allowlist, and 42-file relative-link validation pass. Fresh screenshot promotion remains Phase 13. |
-| 11.5 | Open: bounded llama.cpp Calibration v1 must pass its Phase 0–6 release scope, required Phase 8 documentation/findings, and applicable Phase 10 gates before rebrand Phase 12 begins. The Phase 5 screenshot-acceptance gate is now closed by Nick on 2026-08-13. Advanced server search, Rapid calibration, and other explicitly deferred items are not 2.0 blockers. |
+| 11.5 | Source-side scope closed 2026-08-16: bounded llama.cpp Calibration Phase 0–8 evidence, macOS representative server receipt, focused fake-runtime apply/rollback/resume, release build, auth checks, and cross-target checks pass. Native Windows `.exe` execution/process/capture and final Phase 10 qualification remain explicit return markers; broad MoE/Rapid-MLX calibration and advanced server search are deferred and are not 2.0 blockers. |
 
 ## 1. Purpose and execution contract
 
@@ -1537,32 +1537,32 @@ advanced defaults.
 
 **Required 2.0 scope**
 
-- [ ] Complete Calibration Phase 0: pin upstream contracts/licenses, fix
+- [x] Complete Calibration Phase 0: pin upstream contracts/licenses, fix
   backend-crossing tuning patches, and remove filename/name-derived tuning
   qualification in favor of authoritative introspection or degraded state.
-- [ ] Complete Calibration Phases 1–3: versioned fingerprints/receipts,
+- [x] Complete Calibration Phases 1–3: versioned fingerprints/receipts,
   cancellable and crash-resumable single-job lifecycle, typed candidate
   patches, managed sibling tool/capability resolution, structured
   `llama-bench -o json`, bounded process control, and measurement-validity
   gates.
-- [ ] Complete the Quick and Balanced portion of Calibration Phase 4: bounded
+- [x] Complete the Quick and Balanced portion of Calibration Phase 4: bounded
   run counts, deterministic/randomized design receipts, measured Pareto picks,
   noise/confidence reporting, and pick verification. Thorough/overnight and
   context-ceiling search remain deferred.
-- [ ] Complete Calibration Phase 5: Preset Editor **Calibrate this preset**,
+- [x] Complete Calibration Phase 5: Preset Editor **Calibrate this preset**,
   preflight/progress/cancel/resume/results, derived-preset-by-default apply,
   optimistic fingerprint conflict handling, bounded post-apply validation,
   and rollback.
-- [ ] Complete Calibration Phase 6: exact current-receipt reuse and explicit
+- [x] Complete Calibration Phase 6: exact current-receipt reuse and explicit
   optional post-download calibration in the Spawn Wizard without blocking the
   normal setup path.
-- [ ] Complete the 2.0-owned portion of Calibration Phase 8: current docs,
+- [x] Complete the 2.0-owned portion of Calibration Phase 8: current docs,
   backend-safe Tune behavior, minimal current/stale/noisy receipt findings,
   and consolidation only where needed to prevent contradictory or unsafe
   behavior.
 - [ ] Run the applicable Calibration Phase 10 security, auth, platform,
   release-build, UI, screenshot, process-recovery, and real-hardware gates.
-- [ ] Update the breaking PR title/body override and changelog inputs so the
+- [x] Update the breaking PR title/body override and changelog inputs so the
   2.0 release accurately includes hardware Calibration without changing the
   already-frozen dual-asset bridge contract.
 

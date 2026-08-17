@@ -12,6 +12,7 @@ use std::path::Path;
 use std::process::Command;
 
 fn main() {
+    println!("cargo:rerun-if-changed=static/css/calibration.css");
     let static_dir = "static";
     let out_dir = "src/gen";
 

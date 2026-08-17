@@ -34,9 +34,17 @@ export default async function(ctx) {
                 receipt: {
                     selected_candidate: 'bounded-batch',
                     candidate_results: [
-                        { candidate: { id: 'baseline' }, measurement: { status: 'ok', tg_tps_samples: [12.1] } },
-                        { candidate: { id: 'bounded-batch' }, measurement: { status: 'ok', tg_tps_samples: [13.4] } },
+                        { candidate: { id: 'baseline', config: { batch_size: 2048, ubatch_size: 512, cache_type_k: 'q8_0', cache_type_v: 'q8_0' } }, measurement: { status: 'ok', confidence: 0.91, memory_bytes: 4200000000, tg_tps_samples: [12.1] } },
+                        { candidate: { id: 'bounded-batch', config: { batch_size: 512, ubatch_size: 512, cache_type_k: 'q8_0', cache_type_v: 'q8_0' } }, measurement: { status: 'ok', confidence: 0.96, memory_bytes: 4100000000, tg_tps_samples: [13.4] } },
                     ],
+                    server_qualification: {
+                        tracks: [
+                            { track: 'latency_memory', status: 'passed', latency: { time_to_first_token_ms: 184 } },
+                            { track: 'tool_correctness', status: 'passed', tool: { tool_call_observed: true } },
+                            { track: 'speculation', status: 'unsupported' },
+                        ],
+                        memory: { process_rss_peak_bytes: 4200000000 },
+                    },
                 },
             }) });
             return;

@@ -1,8 +1,8 @@
 # Phase 7 — Pre-spawn real-server qualification
 
-**Status:** Code implementation complete for the bounded 2.0 slice. The
-remaining release gate is representative hardware qualification (including
-Windows), which must use real managed binaries and models rather than fixtures.
+**Status:** Code implementation complete for the bounded 2.0 slice. The macOS representative dense-Qwen managed-server receipt is recorded in [`docs/plans/evidence/20260813-llama-optimize/phase-07/README.md`](evidence/20260813-llama-optimize/phase-07/README.md).
+Native Windows managed-binary qualification remains the release gate and
+must use native binaries and models rather than fixtures.
 
 **Validation (2026-08-15):** `cargo clippy -- -D warnings`, the complete Rust
 suite with `cargo test -- --test-threads=1`, JavaScript validation/lint, release

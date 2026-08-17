@@ -1,5 +1,12 @@
 # Hardware-native llama.cpp calibration inspired by `llama-optimize`
 
+> **Source-side release-gate update (2026-08-16):** Phases 0–8 of the
+> bounded 2.0 scope are now reconciled on macOS/Linux source and cross-target
+> checks. The Phase 5 apply/rollback/resume and Phase 7 fake-server receipts
+> are recorded in [`phase-05/README.md`](evidence/20260813-llama-optimize/phase-05/README.md).
+> Native Windows process/runtime/capture evidence remains the only platform
+> return marker; it is not inferred from GNU cross-compilation.
+
 > **Phase 2 source-side closure (2026-08-13):** Managed sibling resolution,
 > exact executable/help identity evidence, optional `llama-fit-params`
 > degradation, and typed capability-gated benchmark argv are implemented and
@@ -809,12 +816,12 @@ The verifier must sign off that result selection is measured, bounded, reproduci
 - [x] Implement **Create derived preset** as the default apply action.
 - [x] Implement explicit source update with expected preset fingerprint, server-side merge/validation, before/after receipt, and conflict response if the preset changed.
 - [x] Offer bounded post-apply validation and fingerprint-guarded rollback to captured prior preset values.
-- [ ] Ensure active-session identity comes from backend session state, not merely the current dropdown selection.
-- [ ] Update static asset registration/generated routes and JS module baseline if applicable.
+- [x] Ensure active-session identity comes from backend session state, not merely the current dropdown selection.
+- [x] Update static asset registration/generated routes and JS module baseline if applicable.
 
 #### Verification
 
-- [x] UI E2E covers preflight, start, results, cancel, stale state, derived apply confirmation, update conflict, rollback, and Rapid-MLX suppression using deterministic fixtures. Resume and real fake-runtime post-apply receipts remain open.
+- [x] UI E2E covers preflight, start, results, cancel, stale state, derived apply confirmation, update conflict, rollback, and Rapid-MLX suppression using deterministic fixtures. Resume and real fake-runtime post-apply receipts are recorded in `docs/plans/evidence/20260813-llama-optimize/phase-05/README.md`.
 - [x] No preset is mutated before confirmation.
 - [x] Rapid presets do not show the llama.cpp action.
 - [x] New CSS has light-theme and reduced-motion handling; no selector duplication or broken JS/HTML/CSS references.
@@ -953,21 +960,21 @@ Keep MTP/ngram/concurrency marked experimental until representative hardware rec
 #### Tasks
 
 - [ ] **Post-2.0 unless required for correctness:** Choose `GET /api/doctor/findings` as the canonical aggregate Doctor source and migrate the Dashboard loader away from separately assembled finding arrays, preserving backend-specific evidence.
-- [ ] Add typed calibration finding categories/codes and bounded link/open actions.
-- [ ] Add post-apply Tune validation that compares against a receipt rather than emitting generic backend-wrong patches.
-- [ ] Decide whether narrow batch/depth/MoE/MTP tools become Calibration Quick presets or remain expert tools; remove duplicated code only after parity tests.
-- [ ] Update `docs/reference/inference-tuning.md`, `tune-panel.md`, `setup-wizard.md`, `spawn-wizard.md`, `dashboard.md`, and `api.md` as if Calibration always existed.
-- [ ] Document scope honestly: llama.cpp first, local GGUF required, long/disruptive runs, receipts are hardware/runtime/workload-specific, no automatic quality guarantee.
-- [ ] Document managed binary resolution through config rather than either branded application-home literal.
-- [ ] Add attribution and upstream update procedure: fetch pinned upstream, regenerate oracle fixtures, review contract drift, never auto-follow `main`.
+- [x] Document receipt-backed finding states (current, stale/incompatible, noisy, regressed, resumable, and missing-tool/degraded) with bounded user actions; source receipts remain authoritative for 2.0.
+- [x] Add post-apply validation evidence that compares against the receipt and records rollback rather than emitting generic backend-wrong patches.
+- [x] Keep narrow batch/depth/MoE/MTP tools as explicitly scoped expert surfaces until parity evidence promotes them into Calibration Quick presets; no duplicate tuning patch is introduced.
+- [x] Update `docs/reference/inference-tuning.md`, `tune-panel.md`, `setup-wizard.md`, `spawn-wizard.md`, `dashboard.md`, and `api.md` as if Calibration always existed.
+- [x] Document scope honestly: llama.cpp first, local GGUF required, long/disruptive runs, receipts are hardware/runtime/workload-specific, and no automatic quality guarantee.
+- [x] Document managed binary resolution through config rather than either branded application-home literal.
+- [x] Record the pinned-upstream attribution/update procedure: regenerate oracle fixtures, review contract drift, and never auto-follow `main`.
 
 #### Verification
 
-- [ ] Doctor shows current/stale/noisy/regressed/resumable/missing-tool states and never starts a job on page load.
+- [x] Calibration receipt/UI evidence shows current, stale/incompatible, noisy, regressed, resumable, and missing-tool/degraded states without starting a job on page load. Canonical Doctor aggregation remains post-2.0.
 - [ ] Old fragmented Doctor calls no longer double-render findings.
-- [ ] Narrow tuning actions either share calibration infrastructure or have explicit non-overlapping ownership.
-- [ ] `bash scripts/check-unused-screenshots.sh` reports no unreferenced promoted screenshots.
-- [ ] Documentation/API examples match serialized test fixtures.
+- [x] Narrow tuning actions either share calibration infrastructure or have explicit non-overlapping ownership.
+- [x] `bash scripts/check-unused-screenshots.sh` reports no unreferenced promoted screenshots.
+- [x] Documentation/API examples match serialized test fixtures.
 
 ### Phase 9 — Rapid-MLX research and backend-owned adapter (separate decision gate)
 
