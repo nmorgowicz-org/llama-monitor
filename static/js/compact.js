@@ -57,25 +57,56 @@ document.getElementById('compact-close').addEventListener('click', () => {
 const compactHeader = document.querySelector('.header');
 let compactDragging = false;
 let compactLastPointer = null;
+let compactDragFrame = 0;
+let compactPendingDelta = null;
 compactHeader?.addEventListener('pointerdown', (event) => {
     if (event.target.closest('#compact-close')) return;
+    event.preventDefault();
     compactDragging = true;
     compactLastPointer = { x: event.clientX, y: event.clientY };
     compactHeader.setPointerCapture?.(event.pointerId);
 });
 compactHeader?.addEventListener('pointermove', (event) => {
     if (!compactDragging || !compactLastPointer || !window.ipc?.postMessage) return;
+    event.preventDefault();
     const dx = Math.round(event.clientX - compactLastPointer.x);
     const dy = Math.round(event.clientY - compactLastPointer.y);
     compactLastPointer = { x: event.clientX, y: event.clientY };
-    if (dx || dy) window.ipc.postMessage(JSON.stringify({ action: 'move', dx, dy }));
+    if (dx || dy) {
+        compactPendingDelta = { dx: (compactPendingDelta?.dx || 0) + dx, dy: (compactPendingDelta?.dy || 0) + dy };
+        if (!compactDragFrame) compactDragFrame = requestAnimationFrame(() => {
+            compactDragFrame = 0;
+            const delta = compactPendingDelta;
+            compactPendingDelta = null;
+            if (delta) window.ipc.postMessage(JSON.stringify({ action: 'move', ...delta }));
+        });
+    }
 });
 const stopCompactDrag = () => {
     compactDragging = false;
     compactLastPointer = null;
+    compactPendingDelta = null;
 };
 compactHeader?.addEventListener('pointerup', stopCompactDrag);
 compactHeader?.addEventListener('pointercancel', stopCompactDrag);
+
+const compactResizeGrip = document.getElementById('compact-resize-grip');
+let compactResizing = false;
+let compactResizeStart = null;
+compactResizeGrip?.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    compactResizing = true;
+    compactResizeStart = { x: event.clientX, y: event.clientY, ...window.getContentDimensions() };
+    compactResizeGrip.setPointerCapture?.(event.pointerId);
+});
+compactResizeGrip?.addEventListener('pointermove', (event) => {
+    if (!compactResizing || !compactResizeStart || !window.ipc?.postMessage) return;
+    event.preventDefault();
+    window.ipc.postMessage(JSON.stringify({ action: 'resize', width: compactResizeStart.width + event.clientX - compactResizeStart.x, height: compactResizeStart.height + event.clientY - compactResizeStart.y }));
+});
+const stopCompactResize = () => { compactResizing = false; compactResizeStart = null; };
+compactResizeGrip?.addEventListener('pointerup', stopCompactResize);
+compactResizeGrip?.addEventListener('pointercancel', stopCompactResize);
 
 const PORT = window.__COMPACT_PORT__;
 let ws = null;
