@@ -31,6 +31,9 @@
 - Release-built Playwright UI validation passed with 281 tests and 5
   intentional/platform skips; the Rapid-MLX scenarios remain correctly
   Apple-Silicon/macOS gated and the SSH integration remains environment-gated.
+- Tray/WebView2 source review found and corrected the compact popover's stale
+  `llama-monitor` heading; the visible tray menu and runtime guidance already
+  use `Local LLM Foundry`.
 
 All disposable roots were created below the Windows temporary directory and
 were not connected to the user's real profile or model inventory.
