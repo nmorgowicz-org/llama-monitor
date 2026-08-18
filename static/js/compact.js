@@ -69,10 +69,17 @@ compactHeader?.addEventListener('pointerdown', (event) => {
 const compactResizeGrip = document.getElementById('compact-resize-grip');
 let compactResizing = false;
 let compactResizeStart = null;
+const compactResizeMinimum = window.getContentDimensions();
 compactResizeGrip?.addEventListener('pointerdown', (event) => {
     event.preventDefault();
     compactResizing = true;
-    compactResizeStart = { x: event.clientX, y: event.clientY, ...window.getContentDimensions() };
+    const dimensions = window.getContentDimensions();
+    compactResizeStart = {
+        x: event.clientX,
+        y: event.clientY,
+        width: Math.max(dimensions.width, compactResizeMinimum.width),
+        height: Math.max(dimensions.height, compactResizeMinimum.height),
+    };
     compactResizeGrip.setPointerCapture?.(event.pointerId);
 });
 compactResizeGrip?.addEventListener('pointermove', (event) => {

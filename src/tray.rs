@@ -98,7 +98,7 @@ const POPOVER_MAX_WIDTH: f64 = 520.0;
 #[cfg(feature = "webview-popover")]
 const POPOVER_INITIAL_HEIGHT: f64 = 220.0;
 #[cfg(feature = "webview-popover")]
-const POPOVER_MIN_HEIGHT: f64 = 96.0;
+const POPOVER_MIN_HEIGHT: f64 = POPOVER_INITIAL_HEIGHT;
 #[cfg(feature = "webview-popover")]
 const POPOVER_MAX_HEIGHT: f64 = 520.0;
 
@@ -510,7 +510,7 @@ impl TrayApp {
             // Keep the Windows popover user-resizable. The compact page still
             // reports content-driven height through IPC, while this enables
             // normal edge/corner resizing from the borderless Winit window.
-            .with_resizable(true)
+            .with_resizable(false)
             .with_window_level(WindowLevel::AlwaysOnTop)
             .with_visible(true);
 
