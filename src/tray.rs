@@ -265,6 +265,15 @@ impl ApplicationHandler for TrayApp {
                 .is_some_and(|popover| popover.window.id() == id);
             if is_popover {
                 match event {
+                    WindowEvent::SurfaceResized(size) => {
+                        if let Some(popover) = self.popover.as_ref() {
+                            let scale = popover.window.scale_factor();
+                            self.resize_popover(
+                                f64::from(size.width) / scale,
+                                f64::from(size.height) / scale,
+                            );
+                        }
+                    }
                     WindowEvent::CloseRequested => {
                         self.close_popover();
                     }
