@@ -55,44 +55,16 @@ document.getElementById('compact-close').addEventListener('click', () => {
 // Borderless Windows popovers do not have a native title bar. Let the
 // branded header drag the window while keeping the close control clickable.
 const compactHeader = document.querySelector('.header');
-let compactDragging = false;
-let compactLastPointer = null;
-let compactDragFrame = 0;
-let compactPendingDelta = null;
 compactHeader?.addEventListener('pointerdown', (event) => {
     if (event.target.closest('#compact-close')) return;
     event.preventDefault();
-    compactDragging = true;
-    compactLastPointer = { x: event.clientX, y: event.clientY };
-    compactHeader.setPointerCapture?.(event.pointerId);
     if (window.ipc?.postMessage) {
+        // Native drag owns the pointer sequence on Windows. Do not also send
+        // synthetic move deltas: that races the OS drag loop and can leave a
+        // second drag effectively attached to later mouse movement.
         window.ipc.postMessage(JSON.stringify({ action: 'drag' }));
-        return;
     }
 });
-compactHeader?.addEventListener('pointermove', (event) => {
-    if (!compactDragging || !compactLastPointer || !window.ipc?.postMessage) return;
-    event.preventDefault();
-    const dx = Math.round(event.clientX - compactLastPointer.x);
-    const dy = Math.round(event.clientY - compactLastPointer.y);
-    compactLastPointer = { x: event.clientX, y: event.clientY };
-    if (dx || dy) {
-        compactPendingDelta = { dx: (compactPendingDelta?.dx || 0) + dx, dy: (compactPendingDelta?.dy || 0) + dy };
-        if (!compactDragFrame) compactDragFrame = requestAnimationFrame(() => {
-            compactDragFrame = 0;
-            const delta = compactPendingDelta;
-            compactPendingDelta = null;
-            if (delta) window.ipc.postMessage(JSON.stringify({ action: 'move', ...delta }));
-        });
-    }
-});
-const stopCompactDrag = () => {
-    compactDragging = false;
-    compactLastPointer = null;
-    compactPendingDelta = null;
-};
-compactHeader?.addEventListener('pointerup', stopCompactDrag);
-compactHeader?.addEventListener('pointercancel', stopCompactDrag);
 
 const compactResizeGrip = document.getElementById('compact-resize-grip');
 let compactResizing = false;
