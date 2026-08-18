@@ -66,31 +66,6 @@ compactHeader?.addEventListener('pointerdown', (event) => {
     }
 });
 
-const compactResizeGrip = document.getElementById('compact-resize-grip');
-let compactResizing = false;
-let compactResizeStart = null;
-const compactResizeMinimum = window.getContentDimensions();
-compactResizeGrip?.addEventListener('pointerdown', (event) => {
-    event.preventDefault();
-    compactResizing = true;
-    const dimensions = window.getContentDimensions();
-    compactResizeStart = {
-        x: event.clientX,
-        y: event.clientY,
-        width: Math.max(dimensions.width, compactResizeMinimum.width),
-        height: Math.max(dimensions.height, compactResizeMinimum.height),
-    };
-    compactResizeGrip.setPointerCapture?.(event.pointerId);
-});
-compactResizeGrip?.addEventListener('pointermove', (event) => {
-    if (!compactResizing || !compactResizeStart || !window.ipc?.postMessage) return;
-    event.preventDefault();
-    window.ipc.postMessage(JSON.stringify({ action: 'resize', width: compactResizeStart.width + event.clientX - compactResizeStart.x, height: compactResizeStart.height + event.clientY - compactResizeStart.y }));
-});
-const stopCompactResize = () => { compactResizing = false; compactResizeStart = null; };
-compactResizeGrip?.addEventListener('pointerup', stopCompactResize);
-compactResizeGrip?.addEventListener('pointercancel', stopCompactResize);
-
 const PORT = window.__COMPACT_PORT__;
 let ws = null;
 let reconnectTimer = null;
