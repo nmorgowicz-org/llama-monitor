@@ -65,6 +65,10 @@ compactHeader?.addEventListener('pointerdown', (event) => {
     compactDragging = true;
     compactLastPointer = { x: event.clientX, y: event.clientY };
     compactHeader.setPointerCapture?.(event.pointerId);
+    if (window.ipc?.postMessage) {
+        window.ipc.postMessage(JSON.stringify({ action: 'drag' }));
+        return;
+    }
 });
 compactHeader?.addEventListener('pointermove', (event) => {
     if (!compactDragging || !compactLastPointer || !window.ipc?.postMessage) return;

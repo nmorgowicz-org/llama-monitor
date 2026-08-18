@@ -92,6 +92,10 @@ use crate::system::SystemMetrics;
 #[cfg(feature = "webview-popover")]
 const POPOVER_WIDTH: f64 = 240.0;
 #[cfg(feature = "webview-popover")]
+const POPOVER_MIN_WIDTH: f64 = 200.0;
+#[cfg(feature = "webview-popover")]
+const POPOVER_MAX_WIDTH: f64 = 520.0;
+#[cfg(feature = "webview-popover")]
 const POPOVER_INITIAL_HEIGHT: f64 = 220.0;
 #[cfg(feature = "webview-popover")]
 const POPOVER_MIN_HEIGHT: f64 = 96.0;
@@ -236,6 +240,7 @@ struct Popover {
 #[serde(tag = "action", rename_all = "snake_case")]
 enum PopoverMessage {
     Resize { width: f64, height: f64 },
+    Drag,
     Move { dx: i32, dy: i32 },
     Close,
 }
@@ -391,6 +396,11 @@ impl ApplicationHandler for TrayApp {
                 match message {
                     PopoverMessage::Resize { width, height } => {
                         latest = Some((width, height));
+                    }
+                    PopoverMessage::Drag => {
+                        if let Some(popover) = self.popover.as_ref() {
+                            let _ = popover.window.drag_window();
+                        }
                     }
                     PopoverMessage::Move { dx, dy } => {
                         if let Some(popover) = self.popover.as_ref()
@@ -591,12 +601,12 @@ impl TrayApp {
     }
 
     #[cfg(feature = "webview-popover")]
-    fn resize_popover(&mut self, _reported_width: f64, height: f64) {
+    fn resize_popover(&mut self, reported_width: f64, height: f64) {
         let Some(popover) = self.popover.as_mut() else {
             return;
         };
 
-        let width = POPOVER_WIDTH;
+        let width = reported_width.clamp(POPOVER_MIN_WIDTH, POPOVER_MAX_WIDTH);
         let height = height.clamp(POPOVER_MIN_HEIGHT, POPOVER_MAX_HEIGHT);
         if (popover.width - width).abs() < 1.0 && (popover.height - height).abs() < 1.0 {
             return;
@@ -932,6 +942,7 @@ mod tests {
                 assert_eq!(width, 240.0);
                 assert_eq!(height, 180.0);
             }
+            PopoverMessage::Drag => panic!("expected resize message"),
             PopoverMessage::Move { .. } => panic!("expected resize message"),
             PopoverMessage::Close => panic!("expected resize message"),
         }
