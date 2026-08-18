@@ -116,6 +116,44 @@ pub struct AppHomeMigrationEntry {
     pub modified_unix_seconds: u64,
 }
 
+/// The two application-home roots participating in a migration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppHomeRoots {
+    pub canonical: PathBuf,
+    pub legacy: PathBuf,
+    pub disposable: bool,
+}
+
+/// Resolve an explicitly disposable migration root. This is intentionally
+/// strict: test roots must live below the current user's temp directory and
+/// may not target either real application root.
+pub fn disposable_roots(root: &Path) -> Result<AppHomeRoots> {
+    let root = root
+        .canonicalize()
+        .with_context(|| format!("migration test root is not readable: {}", root.display()))?;
+    let temp = std::env::temp_dir().canonicalize()?;
+    if !root.starts_with(&temp) || root == temp {
+        bail!("migration test root must be a child of the temp directory");
+    }
+    let metadata = fs::symlink_metadata(&root)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        bail!("migration test root must be a real directory");
+    }
+    Ok(AppHomeRoots {
+        canonical: root.join("local-llm-foundry"),
+        legacy: root.join("llama-monitor"),
+        disposable: true,
+    })
+}
+
+pub fn default_roots() -> AppHomeRoots {
+    AppHomeRoots {
+        canonical: AppPaths::canonical_default_root(),
+        legacy: AppPaths::legacy_default_root(),
+        disposable: false,
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppHomeMigrationPlan {
     pub schema_version: u32,
@@ -198,10 +236,13 @@ pub struct AppHomeCleanupPlan {
 static MIGRATION_QUEUE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 pub fn migration_request_path() -> PathBuf {
-    AppPaths::canonical_default_root()
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(format!(".{PRODUCT_SLUG}-migration-request.json"))
+    let canonical = AppPaths::canonical_default_root();
+    let parent = canonical.parent().unwrap_or_else(|| Path::new("."));
+    migration_request_path_for_parent(parent)
+}
+
+pub fn migration_request_path_for_parent(parent: &Path) -> PathBuf {
+    parent.join(format!(".{PRODUCT_SLUG}-migration-request.json"))
 }
 
 pub fn queue_application_home_migration(
@@ -212,7 +253,10 @@ pub fn queue_application_home_migration(
         .lock()
         .map_err(|_| anyhow::anyhow!("migration queue is unavailable"))?;
     validate_root(&plan.source, "source")?;
-    if migration_request_path().is_file() {
+    let request_path = migration_request_path_for_parent(
+        plan.destination.parent().unwrap_or_else(|| Path::new(".")),
+    );
+    if request_path.is_file() {
         bail!("a migration is already queued");
     }
     if plan.destination.exists()
@@ -233,12 +277,22 @@ pub fn queue_application_home_migration(
             .unwrap_or_default()
             .as_secs(),
     };
-    write_json_atomic(&migration_request_path(), &request)?;
+    write_json_atomic(&request_path, &request)?;
     Ok(request)
 }
 
 pub fn load_migration_request() -> Result<Option<AppHomeMigrationRequest>> {
-    let path = migration_request_path();
+    load_migration_request_from_parent(
+        AppPaths::canonical_default_root()
+            .parent()
+            .unwrap_or_else(|| Path::new(".")),
+    )
+}
+
+pub fn load_migration_request_from_parent(
+    parent: &Path,
+) -> Result<Option<AppHomeMigrationRequest>> {
+    let path = migration_request_path_for_parent(parent);
     if !path.is_file() {
         return Ok(None);
     }
@@ -437,7 +491,9 @@ pub fn execute_application_home(plan: &AppHomeMigrationPlan) -> Result<AppHomeMi
         verified_entries: journal.completed_entries.len(),
     };
     write_json_atomic(&migration_receipt_path(plan), &receipt)?;
-    let request_path = migration_request_path();
+    let request_path = migration_request_path_for_parent(
+        plan.destination.parent().unwrap_or_else(|| Path::new(".")),
+    );
     if request_path.is_file() {
         let _ = fs::remove_file(request_path);
     }
@@ -537,7 +593,13 @@ pub fn queue_application_home_rollback(
 }
 
 pub fn load_rollback_request() -> Result<Option<AppHomeRollbackRequest>> {
-    let path = rollback_request_path(&AppPaths::canonical_default_root());
+    load_rollback_request_for_root(&AppPaths::canonical_default_root())
+}
+
+pub fn load_rollback_request_for_root(
+    canonical_root: &Path,
+) -> Result<Option<AppHomeRollbackRequest>> {
+    let path = rollback_request_path(canonical_root);
     if !path.is_file() {
         return Ok(None);
     }
@@ -599,7 +661,11 @@ pub fn queue_application_home_cleanup(plan: &AppHomeCleanupPlan) -> Result<AppHo
 }
 
 pub fn load_cleanup_request() -> Result<Option<AppHomeCleanupPlan>> {
-    let path = cleanup_request_path(&AppPaths::canonical_default_root());
+    load_cleanup_request_for_root(&AppPaths::canonical_default_root())
+}
+
+pub fn load_cleanup_request_for_root(canonical_root: &Path) -> Result<Option<AppHomeCleanupPlan>> {
+    let path = cleanup_request_path(canonical_root);
     if !path.is_file() {
         return Ok(None);
     }
@@ -828,11 +894,21 @@ fn classify_resource(relative: &Path) -> ResourceClass {
 }
 
 pub fn inspect_default_roots() -> Result<RootInspection> {
-    inspect_roots(
-        &AppPaths::canonical_default_root(),
-        &AppPaths::legacy_default_root(),
-        false,
-    )
+    let roots = default_roots();
+    inspect_roots(&roots.canonical, &roots.legacy, false)
+}
+
+pub fn inspect_application_roots(roots: &AppHomeRoots) -> Result<RootInspection> {
+    let mut inspection = inspect_roots(&roots.canonical, &roots.legacy, false)?;
+    if inspection.state == RootState::LegacyActive
+        && migration_request_path_for_parent(
+            roots.canonical.parent().unwrap_or_else(|| Path::new(".")),
+        )
+        .is_file()
+    {
+        inspection.state = RootState::MigrationQueued;
+    }
+    Ok(inspection)
 }
 
 pub fn inspect_roots(

@@ -159,8 +159,17 @@ pub fn run() -> Result<()> {
         || args.app_home_rollback_preview
         || args.app_home_rollback
         || args.app_home_cleanup;
-    let mut default_inspection = if args.config_dir.is_none() {
-        Some(app_migration::inspect_default_roots()?)
+    let test_roots = args
+        .migration_test_root
+        .as_deref()
+        .map(app_migration::disposable_roots)
+        .transpose()?;
+    let migration_scope = args.config_dir.is_none() || test_roots.is_some();
+    let mut default_inspection = if migration_scope {
+        Some(match test_roots.as_ref() {
+            Some(roots) => app_migration::inspect_application_roots(roots)?,
+            None => app_migration::inspect_default_roots()?,
+        })
     } else {
         None
     };
@@ -265,14 +274,20 @@ pub fn run() -> Result<()> {
     // A rollback is queued by the authenticated migration center and consumed
     // before normal root selection, so no live process ever switches roots
     // halfway through initialization.
-    if args.config_dir.is_none()
-        && let Some(request) = app_migration::load_rollback_request()?
+    if migration_scope
+        && let Some(request) = match test_roots.as_ref() {
+            Some(roots) => app_migration::load_rollback_request_for_root(&roots.canonical)?,
+            None => app_migration::load_rollback_request()?,
+        }
     {
         app_migration::execute_queued_rollback(&request)
             .context("queued application-home rollback failed")?;
     }
-    if args.config_dir.is_none()
-        && let Some(request) = app_migration::load_cleanup_request()?
+    if migration_scope
+        && let Some(request) = match test_roots.as_ref() {
+            Some(roots) => app_migration::load_cleanup_request_for_root(&roots.canonical)?,
+            None => app_migration::load_cleanup_request()?,
+        }
     {
         app_migration::execute_queued_cleanup(&request)
             .context("queued legacy-root cleanup failed")?;
@@ -282,13 +297,21 @@ pub fn run() -> Result<()> {
     // tokens, load protected config, initialize encryption, or create model
     // directories. Legacy-only installs remain on their existing root until
     // the explicit migration flow is implemented; both-root conflicts stop.
-    if args.config_dir.is_none() {
+    if migration_scope {
         let inspection = default_inspection
             .take()
             .expect("default inspection captured above");
         if inspection.state == RootState::MigrationQueued {
-            let request = app_migration::load_migration_request()?
-                .ok_or_else(|| anyhow::anyhow!("migration queue marker is missing"))?;
+            let request = match test_roots.as_ref() {
+                Some(roots) => app_migration::load_migration_request_from_parent(
+                    roots
+                        .canonical
+                        .parent()
+                        .unwrap_or_else(|| std::path::Path::new(".")),
+                )?,
+                None => app_migration::load_migration_request()?,
+            }
+            .ok_or_else(|| anyhow::anyhow!("migration queue marker is missing"))?;
             let plan = app_migration::plan_application_home(&request.source, &request.destination)?;
             if plan.plan_id != request.plan_id {
                 return Err(anyhow::anyhow!(
@@ -297,7 +320,10 @@ pub fn run() -> Result<()> {
             }
             app_migration::execute_application_home(&plan)
                 .context("queued application-home migration failed")?;
-            default_inspection = Some(app_migration::inspect_default_roots()?);
+            default_inspection = Some(match test_roots.as_ref() {
+                Some(roots) => app_migration::inspect_application_roots(roots)?,
+                None => app_migration::inspect_default_roots()?,
+            });
         } else {
             default_inspection = Some(inspection);
         }
@@ -321,7 +347,13 @@ pub fn run() -> Result<()> {
             | RootState::MigrationFailed
             | RootState::RollbackAvailable => inspection.canonical_root.clone(),
         };
-        args.config_dir = Some(selected);
+        // A disposable migration root is only the migration fixture. Keep an
+        // explicitly supplied config directory authoritative so startup
+        // tokens and encrypted state are generated there, rather than inside
+        // the synthetic application roots.
+        if test_roots.is_none() {
+            args.config_dir = Some(selected);
+        }
     }
 
     // Establish the encryption key before AppConfig loads protected config
@@ -1387,6 +1419,7 @@ mod tests {
                 presets_file: None,
                 sessions_file: None,
                 config_dir: None,
+                migration_test_root: None,
                 headless,
                 no_tray,
                 agent: false,
@@ -1439,6 +1472,7 @@ mod tests {
             presets_file: None,
             sessions_file: None,
             config_dir: None,
+            migration_test_root: None,
             headless: false,
             no_tray: false,
             agent: false,
@@ -1483,6 +1517,7 @@ mod tests {
             presets_file: None,
             sessions_file: None,
             config_dir: None,
+            migration_test_root: None,
             headless: false,
             no_tray: false,
             agent: false,
@@ -1528,6 +1563,7 @@ mod tests {
             presets_file: None,
             sessions_file: None,
             config_dir: None,
+            migration_test_root: None,
             headless: false,
             no_tray: false,
             agent: false,
@@ -1574,6 +1610,7 @@ mod tests {
             presets_file: None,
             sessions_file: None,
             config_dir: None,
+            migration_test_root: None,
             headless: false,
             no_tray: false,
             agent: false,

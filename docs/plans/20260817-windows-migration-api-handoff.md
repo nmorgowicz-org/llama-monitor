@@ -40,9 +40,29 @@ controlled and every response can be captured.
    ```
 
 3. Use a disposable directory below `$env:TEMP` for every scenario. Do not
-   point `--config-dir` at the real `%APPDATA%` tree.
+   point `--config-dir` at the real `%APPDATA%` tree. The migration API's
+   normal roots are discovered from Windows known folders, so `--config-dir`
+   alone is not a sufficient isolation boundary.
 
-4. Create a receipt directory outside the repository or under the machine-local
+4. Pass the disposable migration root explicitly:
+
+   ```powershell
+   --migration-test-root (Join-Path $root "migration-roots")
+   ```
+
+   This qualification-only option is accepted only for a directory beneath
+   the current user's temp directory. It derives isolated roots beneath that
+   directory (`local-llm-foundry` and `llama-monitor`), rejects symlinks and
+   non-directory roots, and leaves normal production root discovery unchanged.
+   The queue marker, journal, receipt, rollback marker, and cleanup plan stay
+   beside those isolated roots. The token files in `--config-dir` are
+   encrypted at rest; do not use their raw contents as bearer tokens. For a
+   loopback qualification run, obtain the live values from
+   `/api/internal/api-token` and `/api/db/admin-token`, then use those values
+   only in memory. The first endpoint is unauthenticated on loopback; the
+   second accepts the API token and returns the live admin token.
+
+5. Create a receipt directory outside the repository or under the machine-local
    evidence directory described below. Redact tokens, usernames, hostnames, and
    absolute paths before committing any receipt.
 
@@ -63,7 +83,7 @@ New-Item -ItemType Directory -Force $cfg | Out-Null
 # Add scenario fixtures here before starting the process.
 $p = Start-Process `
   -FilePath (Resolve-Path ".\target\release\local-llm-foundry.exe") `
-  -ArgumentList @("--headless", "--config-dir", $cfg, "--port", "17880") `
+  -ArgumentList @("--headless", "--config-dir", $cfg, "--migration-test-root", (Join-Path $root "migration-roots"), "--port", "17880") `
   -PassThru `
   -RedirectStandardOutput $out `
   -RedirectStandardError $err
@@ -108,7 +128,9 @@ Get-Content $err
 
 ### A. Legacy-only preview
 
-- Create only the legacy config root and add a harmless sentinel file.
+- Create only the legacy config root and add a harmless sentinel file plus a
+  recognized state marker such as `presets.json`; a sentinel alone is not
+  considered application state by the root classifier.
 - Start with that root as `--config-dir`.
 - `GET /api/app-home-migration/status` must report `legacy_active`.
 - `GET /api/app-home-migration/preview` must return a non-null deterministic

@@ -463,6 +463,8 @@ pub fn clear_auth_config(config_dir: &std::path::Path) -> std::io::Result<bool> 
 pub struct AppConfig {
     pub app_paths: AppPaths,
     pub config_dir: PathBuf,
+    /// Explicit disposable migration roots used only by native qualification.
+    pub migration_test_root: Option<PathBuf>,
     pub llama_server_path: PathBuf,
     pub llama_server_cwd: PathBuf,
     pub port: u16,
@@ -534,6 +536,7 @@ impl AppConfig {
         Self {
             app_paths: app_paths.clone(),
             config_dir: config_dir.clone(),
+            migration_test_root: args.migration_test_root,
             llama_server_path: args.llama_server_path.unwrap_or(default_server_path),
             llama_server_cwd: args.llama_server_cwd.unwrap_or(default_server_cwd),
             port: args.port,
@@ -610,6 +613,7 @@ impl AppConfig {
         Self {
             app_paths: AppPaths::from_root(std::path::PathBuf::from("/tmp/llama-monitor-test")),
             config_dir: std::path::PathBuf::from("/tmp/llama-monitor-test"),
+            migration_test_root: None,
             llama_server_path: std::path::PathBuf::from("llama-server"),
             llama_server_cwd: std::path::PathBuf::from("."),
             port: 8001,

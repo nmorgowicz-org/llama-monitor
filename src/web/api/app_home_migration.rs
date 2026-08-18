@@ -3,9 +3,10 @@ use warp::Filter;
 use serde::Deserialize;
 
 use crate::app_migration::{
-    inspect_default_roots, plan_application_home, plan_application_home_cleanup,
-    plan_application_home_rollback, queue_application_home_cleanup,
-    queue_application_home_migration, queue_application_home_rollback,
+    AppHomeRoots, default_roots, disposable_roots, inspect_application_roots,
+    plan_application_home, plan_application_home_cleanup, plan_application_home_rollback,
+    queue_application_home_cleanup, queue_application_home_migration,
+    queue_application_home_rollback,
 };
 
 use super::common::{
@@ -18,6 +19,16 @@ use super::common::{
 struct QueueRequest {
     plan_id: String,
     confirmation: String,
+}
+
+fn migration_roots(config: &crate::config::AppConfig) -> Result<AppHomeRoots, String> {
+    config
+        .migration_test_root
+        .as_deref()
+        .map(disposable_roots)
+        .transpose()
+        .map(|roots| roots.unwrap_or_else(default_roots))
+        .map_err(|error| error.to_string())
 }
 
 /// Read-only migration status used by the non-blocking frontend migration
@@ -34,7 +45,13 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
                 if !check_api_token(&authorization, &config) {
                     return Ok::<ApiReply, warp::Rejection>(Box::new(unauthorized_api_token()));
                 }
-                let inspection = inspect_default_roots()
+                let roots = migration_roots(&config).map_err(|error| {
+                    warp::reject::custom(super::ApiError::new(
+                        warp::http::StatusCode::BAD_REQUEST,
+                        error,
+                    ))
+                })?;
+                let inspection = inspect_application_roots(&roots)
                     .map_err(|error| warp::reject::custom(super::ApiError::migration(&error)))?;
                 Ok(Box::new(warp::reply::json(&serde_json::json!({
                     "ok": true,
@@ -63,7 +80,13 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
                     if !check_api_token(&authorization, &config) {
                         return Ok::<ApiReply, warp::Rejection>(Box::new(unauthorized_api_token()));
                     }
-                    let inspection = inspect_default_roots().map_err(|error| {
+                    let roots = migration_roots(&config).map_err(|error| {
+                        warp::reject::custom(super::ApiError::new(
+                            warp::http::StatusCode::BAD_REQUEST,
+                            error,
+                        ))
+                    })?;
+                    let inspection = inspect_application_roots(&roots).map_err(|error| {
                         warp::reject::custom(super::ApiError::migration(&error))
                     })?;
                     if !matches!(
@@ -114,7 +137,13 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
                             warp::http::StatusCode::BAD_REQUEST,
                         )));
                     }
-                    let inspection = inspect_default_roots().map_err(|error| {
+                    let roots = migration_roots(&config).map_err(|error| {
+                        warp::reject::custom(super::ApiError::new(
+                            warp::http::StatusCode::BAD_REQUEST,
+                            error,
+                        ))
+                    })?;
+                    let inspection = inspect_application_roots(&roots).map_err(|error| {
                         warp::reject::custom(super::ApiError::migration(&error))
                     })?;
                     if !matches!(
@@ -165,7 +194,13 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
                     if !check_api_token(&authorization, &config) {
                         return Ok::<ApiReply, warp::Rejection>(Box::new(unauthorized_api_token()));
                     }
-                    let inspection = inspect_default_roots().map_err(|error| {
+                    let roots = migration_roots(&config).map_err(|error| {
+                        warp::reject::custom(super::ApiError::new(
+                            warp::http::StatusCode::BAD_REQUEST,
+                            error,
+                        ))
+                    })?;
+                    let inspection = inspect_application_roots(&roots).map_err(|error| {
                         warp::reject::custom(super::ApiError::migration(&error))
                     })?;
                     let plan = plan_application_home_rollback(
@@ -205,7 +240,13 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
                             warp::http::StatusCode::BAD_REQUEST,
                         )));
                     }
-                    let inspection = inspect_default_roots().map_err(|error| {
+                    let roots = migration_roots(&config).map_err(|error| {
+                        warp::reject::custom(super::ApiError::new(
+                            warp::http::StatusCode::BAD_REQUEST,
+                            error,
+                        ))
+                    })?;
+                    let inspection = inspect_application_roots(&roots).map_err(|error| {
                         warp::reject::custom(super::ApiError::migration(&error))
                     })?;
                     let plan = plan_application_home_rollback(
@@ -249,7 +290,13 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
                             warp::http::StatusCode::BAD_REQUEST,
                         )));
                     }
-                    let inspection = inspect_default_roots().map_err(|error| {
+                    let roots = migration_roots(&config).map_err(|error| {
+                        warp::reject::custom(super::ApiError::new(
+                            warp::http::StatusCode::BAD_REQUEST,
+                            error,
+                        ))
+                    })?;
+                    let inspection = inspect_application_roots(&roots).map_err(|error| {
                         warp::reject::custom(super::ApiError::migration(&error))
                     })?;
                     let plan = plan_application_home_cleanup(
