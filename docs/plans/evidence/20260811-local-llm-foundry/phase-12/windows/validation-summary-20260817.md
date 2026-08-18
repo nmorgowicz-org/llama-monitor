@@ -24,6 +24,10 @@
 - Disposable rollback qualification passed rollback preview, authenticated
   rollback queueing, restart cleanup of the canonical root, legacy-root
   retention, and sentinel preservation.
+- Native Windows release preflight passed with the installed .NET 10 SDK;
+  the sensor bridge built successfully with two existing compiler warnings.
+- Temporary canonical and legacy ZIP inspection passed: each archive contains
+  its expected executable, `sensor_bridge.exe`, and x64 `WebView2Loader.dll`.
 
 All disposable roots were created below the Windows temporary directory and
 were not connected to the user's real profile or model inventory.
@@ -42,5 +46,6 @@ remains a separate CI/Linux gate.
 - Tray/WebView2 and sensor-bridge runtime receipts.
 - Updater replacement/checksum/archive extraction.
 - Remote-agent install/update/uninstall and mixed-version task cleanup.
-- Native ZIP/package/icon manifest receipts.
+- Native ZIP/package/icon manifest receipts beyond the temporary archive
+  inspection.
 - Fresh remote CI on the final branch and screenshot-parity acceptance.
