@@ -1,7 +1,7 @@
 # Native Windows Validation Receipt — 2026-08-17
 
 - **Branch:** `feat/rapid-mlx-integration`
-- **Commit:** `e11af59`
+- **Commit:** `a97a8cc`
 - **Host:** native Windows workstation `ryne`, x86_64
 - **Checkout:** `D:\scripts\claude\local-llm-foundry`
 
@@ -34,6 +34,11 @@
 - Tray/WebView2 source review found and corrected the compact popover's stale
   `llama-monitor` heading; the visible tray menu and runtime guidance already
   use `Local LLM Foundry`.
+- Manual tray/WebView2 acceptance passed on the final Windows build: tray
+  open/close, branded popover, native header dragging without text selection or
+  mouse reattachment, dashboard/logs menu actions, and full app quit were
+  verified. Resizing is intentionally disabled pending a future native
+  borderless-window implementation.
 
 All disposable roots were created below the Windows temporary directory and
 were not connected to the user's real profile or model inventory.
@@ -49,7 +54,7 @@ remains a separate CI/Linux gate.
 ## Still open
 
 - Interrupted migration resume journal matrix.
-- Tray/WebView2 and sensor-bridge runtime receipts.
+- Sensor-bridge runtime receipt.
 - Updater replacement/checksum/archive extraction.
 - Remote-agent install/update/uninstall and mixed-version task cleanup.
 - Native ZIP/package/icon manifest receipts beyond the temporary archive
