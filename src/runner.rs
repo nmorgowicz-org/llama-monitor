@@ -1210,9 +1210,17 @@ pub fn run() -> Result<()> {
     #[cfg(feature = "native-tray")]
     {
         if should_start_tray(&args) {
-            if let Err(e) = crate::tray::run_tray(state, port, app_config.config_dir.clone()) {
-                eprintln!("[warn] Tray unavailable: {e}");
-                eprintln!("[info] Continuing in headless mode with web/API server");
+            match crate::tray::run_tray(state, port, app_config.config_dir.clone()) {
+                Ok(()) => {
+                    // A normal tray-loop return means the user selected Quit.
+                    // Do not leave the API server parked alive with only its
+                    // tray icon gone.
+                    std::process::exit(0);
+                }
+                Err(e) => {
+                    eprintln!("[warn] Tray unavailable: {e}");
+                    eprintln!("[info] Continuing in headless mode with web/API server");
+                }
             }
         } else {
             println!("[info] Tray disabled (no graphical session)");

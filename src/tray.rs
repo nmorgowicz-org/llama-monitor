@@ -482,7 +482,10 @@ impl TrayApp {
             .with_surface_size(winit::dpi::LogicalSize::new(width, height))
             .with_position(PhysicalPosition::new(x as i32, y as i32))
             .with_decorations(false)
-            .with_resizable(false)
+            // Keep the Windows popover user-resizable. The compact page still
+            // reports content-driven height through IPC, while this enables
+            // normal edge/corner resizing from the borderless Winit window.
+            .with_resizable(true)
             .with_window_level(WindowLevel::AlwaysOnTop)
             .with_visible(true);
 
