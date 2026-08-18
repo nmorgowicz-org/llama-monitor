@@ -28,6 +28,9 @@
   the sensor bridge built successfully with two existing compiler warnings.
 - Temporary canonical and legacy ZIP inspection passed: each archive contains
   its expected executable, `sensor_bridge.exe`, and x64 `WebView2Loader.dll`.
+- Release-built Playwright UI validation passed with 281 tests and 5
+  intentional/platform skips; the Rapid-MLX scenarios remain correctly
+  Apple-Silicon/macOS gated and the SSH integration remains environment-gated.
 
 All disposable roots were created below the Windows temporary directory and
 were not connected to the user's real profile or model inventory.
