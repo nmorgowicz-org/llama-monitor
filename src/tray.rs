@@ -521,6 +521,15 @@ impl TrayApp {
                 Err(_) => return,
             };
 
+        // Keep native edge/corner resizing from shrinking the borderless
+        // popover below the compact layout's usable content bounds. The HTML
+        // clamp alone is insufficient because WebView2 can resize its host
+        // window directly without sending an IPC resize message.
+        #[cfg(not(target_os = "linux"))]
+        window.set_min_surface_size(Some(winit::dpi::Size::Logical(
+            winit::dpi::LogicalSize::new(POPOVER_MIN_WIDTH, POPOVER_INITIAL_HEIGHT),
+        )));
+
         #[cfg(not(target_os = "linux"))]
         let webview_builder = wry::WebViewBuilder::new()
             .with_ipc_handler(move |request| {
