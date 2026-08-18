@@ -1,7 +1,7 @@
 # Native Windows Validation Receipt — 2026-08-17
 
 - **Branch:** `feat/rapid-mlx-integration`
-- **Commit:** `d711fb1`
+- **Commit:** `e11af59`
 - **Host:** native Windows workstation `ryne`, x86_64
 - **Checkout:** `D:\scripts\claude\local-llm-foundry`
 
@@ -18,6 +18,12 @@
   auth tokens, database/WAL files, certificates, settings, and model metadata.
 - Legacy-only disposable startup remained alive for the probe interval,
   preserved the legacy sentinel, and did not create a canonical root.
+- Disposable migration API qualification passed status, preview, authenticated
+  queueing, copy-first restart execution, receipt creation, request cleanup,
+  and legacy-root retention using `--migration-test-root`.
+- Disposable rollback qualification passed rollback preview, authenticated
+  rollback queueing, restart cleanup of the canonical root, legacy-root
+  retention, and sentinel preservation.
 
 All disposable roots were created below the Windows temporary directory and
 were not connected to the user's real profile or model inventory.
@@ -32,7 +38,7 @@ remains a separate CI/Linux gate.
 
 ## Still open
 
-- Interrupted migration resume/rollback journal matrix.
+- Interrupted migration resume journal matrix.
 - Tray/WebView2 and sensor-bridge runtime receipts.
 - Updater replacement/checksum/archive extraction.
 - Remote-agent install/update/uninstall and mixed-version task cleanup.
