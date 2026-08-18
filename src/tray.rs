@@ -265,15 +265,6 @@ impl ApplicationHandler for TrayApp {
                 .is_some_and(|popover| popover.window.id() == id);
             if is_popover {
                 match event {
-                    WindowEvent::SurfaceResized(size) => {
-                        if let Some(popover) = self.popover.as_ref() {
-                            let scale = popover.window.scale_factor();
-                            self.resize_popover(
-                                f64::from(size.width) / scale,
-                                f64::from(size.height) / scale,
-                            );
-                        }
-                    }
                     WindowEvent::CloseRequested => {
                         self.close_popover();
                     }
@@ -529,15 +520,6 @@ impl TrayApp {
                 Ok(w) => std::sync::Arc::from(w),
                 Err(_) => return,
             };
-
-        // Keep native edge/corner resizing from shrinking the borderless
-        // popover below the compact layout's usable content bounds. The HTML
-        // clamp alone is insufficient because WebView2 can resize its host
-        // window directly without sending an IPC resize message.
-        #[cfg(not(target_os = "linux"))]
-        window.set_min_surface_size(Some(winit::dpi::Size::Logical(
-            winit::dpi::LogicalSize::new(POPOVER_MIN_WIDTH, POPOVER_INITIAL_HEIGHT),
-        )));
 
         #[cfg(not(target_os = "linux"))]
         let webview_builder = wry::WebViewBuilder::new()
