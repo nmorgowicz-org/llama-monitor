@@ -52,6 +52,31 @@ document.getElementById('compact-close').addEventListener('click', () => {
     window.close();
 });
 
+// Borderless Windows popovers do not have a native title bar. Let the
+// branded header drag the window while keeping the close control clickable.
+const compactHeader = document.querySelector('.header');
+let compactDragging = false;
+let compactLastPointer = null;
+compactHeader?.addEventListener('pointerdown', (event) => {
+    if (event.target.closest('#compact-close')) return;
+    compactDragging = true;
+    compactLastPointer = { x: event.clientX, y: event.clientY };
+    compactHeader.setPointerCapture?.(event.pointerId);
+});
+compactHeader?.addEventListener('pointermove', (event) => {
+    if (!compactDragging || !compactLastPointer || !window.ipc?.postMessage) return;
+    const dx = Math.round(event.clientX - compactLastPointer.x);
+    const dy = Math.round(event.clientY - compactLastPointer.y);
+    compactLastPointer = { x: event.clientX, y: event.clientY };
+    if (dx || dy) window.ipc.postMessage(JSON.stringify({ action: 'move', dx, dy }));
+});
+const stopCompactDrag = () => {
+    compactDragging = false;
+    compactLastPointer = null;
+};
+compactHeader?.addEventListener('pointerup', stopCompactDrag);
+compactHeader?.addEventListener('pointercancel', stopCompactDrag);
+
 const PORT = window.__COMPACT_PORT__;
 let ws = null;
 let reconnectTimer = null;

@@ -68,6 +68,8 @@ use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalPosition;
 #[cfg(feature = "webview-popover")]
 use winit::dpi::PhysicalSize;
+#[cfg(feature = "webview-popover")]
+use winit::dpi::Position;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::WindowId;
@@ -234,6 +236,7 @@ struct Popover {
 #[serde(tag = "action", rename_all = "snake_case")]
 enum PopoverMessage {
     Resize { width: f64, height: f64 },
+    Move { dx: i32, dy: i32 },
     Close,
 }
 
@@ -388,6 +391,18 @@ impl ApplicationHandler for TrayApp {
                 match message {
                     PopoverMessage::Resize { width, height } => {
                         latest = Some((width, height));
+                    }
+                    PopoverMessage::Move { dx, dy } => {
+                        if let Some(popover) = self.popover.as_ref()
+                            && let Ok(position) = popover.window.outer_position()
+                        {
+                            popover.window.set_outer_position(Position::Physical(
+                                PhysicalPosition::new(
+                                    position.x.saturating_add(dx),
+                                    position.y.saturating_add(dy),
+                                ),
+                            ));
+                        }
                     }
                     PopoverMessage::Close => close_requested = true,
                 }
@@ -917,6 +932,7 @@ mod tests {
                 assert_eq!(width, 240.0);
                 assert_eq!(height, 180.0);
             }
+            PopoverMessage::Move { .. } => panic!("expected resize message"),
             PopoverMessage::Close => panic!("expected resize message"),
         }
     }
