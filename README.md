@@ -12,7 +12,7 @@ One dashboard for local AI models on macOS, Linux, and Windows. Performance metr
 
 ## Getting started
 
-Run Llama Monitor and open it in your browser:
+Run Local LLM Foundry and open it in your browser:
 
 ```bash
 ./local-llm-foundry
@@ -23,7 +23,7 @@ If you’re unsure whether your setup looks healthy, look for green status indic
 
 Quick start:
 
-- Open Llama Monitor and connect to a running server.
+- Open Local LLM Foundry and connect to a running server.
 - Or use the Setup wizard to pick a model, tune settings, and start a server.
 - Use the dashboard to check speed, active sessions, and resource usage.
 - Start a new conversation from the chat workspace when ready.
@@ -32,10 +32,10 @@ Quick start:
 
 ### Rapid-MLX Backend (Apple Silicon)
 
-Rapid-MLX is now a first-class inference backend for Apple Silicon. Llama Monitor manages its runtime in an isolated environment—no manual Python setup required.
+Rapid-MLX is now a first-class inference backend for Apple Silicon. Local LLM Foundry manages its runtime in an isolated environment—no manual Python setup required.
 
 - Engine selection: choose llama.cpp or Rapid-MLX in the Setup wizard; the wizard recommends Rapid-MLX when using MLX-native models.
-- Managed runtime: Llama Monitor installs, updates, repairs, and rolls back the Rapid-MLX runtime automatically.
+- Managed runtime: Local LLM Foundry installs, updates, repairs, and rolls back the Rapid-MLX runtime automatically.
 - Live telemetry: the dashboard surfaces Rapid-MLX-specific metrics (throughput, context, model info) alongside llama.cpp, with the same UX.
 
 ![Rapid-MLX dashboard](docs/screenshots/dashboard-rapid-mlx--rapidmlx-local--dark.png)
@@ -146,7 +146,7 @@ cargo build --release
 
 ## Updating
 
-Llama Monitor includes in-app updates via the dashboard (Settings or header update prompt). No manual download is required.
+Local LLM Foundry includes in-app updates via the dashboard (Settings or header update prompt). No manual download is required.
 
 - On Windows, the update is seamless: the app restarts automatically with the new version.
 - On macOS (Apple Silicon) and Linux, the app briefly shuts down and restarts; if it does not restart on its own, relaunch once.
