@@ -64,11 +64,11 @@ fn try_install_webview2() {
 use tray_icon::TrayIconEvent;
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 use winit::application::ApplicationHandler;
-#[cfg(feature = "webview-popover")]
+#[cfg(all(not(target_os = "linux"), feature = "webview-popover"))]
 use winit::dpi::PhysicalPosition;
 #[cfg(feature = "webview-popover")]
 use winit::dpi::PhysicalSize;
-#[cfg(feature = "webview-popover")]
+#[cfg(all(not(target_os = "linux"), feature = "webview-popover"))]
 use winit::dpi::Position;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -397,7 +397,9 @@ impl ApplicationHandler for TrayApp {
                     PopoverMessage::Resize { width, height } => {
                         latest = Some((width, height));
                     }
-                    PopoverMessage::Drag => {
+                    PopoverMessage::Drag =>
+                    {
+                        #[cfg(not(target_os = "linux"))]
                         if let Some(popover) = self.popover.as_ref() {
                             let _ = popover.window.drag_window();
                         }
