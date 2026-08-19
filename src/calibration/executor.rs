@@ -3029,7 +3029,10 @@ mod tests {
             RESUME_CONFIRMATION,
         )
         .expect("resume accepted");
-        for _ in 0..250 {
+        // Other calibration lifecycle tests may run concurrently and share the
+        // executor gate. Allow a bounded but realistic window for the resumed
+        // job to acquire the gate and finish its fake runtime trial.
+        for _ in 0..1200 {
             if get(&config, "resume-job")
                 .expect("get resumed job")
                 .is_some_and(|snapshot| snapshot.state == CalibrationJobState::Complete)
