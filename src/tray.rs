@@ -64,7 +64,7 @@ fn try_install_webview2() {
 use tray_icon::TrayIconEvent;
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 use winit::application::ApplicationHandler;
-#[cfg(all(not(target_os = "linux"), feature = "webview-popover"))]
+#[cfg(feature = "webview-popover")]
 use winit::dpi::PhysicalPosition;
 #[cfg(feature = "webview-popover")]
 use winit::dpi::PhysicalSize;
