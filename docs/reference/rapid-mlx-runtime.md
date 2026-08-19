@@ -8,7 +8,7 @@ discoverable through the 2.x migration window.
 > backend with a managed runtime, backend-neutral spawn wizard, live telemetry cards,
 > VRAM estimator, and per-backend presets.
 
-Llama Monitor treats Rapid-MLX as a first-class inference engine while keeping its
+Local LLM Foundry treats Rapid-MLX as a first-class inference engine while keeping its
 managed runtime isolated from the user's Python tooling. Local Rapid-MLX launch and
 managed runtime changes are supported only on Apple Silicon macOS. Remote attachment
 remains backend-aware on other platforms.

@@ -8,11 +8,11 @@ Get your first local AI model up and running with Local LLM Foundry.
 
 ## 1. Launch Local LLM Foundry
 
-Open Llama Monitor. By default it listens at:
+Open Local LLM Foundry. By default it listens at:
 
 - http://127.0.0.1:7778
 
-On first launch, Llama Monitor auto-generates an API token and stores it in
+On first launch, Local LLM Foundry auto-generates an API token and stores it in
 `~/.config/llama-monitor`. All API endpoints (including local ones) require this token
 via the `Authorization: Bearer <token>` header. The token is shown in Settings and is
 used internally by the UI.
@@ -119,7 +119,7 @@ Click the chip to cycle modes, or use it when you want the server running but ne
     is not recommended.
 - GPU / backend setup:
   - macOS on Apple Silicon:
-    - Rapid-MLX: automatic (Metal); managed runtime handled by Llama Monitor.
+  - Rapid-MLX: automatic (Metal); managed runtime handled by Local LLM Foundry.
     - llama.cpp: Metal is automatic.
   - Linux with NVIDIA GPU: install the matching CUDA runtime and select the
     CUDA backend when installing llama.cpp.
