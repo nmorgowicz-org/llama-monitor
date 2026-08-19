@@ -403,6 +403,7 @@ impl ApplicationHandler for TrayApp {
                         }
                     }
                     PopoverMessage::Move { dx, dy } => {
+                        #[cfg(not(target_os = "linux"))]
                         if let Some(popover) = self.popover.as_ref()
                             && let Ok(position) = popover.window.outer_position()
                         {
@@ -413,6 +414,8 @@ impl ApplicationHandler for TrayApp {
                                 ),
                             ));
                         }
+                        #[cfg(target_os = "linux")]
+                        let _ = (dx, dy);
                     }
                     PopoverMessage::Close => close_requested = true,
                 }
