@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "benchmark": {
+    "name": "Rapid Qwen text PFlash int8 control",
+    "purpose": "Matched source-retrieval control; one fresh server configuration per manifest."
+  },
+  "runtime": {
+    "backend": "rapid-mlx",
+    "version": "0.10.17",
+    "base_url": "http://127.0.0.1:18086",
+    "health_path": "/health",
+    "metrics_path": "/metrics",
+    "fresh_server_per_cell": true,
+    "exact_argv": ["rapid-mlx", "--no-telemetry", "serve", "<model>", "--max-num-seqs", "1", "--max-concurrent-requests", "1", "--disable-prefix-cache", "--pflash", "auto", "--pflash-threshold", "32768", "--prefill-step-size", "150000", "--max-tokens", "64", "--kv-cache-dtype", "int8", "--kv-cache-turboquant", "none", "--no-mllm", "--gpu-memory-utilization", "0.75"]
+  },
+  "hardware": {
+    "cpu": "Apple M5 Max",
+    "unified_memory_bytes": 68719476736
+  },
+  "model": {
+    "hf_repo_id": "nightmedia/Qwen3.6-35B-A3B-Fable-Holo3.1-mxfp4-mlx",
+    "revision": "16279aa65cee814c6b23e068a71eec7e1617fae0",
+    "config_sha256": "7a51dff046fe60fb82428666efcc9bc63b835a2d7edab25d7c410ab40ad8bd30"
+  },
+  "cells": [{
+    "id": "context-65k-retrieval",
+    "model": "nightmedia/Qwen3.6-35B-A3B-Fable-Holo3.1-mxfp4-mlx",
+    "configuration": {
+      "kv_cache_dtype_requested": "int8",
+      "turboquant_requested": "none",
+      "prefix_cache": "disabled",
+      "pflash": "auto",
+      "concurrency": 1,
+      "expected_metrics": {
+        "rapid_mlx_kv_cache_dtype{dtype=\"int8\"}": 1,
+        "rapid_mlx_turboquant_mode{mode=\"disabled\"}": 1
+      }
+    },
+    "sequence": ["cold"],
+    "workload": {
+      "corpus": "code",
+      "target_words": 25000,
+      "max_tokens": 64,
+      "instruction": "In the supplied TypeScript source, return only the exact string assigned to RAPID_CONTEXT_VALIDATION.exact_value.",
+      "needle": {
+        "position": 0.5,
+        "text": "VERIFICATION-PHRASE-COPPER-8291"
+      }
+    }
+  }]
+}

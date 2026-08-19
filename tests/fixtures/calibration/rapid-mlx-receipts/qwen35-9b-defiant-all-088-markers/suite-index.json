@@ -1,0 +1,98 @@
+{
+  "model": "nightmedia/Qwen3.5-9B-DS9-USS-Defiant-1M-q8-hi-mlx",
+  "suite": "all",
+  "receipts": [
+    {
+      "label": "00-smoke-8k-int8",
+      "receipt": "00-00-smoke-8k-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "01-context-8000-int8",
+      "receipt": "01-01-context-8000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "02-context-16000-int8",
+      "receipt": "02-02-context-16000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "03-context-32000-int8",
+      "receipt": "03-03-context-32000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "04-context-131072-int8",
+      "receipt": "04-04-context-131072-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "05-context-8000-int4",
+      "receipt": "05-05-context-8000-int4.json",
+      "manifest": null
+    },
+    {
+      "label": "06-context-16000-int4",
+      "receipt": "06-06-context-16000-int4.json",
+      "manifest": null
+    },
+    {
+      "label": "07-context-32000-int4",
+      "receipt": "07-07-context-32000-int4.json",
+      "manifest": null
+    },
+    {
+      "label": "08-context-131072-int4",
+      "receipt": "08-08-context-131072-int4.json",
+      "manifest": null
+    },
+    {
+      "label": "09-pflash-65536-int4",
+      "receipt": "09-09-pflash-65536-int4.json",
+      "manifest": null
+    },
+    {
+      "label": "10-pflash-131072-int4",
+      "receipt": "10-10-pflash-131072-int4.json",
+      "manifest": null
+    },
+    {
+      "label": "11-pflash-196608-int4",
+      "receipt": "11-11-pflash-196608-int4.json",
+      "manifest": null
+    },
+    {
+      "label": "12-cache-8k-none",
+      "receipt": "12-12-cache-8k-none.json",
+      "manifest": null
+    },
+    {
+      "label": "13-cache-8k-k8v4",
+      "receipt": "13-13-cache-8k-k8v4.json",
+      "manifest": null
+    },
+    {
+      "label": "14-tools-sequential-8k-int8-required",
+      "receipt": "14-14-tools-sequential-8k-int8-required.json",
+      "manifest": null
+    },
+    {
+      "label": "15-tools-sequential-8k-int8-auto",
+      "receipt": "15-15-tools-sequential-8k-int8-auto.json",
+      "manifest": null
+    },
+    {
+      "label": "16-tools-sequential-8k-int4-required",
+      "receipt": "16-16-tools-sequential-8k-int4-required.json",
+      "manifest": null
+    },
+    {
+      "label": "17-tools-sequential-8k-int4-auto",
+      "receipt": "17-17-tools-sequential-8k-int4-auto.json",
+      "manifest": null
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

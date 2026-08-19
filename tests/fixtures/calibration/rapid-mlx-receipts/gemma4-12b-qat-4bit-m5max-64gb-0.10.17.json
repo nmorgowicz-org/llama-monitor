@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "rapid_mlx_runtime_receipt",
+  "evidence_level": "provisional",
+  "runtime": {
+    "backend": "rapid-mlx",
+    "version": "0.10.17",
+    "host": "127.0.0.1",
+    "prefix_cache": "disabled",
+    "pflash": "off",
+    "kv_cache_dtype": "int4"
+  },
+  "hardware": {
+    "cpu": "Apple M5 Max",
+    "unified_memory_bytes": 68719476736,
+    "measurement_limitations": [
+      "This is a functional VLM smoke test, not a D28 calibrated context or performance envelope.",
+      "The default int4 KV setting was used only to prove image acceptance; it is not an agentic-tool fidelity recommendation."
+    ]
+  },
+  "model": {
+    "hf_repo_id": "mlx-community/gemma-4-12B-it-qat-4bit",
+    "revision": "e70c6b3ba0979b3357dcd2f223ad8bde7787a6b6",
+    "config_sha256": "fe091f98e6f7e5e80461bd8ec7ced6d87ac16987586239386ed44b82ecbc2b12",
+    "family": "Gemma 4 12B QAT",
+    "published_artifact_bytes": 11020140534
+  },
+  "procedure": {
+    "arguments": [
+      "--host 127.0.0.1",
+      "--port 18081",
+      "--disable-prefix-cache",
+      "--pflash off",
+      "--max-tokens 128",
+      "--kv-cache-dtype int4"
+    ],
+    "request": {
+      "endpoint": "/v1/chat/completions",
+      "temperature": 0,
+      "max_tokens": 80,
+      "input": "OpenAI image_url data URI containing docs/screenshots/artifacts/preset-editor-model-tab.png"
+    }
+  },
+  "observations": [
+    {
+      "id": "automatic-vlm-routing",
+      "server_started": true,
+      "runtime_log": "Loading MLLM; Native M-RoPE; MLLM scheduler initialized",
+      "models_endpoint": {
+        "modality": "image",
+        "capabilities": ["text", "vision", "tools"],
+        "context_window": 262144
+      },
+      "interpretation": "Unlike the tested hybrid Qwen 3.5/3.6 revisions, Rapid 0.10.17 automatically loaded the complete native multimodal lane."
+    },
+    {
+      "id": "real-ui-screenshot-image-request",
+      "request_succeeded": true,
+      "completion": "The image shows a software interface for a Model Path configuration...",
+      "usage": {"prompt_tokens": 297, "completion_tokens": 48, "total_tokens": 345},
+      "interpretation": "Rapid accepted and interpreted a real local application screenshot. This is functional VLM evidence, not merely repository metadata or a claimed API capability."
+    }
+  ],
+  "next_measurements_required": [
+    "Repeat with a minimal synthetic image and a representative UI-analysis task at controlled 8k and 32k text contexts.",
+    "Measure active and retained memory, TTFT, decode throughput, and estimator residuals.",
+    "Test tool-call fidelity separately at int8 and int4; this VLM smoke test does not validate agentic KV precision."
+  ]
+}

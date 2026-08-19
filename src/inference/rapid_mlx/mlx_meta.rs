@@ -1,0 +1,2055 @@
+//! MLX / Rapid-MLX model metadata reader.
+//!
+//! This module parses MLX model configs and safetensors indexes into a backend-neutral
+//! [`ModelMemoryProfile`] with field-level evidence. It supports:
+//!
+//! - Nested `text_config` configs (Qwen3.6, Gemma4, etc.) — geometry from inner config only
+//! - Flat configs (Qwen3, etc.) — geometry from top-level fields
+//! - Wrapper-field protection — outer wrapper fields don't override inner text geometry
+//! - Field-level evidence for every populated value
+//!
+//! Per D1/D2/A53: this parser populates the shared geometry profile; it does not contain
+//! backend-specific allocation math or llama.cpp vocabulary.
+//!
+//! A directory without a readable config.json degrades to the safetensors index rather
+//! than failing: see [`degraded_profile_from_safetensors`]. Every field it produces is
+//! labelled heuristic, and the reason config.json was unusable is recorded in
+//! `warnings.missing_critical_fields`.
+
+use std::path::Path;
+
+use crate::llama::model_memory_profile::*;
+
+pub const MAX_CONFIG_BYTES: u64 = 8 * 1024 * 1024;
+pub const MAX_INDEX_BYTES: u64 = 64 * 1024 * 1024;
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct MlxQuantization {
+    pub bits: Option<u32>,
+    pub group_size: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct MlxDraftConfig {
+    pub model: Option<String>,
+    pub num_hidden_layers: Option<u32>,
+}
+
+/// Raw HF-transformers-style `config.json`.
+/// Every field is optional — missing fields degrade evidence, never silently guess.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct MlxConfig {
+    pub model_type: Option<String>,
+    #[serde(default)]
+    pub architectures: Option<Vec<String>>,
+    pub hidden_size: Option<u32>,
+    #[serde(alias = "num_hidden_layers")]
+    pub num_layers: Option<u32>,
+    pub num_attention_heads: Option<u32>,
+    #[serde(alias = "num_kv_heads")]
+    pub num_key_value_heads: Option<u32>,
+    #[serde(alias = "intermediate_size")]
+    pub n_ff: Option<u32>,
+    pub head_dim: Option<u32>,
+    #[serde(alias = "num_local_experts", alias = "n_routed_experts")]
+    pub num_experts: Option<u32>,
+    #[serde(alias = "num_experts_per_token", alias = "n_experts_used")]
+    pub num_experts_per_tok: Option<u32>,
+    pub sliding_window: Option<u32>,
+    pub sliding_window_pattern: Option<u32>,
+    pub max_position_embeddings: Option<u32>,
+    pub quantization: Option<MlxQuantization>,
+    pub draft_model: Option<MlxDraftConfig>,
+    pub speculative_config: Option<MlxDraftConfig>,
+    pub vision_config: Option<serde_json::Value>,
+    /// Nested text architecture config (Qwen3.6, Gemma4, etc.).
+    #[serde(default)]
+    pub text_config: Option<serde_json::Value>,
+    /// Full attention interval for hybrid architectures.
+    #[serde(default)]
+    pub full_attention_interval: Option<u32>,
+    /// Layer types array from config.
+    #[serde(default)]
+    pub layer_types: Option<Vec<String>>,
+    /// MoE intermediate size.
+    #[serde(default)]
+    pub moe_intermediate_size: Option<u32>,
+    /// Shared expert intermediate size.
+    #[serde(default)]
+    pub shared_expert_intermediate_size: Option<u32>,
+    /// Top-K experts for Gemma4-style models.
+    #[serde(default)]
+    pub top_k_experts: Option<u32>,
+    /// Num global KV heads (Gemma4).
+    #[serde(default)]
+    pub num_global_key_value_heads: Option<u32>,
+    /// Global head dim (Gemma4).
+    #[serde(default)]
+    pub global_head_dim: Option<u32>,
+    /// MTP layers.
+    #[serde(default)]
+    pub mtp_num_hidden_layers: Option<u32>,
+    #[serde(default)]
+    pub mtp_use_dedicated_embeddings: Option<bool>,
+    /// Linear/SSM dimensions.
+    #[serde(default)]
+    pub linear_conv_kernel_dim: Option<u32>,
+    #[serde(default)]
+    pub linear_key_head_dim: Option<u32>,
+    #[serde(default)]
+    pub linear_num_key_heads: Option<u32>,
+    #[serde(default)]
+    pub linear_num_value_heads: Option<u32>,
+    #[serde(default)]
+    pub linear_value_head_dim: Option<u32>,
+    #[serde(default)]
+    pub mamba_ssm_dtype: Option<String>,
+    /// Vocab size.
+    #[serde(default)]
+    pub vocab_size: Option<u32>,
+    /// RMS norm epsilon.
+    #[serde(default)]
+    pub rms_norm_eps: Option<f64>,
+    /// Reference to a separate text_config file (for recursive resolution).
+    #[serde(default, rename = "text_config_ref")]
+    pub text_config_ref: Option<String>,
+    /// Inner config resolved from text_config_ref (populated by HF fetcher).
+    #[serde(skip)]
+    pub text_config_inner: Option<Box<MlxConfig>>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MlxWeightIndex {
+    pub shard_files: Vec<String>,
+    pub total_size_bytes: Option<u64>,
+}
+
+fn bounded_read(path: &Path, max_bytes: u64) -> Result<Vec<u8>, String> {
+    let meta = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    if meta.len() > max_bytes {
+        return Err(format!(
+            "{} exceeds the {max_bytes}-byte read cap ({} bytes)",
+            path.display(),
+            meta.len()
+        ));
+    }
+    std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+pub fn parse_mlx_config(bytes: &[u8]) -> Result<MlxConfig, String> {
+    if bytes.len() as u64 > MAX_CONFIG_BYTES {
+        return Err(format!(
+            "config.json exceeds the {MAX_CONFIG_BYTES}-byte read cap"
+        ));
+    }
+    serde_json::from_slice(bytes).map_err(|e| format!("config.json is not valid JSON: {e}"))
+}
+
+pub fn read_mlx_weight_index(dir: &Path) -> Result<MlxWeightIndex, String> {
+    let index_path = dir.join("model.safetensors.index.json");
+    let bytes = bounded_read(&index_path, MAX_INDEX_BYTES)?;
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|e| format!("safetensors index: {e}"))?;
+
+    let weight_map = value
+        .get("weight_map")
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| "safetensors index requires a weight_map object".to_string())?;
+
+    let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for v in weight_map.values() {
+        let Some(name) = v.as_str() else {
+            return Err("safetensors index contains a non-string shard".into());
+        };
+        let relative = Path::new(name);
+        if relative.is_absolute()
+            || relative
+                .components()
+                .any(|part| matches!(part, std::path::Component::ParentDir))
+            || !name.ends_with(".safetensors")
+        {
+            return Err(format!(
+                "safetensors index contains an unsafe shard path: {name}"
+            ));
+        }
+        names.insert(name.to_string());
+    }
+
+    let total_size_bytes = value
+        .get("metadata")
+        .and_then(|m| m.get("total_size"))
+        .and_then(|t| t.as_u64());
+
+    Ok(MlxWeightIndex {
+        shard_files: names.into_iter().collect(),
+        total_size_bytes,
+    })
+}
+
+pub fn resolve_local_weight_bytes(dir: &Path, index: &MlxWeightIndex) -> Option<u64> {
+    if let Some(total) = index.total_size_bytes {
+        return Some(total);
+    }
+    if index.shard_files.is_empty() {
+        return None;
+    }
+    let mut total = 0u64;
+    for name in &index.shard_files {
+        let meta = std::fs::metadata(dir.join(name)).ok()?;
+        total = total.saturating_add(meta.len());
+    }
+    Some(total)
+}
+
+// ── ModelMemoryProfile parsing ───────────────────────────────────────────────────
+
+/// Parse an MLX config.json from a file into a normalized [`ModelMemoryProfile`].
+///
+/// This is the primary entry point for Part A/B/C: it reads config.json, handles nested
+/// text_config, applies wrapper-field protection, and populates the geometry profile with
+/// field-level evidence.
+pub fn parse_mlx_config_to_profile(config_path: &Path) -> Result<ModelMemoryProfile, String> {
+    let bytes = bounded_read(config_path, MAX_CONFIG_BYTES)?;
+    parse_mlx_config_bytes_to_profile(&bytes)
+}
+
+/// Read a local MLX directory through the normalized geometry path used by
+/// Rapid estimates. GGUF metadata deliberately has no dependency on this.
+pub fn read_mlx_model_profile(dir: &Path) -> Result<ModelMemoryProfile, String> {
+    let mut profile = match parse_mlx_config_to_profile(&dir.join("config.json")) {
+        Ok(profile) => profile,
+        // config.json is the only exact source of geometry, but a directory can
+        // arrive without one — an interrupted download, a hand-assembled MLX
+        // conversion, a checkpoint whose config lives one level up. Refusing
+        // outright would leave the estimator with nothing but the filename, so
+        // fall through to the safetensors index and label every field heuristic.
+        Err(config_error) => degraded_profile_from_safetensors(dir, &config_error)?,
+    };
+    // config.json is not the last word on a vision tower: some checkpoints ship
+    // one without naming it. The index is only available once the model is on
+    // disk, which is why this lives here and not in the bytes-only parser.
+    if profile.vision.is_none()
+        && let Some(marker) = local_vision_tensor_marker(dir)
+    {
+        profile.vision = Some(VisionComponent {
+            has_vision_tensors: true,
+            field_evidence: format!("model.safetensors.index.json:{marker}"),
+            ..Default::default()
+        });
+    }
+    Ok(profile)
+}
+
+/// Build a degraded profile from the safetensors index alone, for a directory whose
+/// config.json is missing or unreadable.
+///
+/// Every field this produces is labelled heuristic by
+/// [`infer_weight_components_from_safetensors`], and the reason config.json was
+/// unusable is recorded in `warnings.missing_critical_fields` so a caller can tell
+/// a user why the estimate is approximate rather than measured. Never returns a
+/// profile that claims exact evidence.
+fn degraded_profile_from_safetensors(
+    dir: &Path,
+    config_error: &str,
+) -> Result<ModelMemoryProfile, String> {
+    let index = parse_safetensors_index(&dir.join("model.safetensors.index.json")).map_err(
+        |index_error| {
+            format!("{config_error}; the safetensors index cannot stand in for it: {index_error}")
+        },
+    )?;
+
+    let weights = infer_weight_components_from_safetensors(&index);
+    // No layer count means the index named no `model.layers.N` tensors, so there is
+    // no geometry to degrade to. Say that instead of returning an empty profile that
+    // downstream code would read as a successful parse.
+    if weights.n_layers.value == 0 {
+        return Err(format!(
+            "{config_error}; the safetensors index names no model.layers.N tensors, \
+             so no layer count could be inferred either"
+        ));
+    }
+
+    let mut profile = ModelMemoryProfile {
+        weights,
+        ..Default::default()
+    };
+    profile.warnings.missing_critical_fields.push(ParseWarning {
+        field: "config.json".into(),
+        message: format!(
+            "{config_error}. Geometry was inferred from the safetensors index instead; \
+             layer count is heuristic and hidden size, head counts, and vocabulary are unknown."
+        ),
+        outer_value: None,
+        inner_value: None,
+    });
+    Ok(profile)
+}
+
+/// Resolve a vision verdict for a local model directory from its own artifacts.
+///
+/// Thin wrapper over [`crate::model_vision::resolve_from_artifacts`] that supplies
+/// the two on-disk artifacts. `None` means the artifacts did not settle it — a
+/// single-shard model has no index, and no index means an absence cannot be
+/// confirmed. Callers that report vision to a user should say which of the three
+/// answers they got rather than collapsing `None` into "no".
+pub fn read_local_vision_evidence(dir: &Path) -> Option<crate::model_vision::VisionEvidence> {
+    let config = bounded_read(&dir.join("config.json"), MAX_CONFIG_BYTES)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    let index = bounded_read(&dir.join("model.safetensors.index.json"), MAX_INDEX_BYTES)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    crate::model_vision::resolve_from_artifacts(config.as_ref(), index.as_ref())
+}
+
+/// The vision tensor marker in a local safetensors index, if the index is
+/// readable and carries one. A single-shard model has no index; that is not
+/// evidence of absence, so it simply yields `None`.
+fn local_vision_tensor_marker(dir: &Path) -> Option<&'static str> {
+    let bytes = bounded_read(&dir.join("model.safetensors.index.json"), MAX_INDEX_BYTES).ok()?;
+    let index: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    crate::model_vision::vision_tensor_marker(&index)
+}
+
+/// Parse MLX config bytes into a normalized [`ModelMemoryProfile`].
+pub fn parse_mlx_config_bytes_to_profile(bytes: &[u8]) -> Result<ModelMemoryProfile, String> {
+    let raw: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(|e| format!("config.json is not valid JSON: {e}"))?;
+
+    let mut profile = ModelMemoryProfile::default();
+
+    // Determine if nested text_config exists and extract geometry from it.
+    let text_config_value = raw.get("text_config").cloned();
+    let _has_text_config = text_config_value.is_some();
+
+    if let Some(tc) = text_config_value {
+        // Extract geometry from nested text_config (authoritative for inner architecture).
+        profile.used_text_config = Some(true);
+        extract_from_text_config(&mut profile, &tc);
+
+        // Check for wrapper-field conflicts and document them as warnings.
+        check_wrapper_field_conflicts(&mut profile, &raw);
+    } else {
+        // Flat config: geometry from top-level fields.
+        profile.used_text_config = Some(false);
+        extract_from_flat_config(&mut profile, &raw);
+    }
+
+    // Extract model type / architectures from wrapper (metadata, not geometry).
+    extract_model_identity(&mut profile, &raw);
+
+    // Extract vision component.
+    extract_vision_component(&mut profile, &raw);
+
+    // Extract draft/MTP config.
+    extract_draft_config(&mut profile, &raw);
+
+    Ok(profile)
+}
+
+fn extract_from_text_config(profile: &mut ModelMemoryProfile, tc: &serde_json::Value) {
+    let prefix = "text_config";
+
+    // Model type (from text_config).
+    if let Some(mt) = tc.get("model_type").and_then(|v| v.as_str()) {
+        profile.model_type = Some(mt.to_string());
+        profile.model_type_evidence = Some(format!("{prefix}.model_type"));
+    }
+
+    // Hidden size.
+    if let Some(v) = tc.get("hidden_size").and_then(|v| v.as_u64()) {
+        profile.weights.n_embd.value = v as u32;
+        profile.weights.n_embd.field_evidence = format!("{prefix}.hidden_size");
+    }
+
+    // Num layers.
+    if let Some(v) = tc.get("num_hidden_layers").and_then(|v| v.as_u64()) {
+        profile.weights.n_layers.value = v as u32;
+        profile.weights.n_layers.field_evidence = format!("{prefix}.num_hidden_layers");
+    }
+
+    // Num attention heads.
+    if let Some(v) = tc.get("num_attention_heads").and_then(|v| v.as_u64()) {
+        profile.weights.n_head.value = v as u32;
+        profile.weights.n_head.field_evidence = format!("{prefix}.num_attention_heads");
+    }
+
+    // Num KV heads.
+    if let Some(v) = tc.get("num_key_value_heads").and_then(|v| v.as_u64()) {
+        profile.weights.n_head_kv.value = v as u32;
+        profile.weights.n_head_kv.field_evidence = format!("{prefix}.num_key_value_heads");
+    }
+
+    // Intermediate size.
+    if let Some(v) = tc.get("intermediate_size").and_then(|v| v.as_u64()) {
+        profile.weights.n_ff.value = v as u32;
+        profile.weights.n_ff.field_evidence = format!("{prefix}.intermediate_size");
+    }
+
+    // Head dim.
+    if let Some(v) = tc.get("head_dim").and_then(|v| v.as_u64()) {
+        profile.weights.head_dim.value = v as u32;
+        profile.weights.head_dim.field_evidence = format!("{prefix}.head_dim");
+    }
+
+    // Vocab size.
+    if let Some(v) = tc.get("vocab_size").and_then(|v| v.as_u64()) {
+        profile.weights.vocab_size.value = v as u32;
+        profile.weights.vocab_size.field_evidence = format!("{prefix}.vocab_size");
+    }
+
+    // RMS norm eps.
+    if let Some(v) = tc.get("rms_norm_eps").and_then(|v| v.as_f64()) {
+        profile.weights.rms_norm_eps.value = v;
+        profile.weights.rms_norm_eps.field_evidence = format!("{prefix}.rms_norm_eps");
+    }
+
+    // Context ceiling: max_position_embeddings (primary) or model_max_length (fallback).
+    // Per gap 3.5: "max_position_embeddings is parsed but not enforced in recommendations"
+    // — this ensures model_context_limit is set for all fixtures providing the field.
+    if let Some(v) = tc
+        .get("max_position_embeddings")
+        .or_else(|| tc.get("model_max_length"))
+        .and_then(|v| v.as_u64())
+        && v > 0
+    {
+        profile.weights.max_position_embeddings.value = v as u32;
+        profile.weights.max_position_embeddings.field_evidence =
+            if tc.get("max_position_embeddings").is_some() {
+                format!("{prefix}.max_position_embeddings")
+            } else {
+                format!("{prefix}.model_max_length")
+            };
+        profile.model_context_limit = Some(v as u32);
+    }
+
+    // Full attention interval.
+    if let Some(v) = tc.get("full_attention_interval").and_then(|v| v.as_u64()) {
+        profile.full_attention_interval = Some(v as u32);
+        profile.full_attention_interval_evidence =
+            Some(format!("{prefix}.full_attention_interval"));
+    }
+
+    // Layer types.
+    if let Some(arr) = tc.get("layer_types").and_then(|v| v.as_array()) {
+        let types: Vec<String> = arr
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+        if !types.is_empty() {
+            profile.layer_types = Some(types.clone());
+            profile.layer_types_evidence = Some(format!("{prefix}.layer_types"));
+
+            // Build layer groups from layer_types.
+            build_layer_groups_from_types(profile, &types, tc);
+        }
+    }
+
+    // Sliding window.
+    if let Some(v) = tc.get("sliding_window").and_then(|v| v.as_u64()) {
+        profile.sliding_window = Some(v as u32);
+        profile.sliding_window_evidence = Some(format!("{prefix}.sliding_window"));
+    }
+
+    // MoE fields.
+    if let Some(v) = tc.get("num_experts").and_then(|v| v.as_u64())
+        && v > 0
+    {
+        profile.experts = Some(ExpertTopology {
+            n_experts: v as u32,
+            field_evidence: format!("{prefix}.num_experts"),
+            ..Default::default()
+        });
+    }
+    if let Some(top_k) = tc.get("num_experts_per_tok").and_then(|v| v.as_u64())
+        && let Some(ref mut experts) = profile.experts
+    {
+        experts.top_k = Some(top_k as u32);
+        experts.top_k_evidence = Some(format!("{prefix}.num_experts_per_tok"));
+    }
+    if let Some(top_k) = tc.get("top_k_experts").and_then(|v| v.as_u64())
+        && let Some(ref mut experts) = profile.experts
+    {
+        experts.top_k = Some(top_k as u32);
+        experts.top_k_evidence = Some(format!("{prefix}.top_k_experts"));
+    }
+    if let Some(v) = tc.get("moe_intermediate_size").and_then(|v| v.as_u64())
+        && let Some(ref mut experts) = profile.experts
+    {
+        experts.moe_intermediate_size = Some(v as u32);
+        experts.moe_intermediate_evidence = Some(format!("{prefix}.moe_intermediate_size"));
+    }
+    if let Some(v) = tc
+        .get("shared_expert_intermediate_size")
+        .and_then(|v| v.as_u64())
+        && let Some(ref mut experts) = profile.experts
+    {
+        experts.shared_expert_intermediate_size = Some(v as u32);
+        experts.shared_expert_intermediate_evidence =
+            Some(format!("{prefix}.shared_expert_intermediate_size"));
+    }
+
+    // Linear/recurrent state geometry (DeltaNet, SSM).
+    let mut rcg = RecurrentStateGeometry::default();
+    let mut has_rcg = false;
+    if let Some(v) = tc.get("linear_conv_kernel_dim").and_then(|v| v.as_u64()) {
+        rcg.linear_conv_kernel_dim = Some(v as u32);
+        rcg.linear_conv_kernel_dim_evidence = Some(format!("{prefix}.linear_conv_kernel_dim"));
+        has_rcg = true;
+    }
+    if let Some(v) = tc.get("linear_key_head_dim").and_then(|v| v.as_u64()) {
+        rcg.linear_key_head_dim = Some(v as u32);
+        rcg.linear_key_head_dim_evidence = Some(format!("{prefix}.linear_key_head_dim"));
+        has_rcg = true;
+    }
+    if let Some(v) = tc.get("linear_num_key_heads").and_then(|v| v.as_u64()) {
+        rcg.linear_num_key_heads = Some(v as u32);
+        rcg.linear_num_key_heads_evidence = Some(format!("{prefix}.linear_num_key_heads"));
+        has_rcg = true;
+    }
+    if let Some(v) = tc.get("linear_num_value_heads").and_then(|v| v.as_u64()) {
+        rcg.linear_num_value_heads = Some(v as u32);
+        rcg.linear_num_value_heads_evidence = Some(format!("{prefix}.linear_num_value_heads"));
+        has_rcg = true;
+    }
+    if let Some(v) = tc.get("linear_value_head_dim").and_then(|v| v.as_u64()) {
+        rcg.linear_value_head_dim = Some(v as u32);
+        rcg.linear_value_head_dim_evidence = Some(format!("{prefix}.linear_value_head_dim"));
+        has_rcg = true;
+    }
+    if let Some(v) = tc.get("mamba_ssm_dtype").and_then(|v| v.as_str()) {
+        rcg.mamba_ssm_dtype = Some(v.to_string());
+        rcg.mamba_ssm_dtype_evidence = Some(format!("{prefix}.mamba_ssm_dtype"));
+        has_rcg = true;
+    }
+    if has_rcg {
+        profile.recurrent_state = Some(rcg);
+    }
+
+    // Gemma4 global/local head geometry.
+    let mut glh = GlobalLocalHeadGeometry::default();
+    let mut has_glh = false;
+    if let Some(v) = tc
+        .get("num_global_key_value_heads")
+        .and_then(|v| v.as_u64())
+    {
+        glh.num_global_key_value_heads = Some(v as u32);
+        glh.num_global_kv_evidence = Some(format!("{prefix}.num_global_key_value_heads"));
+        has_glh = true;
+    }
+    if let Some(v) = tc.get("global_head_dim").and_then(|v| v.as_u64()) {
+        glh.global_head_dim = Some(v as u32);
+        glh.global_head_dim_evidence = Some(format!("{prefix}.global_head_dim"));
+        has_glh = true;
+    }
+
+    // Local KV heads: derived from standard num_key_value_heads minus global KV heads.
+    // Per Gemma4 architecture: total KV = global KV + local KV.
+    if let Some(global_kv) = glh.num_global_key_value_heads
+        && let Some(total_kv) = tc
+            .get("num_key_value_heads")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32)
+        && total_kv > global_kv
+    {
+        glh.num_local_key_value_heads = Some(total_kv - global_kv);
+        glh.num_local_kv_evidence = Some(format!(
+            "derived: text_config.num_key_value_heads ({total_kv}) - text_config.num_global_key_value_heads ({global_kv})"
+        ));
+    }
+
+    // Local head dim: standard head_dim (Gemma4 uses same head_dim for local attention).
+    if let Some(v) = tc.get("head_dim").and_then(|v| v.as_u64()) {
+        glh.local_head_dim = Some(v as u32);
+        glh.local_head_dim_evidence = Some(format!("{prefix}.head_dim"));
+    }
+
+    // Local attention window: from sliding_window config.
+    if let Some(v) = tc.get("sliding_window").and_then(|v| v.as_u64())
+        && v > 0
+    {
+        glh.local_attn_window_size = Some(v as u32);
+        glh.local_attn_window_evidence = Some(format!("{prefix}.sliding_window"));
+    }
+
+    if has_glh {
+        profile.global_local_heads = Some(glh);
+    }
+
+    // MTP fields.
+    if let Some(v) = tc.get("mtp_num_hidden_layers").and_then(|v| v.as_u64())
+        && v > 0
+    {
+        let ded = tc
+            .get("mtp_use_dedicated_embeddings")
+            .and_then(|v| v.as_bool());
+        let mtp = EmbeddedMtpComponent {
+            n_layers: v as u32,
+            field_evidence: format!("{prefix}.mtp_num_hidden_layers"),
+            use_dedicated_embeddings: ded,
+            use_dedicated_embeddings_evidence: ded
+                .map(|_| format!("{prefix}.mtp_use_dedicated_embeddings")),
+        };
+        profile.embedded_mtp = Some(mtp);
+    }
+
+    // Quantization (from wrapper, not text_config).
+}
+
+fn build_layer_groups_from_types(
+    profile: &mut ModelMemoryProfile,
+    types: &[String],
+    tc: &serde_json::Value,
+) {
+    // Count layers by type from the layer_types array.
+    let mut full_count = 0u32;
+    let mut local_count = 0u32;
+    let mut linear_count = 0u32;
+
+    for t in types {
+        match t.as_str() {
+            "full_attention" => full_count += 1,
+            "sliding_attention" | "local_attention" => local_count += 1,
+            "linear_attention" | "delta_net" | "ssm" | "linear" => linear_count += 1,
+            _ => {}
+        }
+    }
+
+    let kv_heads = tc
+        .get("num_key_value_heads")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+    let head_dim = tc
+        .get("head_dim")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+    let sliding_window = tc
+        .get("sliding_window")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+
+    // Full attention layers.
+    if full_count > 0 {
+        // For Gemma4: use global_kv_heads/global_head_dim for full attention.
+        let (gv, gd) = if let Some(ref glh) = profile.global_local_heads {
+            (glh.num_global_key_value_heads, glh.global_head_dim)
+        } else {
+            (None, None)
+        };
+        profile.layer_groups.push(LayerMemoryGroup {
+            kind: LayerGroupKind::FullAttention,
+            count: full_count,
+            field_evidence: "counted from text_config.layer_types".into(),
+            kv_heads: gv.or(kv_heads),
+            head_dim: gd.or(head_dim),
+            ..Default::default()
+        });
+    }
+
+    // Local/sliding attention layers.
+    if local_count > 0 {
+        profile.layer_groups.push(LayerMemoryGroup {
+            kind: LayerGroupKind::LocalAttention,
+            count: local_count,
+            field_evidence: "counted from text_config.layer_types".into(),
+            kv_heads,
+            head_dim,
+            sliding_window,
+            ..Default::default()
+        });
+    }
+
+    // Linear/recurrent layers.
+    if linear_count > 0 {
+        profile.layer_groups.push(LayerMemoryGroup {
+            kind: LayerGroupKind::LinearRecurrent,
+            count: linear_count,
+            field_evidence: "counted from text_config.layer_types".into(),
+            recurrent_state_bytes: profile.recurrent_state.as_ref().and({
+                // Part B will compute this properly; Part A just records presence.
+                None
+            }),
+            ..Default::default()
+        });
+    }
+}
+
+fn extract_from_flat_config(profile: &mut ModelMemoryProfile, raw: &serde_json::Value) {
+    // Flat config: geometry from top-level fields.
+
+    // Model type.
+    if let Some(mt) = raw.get("model_type").and_then(|v| v.as_str()) {
+        profile.model_type = Some(mt.to_string());
+        profile.model_type_evidence = Some("model_type".to_string());
+    }
+
+    // Hidden size.
+    if let Some(v) = raw.get("hidden_size").and_then(|v| v.as_u64()) {
+        profile.weights.n_embd.value = v as u32;
+        profile.weights.n_embd.field_evidence = "hidden_size".to_string();
+    }
+
+    // Num layers.
+    if let Some(v) = raw.get("num_hidden_layers").and_then(|v| v.as_u64()) {
+        profile.weights.n_layers.value = v as u32;
+        profile.weights.n_layers.field_evidence = "num_hidden_layers".to_string();
+    }
+
+    // Num attention heads.
+    if let Some(v) = raw.get("num_attention_heads").and_then(|v| v.as_u64()) {
+        profile.weights.n_head.value = v as u32;
+        profile.weights.n_head.field_evidence = "num_attention_heads".to_string();
+    }
+
+    // Num KV heads.
+    if let Some(v) = raw.get("num_key_value_heads").and_then(|v| v.as_u64()) {
+        profile.weights.n_head_kv.value = v as u32;
+        profile.weights.n_head_kv.field_evidence = "num_key_value_heads".to_string();
+    }
+
+    // Intermediate size.
+    if let Some(v) = raw.get("intermediate_size").and_then(|v| v.as_u64()) {
+        profile.weights.n_ff.value = v as u32;
+        profile.weights.n_ff.field_evidence = "intermediate_size".to_string();
+    }
+
+    // Head dim.
+    if let Some(v) = raw.get("head_dim").and_then(|v| v.as_u64()) {
+        profile.weights.head_dim.value = v as u32;
+        profile.weights.head_dim.field_evidence = "head_dim".to_string();
+    }
+
+    // Vocab size.
+    if let Some(v) = raw.get("vocab_size").and_then(|v| v.as_u64()) {
+        profile.weights.vocab_size.value = v as u32;
+        profile.weights.vocab_size.field_evidence = "vocab_size".to_string();
+    }
+
+    // RMS norm eps.
+    if let Some(v) = raw.get("rms_norm_eps").and_then(|v| v.as_f64()) {
+        profile.weights.rms_norm_eps.value = v;
+        profile.weights.rms_norm_eps.field_evidence = "rms_norm_eps".to_string();
+    }
+
+    // Context ceiling: max_position_embeddings (primary) or model_max_length (fallback).
+    if let Some(v) = raw
+        .get("max_position_embeddings")
+        .or_else(|| raw.get("model_max_length"))
+        .and_then(|v| v.as_u64())
+        && v > 0
+    {
+        profile.weights.max_position_embeddings.value = v as u32;
+        profile.weights.max_position_embeddings.field_evidence =
+            if raw.get("max_position_embeddings").is_some() {
+                "max_position_embeddings".to_string()
+            } else {
+                "model_max_length".to_string()
+            };
+        profile.model_context_limit = Some(v as u32);
+    }
+
+    // Sliding window.
+    if let Some(v) = raw.get("sliding_window").and_then(|v| v.as_u64()) {
+        profile.sliding_window = Some(v as u32);
+        profile.sliding_window_evidence = Some("sliding_window".to_string());
+    }
+
+    // Flat config: all layers are full attention by default.
+    if profile.weights.n_layers.value > 0 {
+        let kv_heads = raw
+            .get("num_key_value_heads")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+        let head_dim = raw
+            .get("head_dim")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+        profile.layer_groups.push(LayerMemoryGroup {
+            kind: LayerGroupKind::FullAttention,
+            count: profile.weights.n_layers.value,
+            field_evidence: "flat config: all layers full attention".into(),
+            kv_heads,
+            head_dim,
+            ..Default::default()
+        });
+    }
+
+    // MoE fields.
+    if let Some(v) = raw.get("num_experts").and_then(|v| v.as_u64())
+        && v > 0
+    {
+        profile.experts = Some(ExpertTopology {
+            n_experts: v as u32,
+            field_evidence: "num_experts".to_string(),
+            ..Default::default()
+        });
+    }
+    if let Some(v) = raw.get("num_experts_per_tok").and_then(|v| v.as_u64())
+        && let Some(ref mut experts) = profile.experts
+    {
+        experts.top_k = Some(v as u32);
+        experts.top_k_evidence = Some("num_experts_per_tok".to_string());
+    }
+}
+
+fn extract_model_identity(profile: &mut ModelMemoryProfile, raw: &serde_json::Value) {
+    // Model type (wrapper-level may differ from text_config).
+    if profile.model_type.is_none()
+        && let Some(mt) = raw.get("model_type").and_then(|v| v.as_str())
+    {
+        profile.model_type = Some(mt.to_string());
+        profile.model_type_evidence = Some("model_type".into());
+    }
+
+    // Architectures.
+    if let Some(arr) = raw.get("architectures").and_then(|v| v.as_array()) {
+        let archs: Vec<String> = arr
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+        if !archs.is_empty() {
+            profile.architectures = Some(archs);
+            profile.architectures_evidence = Some("architectures".into());
+        }
+    }
+}
+
+fn extract_vision_component(profile: &mut ModelMemoryProfile, raw: &serde_json::Value) {
+    // Any of the recognised config keys establishes a vision component, not just
+    // `vision_config`: older wrappers name `mm_vision_tower` instead, and this
+    // path used to miss them while the HF path did not.
+    let Some(key) = crate::model_vision::vision_config_key(raw) else {
+        return;
+    };
+    if let Some(vc) = raw.get("vision_config").and_then(|v| v.as_object()) {
+        let mut vision = VisionComponent {
+            has_vision_config: true,
+            field_evidence: "vision_config".into(),
+            ..Default::default()
+        };
+        if let Some(mt) = vc.get("model_type").and_then(|v| v.as_str()) {
+            vision.model_type = Some(mt.to_string());
+            vision.model_type_evidence = Some("vision_config.model_type".into());
+        }
+        // Vision encoder layers: num_hidden_layers (standard) or depth (Qwen3.6).
+        if let Some(layers) = vc
+            .get("num_hidden_layers")
+            .or_else(|| vc.get("depth"))
+            .and_then(|v| v.as_u64())
+        {
+            vision.encoder_layers = Some(layers as u32);
+            let layers_key = if vc.get("num_hidden_layers").is_some() {
+                "vision_config.num_hidden_layers"
+            } else {
+                "vision_config.depth"
+            };
+            vision.encoder_layers_evidence = Some(layers_key.into());
+        }
+        profile.vision = Some(vision);
+    } else {
+        // A key like `mm_vision_tower` names the tower without carrying its
+        // geometry, so record its presence with no encoder layers rather than
+        // reporting the model as text-only.
+        profile.vision = Some(VisionComponent {
+            has_vision_config: true,
+            field_evidence: key.into(),
+            ..Default::default()
+        });
+    }
+}
+
+fn extract_draft_config(profile: &mut ModelMemoryProfile, raw: &serde_json::Value) {
+    // Draft model from wrapper config (MTP/companion).
+    // Per A25: embedded MTP tensors are part of main model geometry;
+    // external drafter/vision/embedding companions are tracked separately.
+    let draft = raw
+        .get("draft_model")
+        .or_else(|| raw.get("speculative_config"));
+    if let Some(d) = draft {
+        // Check if this is an external companion (references a separate model source).
+        let model_source = d.get("model").and_then(|v| v.as_str());
+        if let Some(src) = model_source {
+            // External companion: separate source with distinct provenance (A25).
+            profile.external_companions.push(ExternalCompanion {
+                companion_type: CompanionType::Drafter,
+                source: src.to_string(),
+                provenance: "draft_model.model".into(),
+            });
+        }
+
+        let layers = d.get("num_hidden_layers").and_then(|v| v.as_u64());
+        if let Some(n) = layers {
+            if n > 0 {
+                profile.embedded_mtp = Some(EmbeddedMtpComponent {
+                    n_layers: n as u32,
+                    field_evidence: "draft_model.num_hidden_layers".into(),
+                    ..Default::default()
+                });
+            }
+        } else {
+            // Presence signals MTP.
+            profile.embedded_mtp = Some(EmbeddedMtpComponent {
+                n_layers: 1,
+                field_evidence: "draft_model (presence)".into(),
+                ..Default::default()
+            });
+        }
+    }
+}
+
+/// Wrapper-field protection: detect when outer wrapper config has geometry fields that
+/// differ from inner text_config, and document them as warnings.
+///
+/// CRITICAL: wrapper fields like outer `num_hidden_layers` or `block_count` represent
+/// total blocks (including recurrent/DeltaNet) and must NOT override inner text_config geometry.
+fn check_wrapper_field_conflicts(profile: &mut ModelMemoryProfile, raw: &serde_json::Value) {
+    // Check num_hidden_layers conflict.
+    if let Some(outer_layers) = raw.get("num_hidden_layers").and_then(|v| v.as_u64())
+        && profile.weights.n_layers.value > 0
+        && profile.weights.n_layers.value != outer_layers as u32
+    {
+        profile.warnings.wrapper_field_conflicts.push(ParseWarning {
+            field: "num_hidden_layers".into(),
+            message: "wrapper field differs from text_config; inner geometry trusted".into(),
+            outer_value: Some(outer_layers.to_string()),
+            inner_value: Some(profile.weights.n_layers.value.to_string()),
+        });
+    }
+
+    // Check hidden_size conflict.
+    if let Some(outer_size) = raw.get("hidden_size").and_then(|v| v.as_u64())
+        && profile.weights.n_embd.value > 0
+        && profile.weights.n_embd.value != outer_size as u32
+    {
+        profile.warnings.wrapper_field_conflicts.push(ParseWarning {
+            field: "hidden_size".into(),
+            message: "wrapper field differs from text_config; inner geometry trusted".into(),
+            outer_value: Some(outer_size.to_string()),
+            inner_value: Some(profile.weights.n_embd.value.to_string()),
+        });
+    }
+
+    // Check num_attention_heads conflict.
+    if let Some(outer_heads) = raw.get("num_attention_heads").and_then(|v| v.as_u64())
+        && profile.weights.n_head.value > 0
+        && profile.weights.n_head.value != outer_heads as u32
+    {
+        profile.warnings.wrapper_field_conflicts.push(ParseWarning {
+            field: "num_attention_heads".into(),
+            message: "wrapper field differs from text_config; inner geometry trusted".into(),
+            outer_value: Some(outer_heads.to_string()),
+            inner_value: Some(profile.weights.n_head.value.to_string()),
+        });
+    }
+
+    // Check num_key_value_heads conflict.
+    if let Some(outer_kv) = raw.get("num_key_value_heads").and_then(|v| v.as_u64())
+        && profile.weights.n_head_kv.value > 0
+        && profile.weights.n_head_kv.value != outer_kv as u32
+    {
+        profile.warnings.wrapper_field_conflicts.push(ParseWarning {
+            field: "num_key_value_heads".into(),
+            message: "wrapper field differs from text_config; inner geometry trusted".into(),
+            outer_value: Some(outer_kv.to_string()),
+            inner_value: Some(profile.weights.n_head_kv.value.to_string()),
+        });
+    }
+}
+
+// ── Safetensors index parsing (for Part C) ───────────────────────────────────────
+
+/// Safetensors index metadata parsed from model.safetensors.index.json.
+///
+/// Deliberately narrower than [`MlxWeightIndex`]: shard files and total byte count are
+/// that type's job, and duplicating them here gave two answers to one question. This
+/// carries only what the degradation path needs — tensor names to count layers from,
+/// and quantization metadata.
+#[derive(Debug, Clone, Default)]
+pub struct SafetensorsIndexInfo {
+    /// Tensor name → shard file mapping.
+    pub weight_map: std::collections::BTreeMap<String, String>,
+    /// Quantization metadata (if present).
+    pub quant_bits: Option<u32>,
+    pub quant_group_size: Option<u32>,
+}
+
+/// Parse a safetensors index into [`SafetensorsIndexInfo`].
+///
+/// Extracts tensor names, shard assignments, and quantization metadata.
+/// This is used to verify weight totals match config geometry and to support
+/// the heuristic degradation path when config is missing.
+pub fn parse_safetensors_index(index_path: &Path) -> Result<SafetensorsIndexInfo, String> {
+    let bytes = bounded_read(index_path, MAX_INDEX_BYTES)?;
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|e| format!("safetensors index: {e}"))?;
+
+    // Validate weight_map.
+    let weight_map_value = value
+        .get("weight_map")
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| "safetensors index requires a weight_map object".to_string())?;
+
+    let mut weight_map: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
+    for (tensor_name, shard_val) in weight_map_value {
+        let Some(shard_name) = shard_val.as_str() else {
+            return Err("safetensors index contains a non-string shard".into());
+        };
+        let relative = Path::new(shard_name);
+        if relative.is_absolute()
+            || relative
+                .components()
+                .any(|part| matches!(part, std::path::Component::ParentDir))
+            || !shard_name.ends_with(".safetensors")
+        {
+            return Err(format!(
+                "safetensors index contains an unsafe shard path: {shard_name}"
+            ));
+        }
+        weight_map.insert(tensor_name.clone(), shard_name.to_string());
+    }
+
+    // Extract metadata.
+    let metadata = value.get("metadata").and_then(|v| v.as_object());
+    let quant_bits = metadata
+        .and_then(|m| m.get("quant_bits"))
+        .or_else(|| metadata.and_then(|m| m.get("bits")))
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+    let quant_group_size = metadata
+        .and_then(|m| m.get("quant_group_size"))
+        .or_else(|| metadata.and_then(|m| m.get("group_size")))
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+
+    Ok(SafetensorsIndexInfo {
+        weight_map,
+        quant_bits,
+        quant_group_size,
+    })
+}
+
+/// Infer WeightComponents from safetensors index tensor names when config is unavailable.
+///
+/// This is the HEURISTIC DEGRADATION PATH — only reached from
+/// [`degraded_profile_from_safetensors`] when config.json is missing or unparseable.
+/// Never labeled as exact. Returns WeightComponents with field_evidence clearly
+/// marked as "heuristic from safetensors index".
+pub fn infer_weight_components_from_safetensors(index: &SafetensorsIndexInfo) -> WeightComponents {
+    let mut weights = WeightComponents::default();
+
+    // Count layers from tensor name patterns (e.g. "model.layers.0.attention.wq.weight").
+    let mut max_layer = 0u32;
+    for name in index.weight_map.keys() {
+        // Pattern: model.layers.N...
+        if let Some(start) = name.find(".layers.") {
+            let rest = &name[start + 8..];
+            if let Some(dot) = rest.find('.')
+                && let Ok(n) = rest[..dot].parse::<u32>()
+            {
+                max_layer = max_layer.max(n);
+            }
+        }
+    }
+    if max_layer > 0 {
+        weights.n_layers.value = max_layer + 1;
+        weights.n_layers.field_evidence = "heuristic from safetensors index tensor names".into();
+    }
+
+    // Quantization from metadata (if present).
+    if let Some(bits) = index.quant_bits {
+        weights.quant_bits.value = bits;
+        weights.quant_bits.field_evidence = "heuristic from safetensors index metadata".into();
+    }
+    if let Some(gs) = index.quant_group_size {
+        weights.quant_group_size.value = gs;
+        weights.quant_group_size.field_evidence =
+            "heuristic from safetensors index metadata".into();
+    }
+
+    weights
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn write_config(dir: &std::path::Path, json: &str) {
+        let mut f = std::fs::File::create(dir.join("config.json")).unwrap();
+        f.write_all(json.as_bytes()).unwrap();
+        f.flush().unwrap();
+    }
+
+    fn write_index(dir: &std::path::Path, json: &str) {
+        let mut f = std::fs::File::create(dir.join("model.safetensors.index.json")).unwrap();
+        f.write_all(json.as_bytes()).unwrap();
+        f.flush().unwrap();
+    }
+
+    #[test]
+    fn local_vision_detection_matches_the_hf_path() {
+        // `mm_vision_tower` names a tower without carrying its geometry. This path
+        // recognised only `vision_config` and reported such a model as text-only.
+        let dir = tempfile::tempdir().unwrap();
+        write_config(
+            dir.path(),
+            r#"{"model_type": "llava", "num_hidden_layers": 32,
+                "mm_vision_tower": "openai/clip-vit-large-patch14"}"#,
+        );
+        let named = read_mlx_model_profile(dir.path()).unwrap();
+        let vision = named.vision.as_ref().expect("tower is named in the config");
+        assert!(vision.is_some());
+        assert_eq!(vision.field_evidence, "mm_vision_tower");
+        // Named but not described: no encoder geometry to report.
+        assert_eq!(vision.encoder_layers, None);
+
+        // A checkpoint can ship a tower without naming one in config.json, so the
+        // weights get the second word. Only available on local disk.
+        let weights_only = tempfile::tempdir().unwrap();
+        write_config(
+            weights_only.path(),
+            r#"{"model_type": "qwen3", "num_hidden_layers": 32}"#,
+        );
+        std::fs::write(
+            weights_only.path().join("model.safetensors.index.json"),
+            r#"{"weight_map": {"visual.blocks.0.attn.qkv.weight": "model-00001.safetensors"}}"#,
+        )
+        .unwrap();
+        let found = weights_only.path();
+        let profile = read_mlx_model_profile(found).unwrap();
+        let vision = profile.vision.as_ref().expect("tower is in the weights");
+        assert!(vision.is_some());
+        assert!(!vision.has_vision_config);
+        assert!(vision.has_vision_tensors);
+        assert_eq!(
+            vision.field_evidence,
+            "model.safetensors.index.json:visual."
+        );
+
+        // Text-only stays text-only: neither artifact carries a tower.
+        let text = tempfile::tempdir().unwrap();
+        write_config(
+            text.path(),
+            r#"{"model_type": "qwen3", "num_hidden_layers": 32}"#,
+        );
+        std::fs::write(
+            text.path().join("model.safetensors.index.json"),
+            r#"{"weight_map": {"model.layers.0.self_attn.q_proj.weight": "model-00001.safetensors"}}"#,
+        )
+        .unwrap();
+        assert!(
+            read_mlx_model_profile(text.path())
+                .unwrap()
+                .vision
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn exact_weight_accounting_from_safetensors_index_total_size() {
+        let dir = tempfile::tempdir().unwrap();
+        write_config(
+            dir.path(),
+            r#"{"hidden_size": 1024, "num_hidden_layers": 10, "num_attention_heads": 8}"#,
+        );
+        write_index(
+            dir.path(),
+            r#"{
+                "metadata": {"total_size": 123456789},
+                "weight_map": {
+                    "a": "model-00001-of-00002.safetensors",
+                    "b": "model-00002-of-00002.safetensors"
+                }
+            }"#,
+        );
+        let index = read_mlx_weight_index(dir.path()).unwrap();
+        assert_eq!(index.total_size_bytes, Some(123_456_789));
+        assert_eq!(index.shard_files.len(), 2);
+        assert_eq!(
+            resolve_local_weight_bytes(dir.path(), &index),
+            Some(123_456_789)
+        );
+    }
+
+    #[test]
+    fn exact_weight_accounting_sums_real_shard_files_when_no_total_size() {
+        let dir = tempfile::tempdir().unwrap();
+        write_config(
+            dir.path(),
+            r#"{"hidden_size": 1024, "num_hidden_layers": 10, "num_attention_heads": 8}"#,
+        );
+        write_index(dir.path(), r#"{"weight_map": {"a": "model.safetensors"}}"#);
+        std::fs::write(dir.path().join("model.safetensors"), vec![0u8; 4096]).unwrap();
+        let index = read_mlx_weight_index(dir.path()).unwrap();
+        assert_eq!(index.total_size_bytes, None);
+        assert_eq!(resolve_local_weight_bytes(dir.path(), &index), Some(4096));
+    }
+
+    #[test]
+    fn rejects_unsafe_shard_paths_in_index() {
+        let dir = tempfile::tempdir().unwrap();
+        write_config(
+            dir.path(),
+            r#"{"hidden_size": 1024, "num_hidden_layers": 10, "num_attention_heads": 8}"#,
+        );
+        write_index(
+            dir.path(),
+            r#"{"weight_map": {"a": "../../etc/passwd.safetensors"}}"#,
+        );
+        assert!(read_mlx_weight_index(dir.path()).is_err());
+        // The traversal attempt must not take the whole profile down with it: config.json
+        // is present and exact here, so geometry still resolves and only the shard list
+        // is lost.
+        let profile = read_mlx_model_profile(dir.path()).unwrap();
+        assert_eq!(profile.weights.n_layers.value, 10);
+    }
+
+    // ── ModelMemoryProfile tests (Phase 4 Part A) ─────────────────────────────
+
+    /// Load a pinned fixture from tests/fixtures/mlx_configs/.
+    fn load_fixture(name: &str) -> Result<Vec<u8>, String> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/mlx_configs/")
+            .join(name);
+        std::fs::read(&path).map_err(|e| format!("{}: {}", path.display(), e))
+    }
+
+    #[test]
+    fn parse_fixture_qwen36_27b_nested_text_config() {
+        let bytes = load_fixture("mlx-community_Qwen3.6-27B-4bit.config.json").unwrap();
+        let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+
+        // Geometry from text_config (inner), not wrapper.
+        assert_eq!(profile.weights.n_layers.value, 64);
+        assert_eq!(
+            profile.weights.n_layers.field_evidence,
+            "text_config.num_hidden_layers"
+        );
+        assert_eq!(profile.weights.n_embd.value, 5120);
+        assert_eq!(
+            profile.weights.n_embd.field_evidence,
+            "text_config.hidden_size"
+        );
+        assert_eq!(profile.weights.n_head.value, 24);
+        assert_eq!(profile.weights.n_head_kv.value, 4);
+        assert_eq!(profile.weights.max_position_embeddings.value, 262144);
+        assert_eq!(
+            profile.weights.max_position_embeddings.field_evidence,
+            "text_config.max_position_embeddings"
+        );
+        assert_eq!(profile.model_context_limit, Some(262144));
+
+        // full_attention_interval: 4 → 64/4 = 16 full attention layers.
+        assert_eq!(profile.full_attention_interval, Some(4));
+        assert_eq!(
+            profile.full_attention_interval_evidence,
+            Some("text_config.full_attention_interval".into())
+        );
+
+        // Layer groups: 16 full + 48 linear (from layer_types array).
+        assert_eq!(profile.total_layer_count(), 64);
+        assert_eq!(profile.full_attention_layer_count(), 16);
+        assert_eq!(profile.linear_recurrent_layer_count(), 48);
+        assert!(profile.is_hybrid_attention());
+
+        // Recurrent state geometry with field_evidence.
+        assert!(profile.recurrent_state.is_some());
+        let rcg = profile.recurrent_state.as_ref().unwrap();
+        assert_eq!(rcg.linear_conv_kernel_dim, Some(4));
+        assert!(rcg.linear_conv_kernel_dim_evidence.is_some());
+        assert_eq!(rcg.linear_key_head_dim, Some(128));
+        assert!(rcg.linear_key_head_dim_evidence.is_some());
+        assert_eq!(rcg.linear_num_key_heads, Some(16));
+        assert!(rcg.linear_num_key_heads_evidence.is_some());
+        assert_eq!(rcg.linear_num_value_heads, Some(48));
+        assert!(rcg.linear_num_value_heads_evidence.is_some());
+        assert_eq!(rcg.linear_value_head_dim, Some(128));
+        assert!(rcg.linear_value_head_dim_evidence.is_some());
+        assert_eq!(rcg.mamba_ssm_dtype, Some("float32".into()));
+        assert!(rcg.mamba_ssm_dtype_evidence.is_some());
+
+        // MTP embedded.
+        assert!(profile.embedded_mtp.is_some());
+        let mtp = profile.embedded_mtp.as_ref().unwrap();
+        assert_eq!(mtp.n_layers, 1);
+        assert!(!mtp.field_evidence.is_empty());
+
+        // Vision component present.
+        assert!(profile.vision.is_some());
+        let vision = profile.vision.as_ref().unwrap();
+        assert!(vision.has_vision_config);
+        assert_eq!(vision.model_type, Some("qwen3_5".into()));
+        assert_eq!(vision.encoder_layers, Some(27));
+
+        // No external companions (vision is inline config, not separate source).
+        assert!(profile.external_companions.is_empty());
+
+        // Used text_config.
+        assert_eq!(profile.used_text_config, Some(true));
+    }
+
+    #[test]
+    fn parse_fixture_qwen36_35b_a3b_nested_text_config() {
+        let bytes = load_fixture("mlx-community_Qwen3.6-35B-A3B-4bit.config.json").unwrap();
+        let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+
+        assert_eq!(profile.weights.n_layers.value, 40);
+        assert_eq!(profile.weights.n_embd.value, 2048);
+        assert_eq!(profile.weights.n_head.value, 16);
+        assert_eq!(profile.weights.n_head_kv.value, 2);
+
+        // MoE: 256 total experts, 8 active per token.
+        assert!(profile.is_moe());
+        let experts = profile.experts.as_ref().unwrap();
+        assert_eq!(experts.n_experts, 256);
+        assert!(!experts.field_evidence.is_empty());
+        assert_eq!(experts.top_k, Some(8));
+        assert!(experts.top_k_evidence.is_some());
+        assert!(experts.moe_intermediate_size.is_some());
+        assert!(experts.shared_expert_intermediate_size.is_some());
+
+        // Layer groups: 10 full + 30 linear (40 / full_attention_interval=4 = 10 full).
+        assert_eq!(profile.total_layer_count(), 40);
+        assert_eq!(profile.full_attention_layer_count(), 10);
+        assert_eq!(profile.linear_recurrent_layer_count(), 30);
+
+        // Recurrent state geometry.
+        assert!(profile.recurrent_state.is_some());
+
+        // Vision component present.
+        assert!(profile.vision.is_some());
+
+        // No external companions.
+        assert!(profile.external_companions.is_empty());
+    }
+
+    #[test]
+    fn parse_fixture_gemma4_26b_a4b_nested_text_config() {
+        let bytes = load_fixture("mlx-community_gemma-4-26b-a4b-it-4bit.config.json").unwrap();
+        let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+
+        assert_eq!(profile.weights.n_layers.value, 30);
+        assert_eq!(profile.weights.n_embd.value, 2816);
+        assert_eq!(profile.weights.n_head.value, 16);
+        assert_eq!(profile.weights.n_head_kv.value, 8);
+
+        // Context ceiling from text_config.
+        assert_eq!(profile.weights.max_position_embeddings.value, 262144);
+        assert_eq!(profile.model_context_limit, Some(262144));
+
+        // Gemma4 global/local head geometry.
+        assert!(profile.global_local_heads.is_some());
+        let glh = profile.global_local_heads.as_ref().unwrap();
+        assert_eq!(glh.num_global_key_value_heads, Some(2));
+        assert_eq!(glh.global_head_dim, Some(512));
+        // Local KV: total (8) - global (2) = 6
+        assert_eq!(glh.num_local_key_value_heads, Some(6));
+        assert!(!glh.num_local_kv_evidence.as_ref().unwrap().is_empty());
+        assert_eq!(glh.local_head_dim, Some(256));
+        assert!(!glh.local_head_dim_evidence.as_ref().unwrap().is_empty());
+        assert_eq!(glh.local_attn_window_size, Some(1024));
+        assert!(!glh.local_attn_window_evidence.as_ref().unwrap().is_empty());
+
+        // Layer groups: 5 full + 25 local.
+        assert_eq!(profile.total_layer_count(), 30);
+        assert_eq!(profile.full_attention_layer_count(), 5);
+        assert_eq!(profile.local_attention_layer_count(), 25);
+        assert!(profile.has_local_attention());
+        assert_eq!(profile.sliding_window, Some(1024));
+
+        // MoE.
+        assert!(profile.is_moe());
+        let experts = profile.experts.as_ref().unwrap();
+        assert_eq!(experts.n_experts, 128);
+        assert_eq!(experts.top_k, Some(8));
+
+        // Vision component.
+        assert!(profile.vision.is_some());
+        let vision = profile.vision.as_ref().unwrap();
+        assert_eq!(vision.encoder_layers, Some(27));
+        assert_eq!(vision.model_type, Some("gemma4_vision".into()));
+
+        // No external companions in this config.
+        assert!(profile.external_companions.is_empty());
+    }
+
+    #[test]
+    fn parse_fixture_gemma4_31b_nested_text_config() {
+        let bytes = load_fixture("mlx-community_gemma-4-31b-it-4bit.config.json").unwrap();
+        let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+
+        assert_eq!(profile.weights.n_layers.value, 60);
+        assert_eq!(profile.weights.n_embd.value, 5376);
+        assert_eq!(profile.weights.n_head.value, 32);
+        assert_eq!(profile.weights.n_head_kv.value, 16);
+
+        // Gemma4 global/local head geometry.
+        let glh = profile.global_local_heads.as_ref().unwrap();
+        assert_eq!(glh.num_global_key_value_heads, Some(4));
+        assert_eq!(glh.global_head_dim, Some(512));
+        // Local KV: total (16) - global (4) = 12
+        assert_eq!(glh.num_local_key_value_heads, Some(12));
+        assert_eq!(glh.local_head_dim, Some(256));
+        assert_eq!(glh.local_attn_window_size, Some(1024));
+
+        // Layer groups: 10 full + 50 local.
+        assert_eq!(profile.total_layer_count(), 60);
+        assert_eq!(profile.full_attention_layer_count(), 10);
+        assert_eq!(profile.local_attention_layer_count(), 50);
+
+        // No MoE (dense).
+        assert!(!profile.is_moe());
+
+        // Vision component.
+        assert!(profile.vision.is_some());
+        let vision = profile.vision.as_ref().unwrap();
+        assert_eq!(vision.encoder_layers, Some(27));
+
+        // No external companions.
+        assert!(profile.external_companions.is_empty());
+    }
+
+    #[test]
+    fn parse_fixture_qwen3_06b_flat_config() {
+        let bytes = load_fixture("mlx-community_Qwen3-0.6B-4bit.config.json").unwrap();
+        let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+
+        // Flat config: geometry from top-level.
+        assert_eq!(profile.weights.n_layers.value, 28);
+        assert_eq!(profile.weights.n_embd.value, 1024);
+        assert_eq!(profile.weights.n_head.value, 16);
+        assert_eq!(profile.weights.n_head_kv.value, 8);
+
+        // Context ceiling propagated from flat config with field_evidence.
+        assert_eq!(profile.weights.max_position_embeddings.value, 40960);
+        assert_eq!(
+            profile.weights.max_position_embeddings.field_evidence,
+            "max_position_embeddings"
+        );
+        assert_eq!(profile.model_context_limit, Some(40960));
+
+        // All layers are full attention (flat config default).
+        assert_eq!(profile.total_layer_count(), 28);
+        assert_eq!(profile.full_attention_layer_count(), 28);
+        assert_eq!(profile.linear_recurrent_layer_count(), 0);
+
+        // Dense: no MoE, no recurrent, no MTP, no vision.
+        assert!(!profile.is_moe());
+        assert!(profile.recurrent_state.is_none());
+        assert!(profile.embedded_mtp.is_none());
+        assert!(profile.vision.is_none());
+        assert!(profile.external_companions.is_empty());
+
+        assert_eq!(profile.used_text_config, Some(false));
+    }
+
+    #[test]
+    fn parse_fixture_qwen3_30b_a3b_flat_config() {
+        let bytes = load_fixture("mlx-community_Qwen3-30B-A3B-4bit.config.json").unwrap();
+        let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+
+        assert_eq!(profile.weights.n_layers.value, 48);
+        assert_eq!(profile.weights.n_embd.value, 2048);
+        assert_eq!(profile.weights.n_head.value, 32);
+        assert_eq!(profile.weights.n_head_kv.value, 4);
+
+        // MoE: 128 total experts, 8 active per token (flat config).
+        assert!(profile.is_moe());
+        let experts = profile.experts.as_ref().unwrap();
+        assert_eq!(experts.n_experts, 128);
+        assert_eq!(experts.field_evidence, "num_experts");
+        assert_eq!(experts.top_k, Some(8));
+        assert_eq!(
+            experts.top_k_evidence,
+            Some("num_experts_per_tok".to_string())
+        );
+
+        // All layers full attention (flat config, no layer_types).
+        assert_eq!(profile.total_layer_count(), 48);
+        assert_eq!(profile.full_attention_layer_count(), 48);
+
+        // No recurrent state, no MTP, no vision, no external companions.
+        assert!(profile.recurrent_state.is_none());
+        assert!(profile.embedded_mtp.is_none());
+        assert!(profile.vision.is_none());
+        assert!(profile.external_companions.is_empty());
+    }
+
+    #[test]
+    fn wrapper_field_protection_outer_does_not_override_inner() {
+        // Construct a config where wrapper has different geometry than text_config.
+        let json = r#"{
+            "model_type": "test_vlm",
+            "num_hidden_layers": 100,
+            "hidden_size": 8192,
+            "num_attention_heads": 32,
+            "num_key_value_heads": 8,
+            "text_config": {
+                "model_type": "test_text",
+                "num_hidden_layers": 40,
+                "hidden_size": 2048,
+                "num_attention_heads": 16,
+                "num_key_value_heads": 2
+            }
+        }"#;
+        let profile = parse_mlx_config_bytes_to_profile(json.as_bytes()).unwrap();
+
+        // Inner text_config geometry is trusted.
+        assert_eq!(profile.weights.n_layers.value, 40);
+        assert_eq!(profile.weights.n_embd.value, 2048);
+        assert_eq!(profile.weights.n_head.value, 16);
+        assert_eq!(profile.weights.n_head_kv.value, 2);
+
+        // Wrapper-field conflicts documented.
+        assert!(!profile.warnings.wrapper_field_conflicts.is_empty());
+    }
+
+    #[test]
+    fn field_evidence_present_for_all_populated_fields() {
+        let json = r#"{
+            "model_type": "test",
+            "architectures": ["TestForCausalLM"],
+            "text_config": {
+                "hidden_size": 1024,
+                "num_hidden_layers": 20,
+                "num_attention_heads": 8,
+                "num_key_value_heads": 4,
+                "intermediate_size": 4096,
+                "head_dim": 128,
+                "vocab_size": 32000,
+                "max_position_embeddings": 8192,
+                "rms_norm_eps": 1e-05,
+                "layer_types": ["full_attention", "linear_attention"]
+            }
+        }"#;
+        let profile = parse_mlx_config_bytes_to_profile(json.as_bytes()).unwrap();
+
+        // Every populated field has evidence.
+        assert!(!profile.weights.n_embd.field_evidence.is_empty());
+        assert!(!profile.weights.n_layers.field_evidence.is_empty());
+        assert!(!profile.weights.n_head.field_evidence.is_empty());
+        assert!(!profile.weights.n_head_kv.field_evidence.is_empty());
+        assert!(!profile.weights.n_ff.field_evidence.is_empty());
+        assert!(!profile.weights.head_dim.field_evidence.is_empty());
+        assert!(!profile.weights.vocab_size.field_evidence.is_empty());
+        assert!(!profile.weights.rms_norm_eps.field_evidence.is_empty());
+        assert!(
+            !profile
+                .weights
+                .max_position_embeddings
+                .field_evidence
+                .is_empty()
+        );
+        assert!(!profile.model_type_evidence.unwrap_or_default().is_empty());
+        assert!(!profile.layer_types_evidence.unwrap_or_default().is_empty());
+    }
+
+    #[test]
+    fn missing_critical_fields_still_returns_profile_with_evidence_gaps() {
+        // Config with no geometry fields at all should still parse but have empty geometry.
+        let json = r#"{
+            "model_type": "empty",
+            "architectures": ["EmptyModel"]
+        }"#;
+        let profile = parse_mlx_config_bytes_to_profile(json.as_bytes()).unwrap();
+
+        // Profile is not substantive (no geometry fields).
+        assert!(!profile.is_substantive());
+        assert_eq!(profile.model_type, Some("empty".into()));
+        assert_eq!(profile.total_layer_count(), 0);
+    }
+
+    #[test]
+    fn invalid_json_returns_error() {
+        let result = parse_mlx_config_bytes_to_profile(b"not json");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("not valid JSON") || err.contains("invalid"));
+    }
+
+    #[test]
+    fn parse_safetensors_index_returns_weight_components() {
+        let dir = tempfile::tempdir().unwrap();
+        let index_path = dir.path().join("model.safetensors.index.json");
+        std::fs::write(
+            &index_path,
+            r#"{
+                "metadata": {"total_size": 123456789},
+                "weight_map": {
+                    "a": "model-00001-of-00002.safetensors"
+                }
+            }"#,
+        )
+        .unwrap();
+        let info = parse_safetensors_index(&index_path).unwrap();
+        assert_eq!(info.weight_map.len(), 1);
+        assert_eq!(
+            info.weight_map["a"], "model-00001-of-00002.safetensors",
+            "the shard a tensor lives in has to survive the parse"
+        );
+    }
+
+    #[test]
+    fn parse_safetensors_index_qwen3_06b_style_shapes() {
+        // Test with a realistic safetensors index structure for Qwen3-0.6B.
+        let dir = tempfile::tempdir().unwrap();
+        let index_path = dir.path().join("model.safetensors.index.json");
+        std::fs::write(
+            &index_path,
+            r#"{
+                "metadata": {"total_size": 378945612},
+                "weight_map": {
+                    "model.embed_tokens.weight": "model-00001-of-00002.safetensors",
+                    "model.layers.0.attention.wq.weight": "model-00001-of-00002.safetensors",
+                    "model.layers.0.attention.wkv.weight": "model-00001-of-00002.safetensors",
+                    "model.layers.27.attention.wo.weight": "model-00002-of-00002.safetensors",
+                    "model.norm.weight": "model-00002-of-00002.safetensors"
+                }
+            }"#,
+        )
+        .unwrap();
+        let info = parse_safetensors_index(&index_path).unwrap();
+        assert_eq!(info.weight_map.len(), 5);
+
+        // Heuristic inference from tensor names.
+        let weights = infer_weight_components_from_safetensors(&info);
+        assert_eq!(weights.n_layers.value, 28);
+        assert!(weights.n_layers.field_evidence.contains("heuristic"));
+    }
+
+    #[test]
+    fn heuristic_degradation_labeled_as_degraded_not_exact() {
+        // Hard gate: heuristics are never labeled exact.
+        let dir = tempfile::tempdir().unwrap();
+        let index_path = dir.path().join("model.safetensors.index.json");
+        std::fs::write(
+            &index_path,
+            r#"{
+                "metadata": {"bits": 4, "group_size": 64},
+                "weight_map": {
+                    "model.layers.5.attention.wq.weight": "model.safetensors"
+                }
+            }"#,
+        )
+        .unwrap();
+        let info = parse_safetensors_index(&index_path).unwrap();
+        let weights = infer_weight_components_from_safetensors(&info);
+
+        // All evidence must be labeled as heuristic.
+        assert!(weights.n_layers.field_evidence.contains("heuristic"));
+        assert!(weights.quant_bits.field_evidence.contains("heuristic"));
+        assert!(
+            weights
+                .quant_group_size
+                .field_evidence
+                .contains("heuristic")
+        );
+
+        // Verify the inferred values.
+        assert_eq!(weights.n_layers.value, 6);
+        assert_eq!(weights.quant_bits.value, 4);
+        assert_eq!(weights.quant_group_size.value, 64);
+    }
+
+    #[test]
+    fn heuristic_degradation_only_when_config_missing() {
+        // When config is present, use config geometry — heuristic is fallback only.
+        let json = r#"{
+            "hidden_size": 1024,
+            "num_hidden_layers": 28,
+            "num_attention_heads": 16
+        }"#;
+        let profile = parse_mlx_config_bytes_to_profile(json.as_bytes()).unwrap();
+
+        // Config provides exact geometry.
+        assert_eq!(profile.weights.n_layers.value, 28);
+        assert!(
+            !profile
+                .weights
+                .n_layers
+                .field_evidence
+                .contains("heuristic")
+        );
+    }
+
+    /// Same claim as `heuristic_degradation_only_when_config_missing`, but through the
+    /// entry point a caller actually uses. The bytes-only parser cannot demonstrate
+    /// precedence, because it never sees the index that would compete with the config.
+    #[test]
+    fn read_mlx_model_profile_prefers_config_over_the_index_when_both_exist() {
+        let dir = tempfile::tempdir().unwrap();
+        write_config(
+            dir.path(),
+            r#"{"hidden_size": 1024, "num_hidden_layers": 28, "num_attention_heads": 16}"#,
+        );
+        write_index(
+            dir.path(),
+            r#"{"weight_map": {"model.layers.5.attention.wq.weight": "model.safetensors"}}"#,
+        );
+        let profile = read_mlx_model_profile(dir.path()).unwrap();
+        // 28 from config, not 6 from the index.
+        assert_eq!(profile.weights.n_layers.value, 28);
+        assert!(
+            !profile
+                .weights
+                .n_layers
+                .field_evidence
+                .contains("heuristic")
+        );
+        assert!(profile.warnings.missing_critical_fields.is_empty());
+    }
+
+    /// The degradation path has to be reachable from the entry point, not just callable
+    /// from a test. A directory with an index and no config must still produce a profile,
+    /// and must say why it is approximate.
+    #[test]
+    fn read_mlx_model_profile_degrades_to_the_index_when_config_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        write_index(
+            dir.path(),
+            r#"{
+                "metadata": {"bits": 4, "group_size": 64},
+                "weight_map": {
+                    "model.layers.0.attention.wq.weight": "model.safetensors",
+                    "model.layers.27.attention.wq.weight": "model.safetensors"
+                }
+            }"#,
+        );
+        let profile = read_mlx_model_profile(dir.path()).unwrap();
+
+        assert_eq!(profile.weights.n_layers.value, 28);
+        assert!(
+            profile
+                .weights
+                .n_layers
+                .field_evidence
+                .contains("heuristic")
+        );
+        assert_eq!(profile.weights.quant_bits.value, 4);
+        assert_eq!(profile.weights.quant_group_size.value, 64);
+        // Nothing the index cannot answer may be invented.
+        assert_eq!(profile.weights.n_embd.value, 0);
+        assert!(profile.is_substantive());
+
+        let warning = profile
+            .warnings
+            .missing_critical_fields
+            .iter()
+            .find(|w| w.field == "config.json")
+            .expect("a degraded profile must record why config.json was unusable");
+        assert!(
+            warning.message.contains("safetensors index"),
+            "warning must name the substitute source: {}",
+            warning.message
+        );
+    }
+
+    /// An unparseable config is the same situation as a missing one — a truncated
+    /// download leaves a file behind.
+    #[test]
+    fn read_mlx_model_profile_degrades_when_config_is_unparseable() {
+        let dir = tempfile::tempdir().unwrap();
+        write_config(dir.path(), "{ this is not json");
+        write_index(
+            dir.path(),
+            r#"{"weight_map": {"model.layers.9.attention.wq.weight": "model.safetensors"}}"#,
+        );
+        let profile = read_mlx_model_profile(dir.path()).unwrap();
+        assert_eq!(profile.weights.n_layers.value, 10);
+        assert!(
+            profile
+                .weights
+                .n_layers
+                .field_evidence
+                .contains("heuristic")
+        );
+    }
+
+    /// With neither artifact readable there is nothing to degrade to, and the error has
+    /// to name both failures — reporting only the index would hide the real cause.
+    #[test]
+    fn read_mlx_model_profile_reports_both_failures_when_nothing_is_readable() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = read_mlx_model_profile(dir.path()).unwrap_err();
+        assert!(err.contains("config.json"), "{err}");
+        assert!(err.contains("safetensors index"), "{err}");
+    }
+
+    /// An index that names no transformer layers cannot stand in for a config. Returning
+    /// an empty profile here would read downstream as a successful parse of a 0-layer model.
+    #[test]
+    fn read_mlx_model_profile_refuses_an_index_with_no_layer_tensors() {
+        let dir = tempfile::tempdir().unwrap();
+        write_index(
+            dir.path(),
+            r#"{"weight_map": {"lm_head.weight": "model.safetensors"}}"#,
+        );
+        let err = read_mlx_model_profile(dir.path()).unwrap_err();
+        assert!(err.contains("model.layers.N"), "{err}");
+    }
+
+    // ── Part B: Architecture-specific geometry tests ──────────────────────────
+
+    #[test]
+    fn qwen36_deltanet_full_attention_layer_count_via_interval() {
+        // Hard gate: Qwen3.6 full_attention_layer_count = block_count / full_attention_interval
+        // NOT block_count (i.e., not all layers treated as full KV).
+        let bytes = load_fixture("mlx-community_Qwen3.6-27B-4bit.config.json").unwrap();
+        let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+
+        assert_eq!(profile.weights.n_layers.value, 64);
+        assert_eq!(profile.full_attention_interval, Some(4));
+        // 64 / 4 = 16 full attention layers (from layer_types).
+        assert_eq!(profile.full_attention_layer_count(), 16);
+        // 48 linear/recurrent layers.
+        assert_eq!(profile.linear_recurrent_layer_count(), 48);
+        // Must NOT equal total layers.
+        assert_ne!(
+            profile.full_attention_layer_count(),
+            profile.total_layer_count()
+        );
+    }
+
+    #[test]
+    fn gemma4_global_kv_included_not_zeroed() {
+        // Hard gate: Gemma4 global_kv_heads from config, not zeroed or ignored.
+        let bytes = load_fixture("mlx-community_gemma-4-26b-a4b-it-4bit.config.json").unwrap();
+        let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+
+        let glh = profile.global_local_heads.as_ref().unwrap();
+        assert_eq!(glh.num_global_key_value_heads, Some(2));
+        assert!(!glh.num_global_kv_evidence.as_ref().unwrap().is_empty());
+        assert_eq!(glh.global_head_dim, Some(512));
+        assert!(!glh.global_head_dim_evidence.as_ref().unwrap().is_empty());
+    }
+
+    #[test]
+    fn gemma4_local_kv_capped_by_sliding_window() {
+        // Hard gate: Gemma4 local KV capped by sliding window.
+        let bytes = load_fixture("mlx-community_gemma-4-26b-a4b-it-4bit.config.json").unwrap();
+        let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+
+        let glh = profile.global_local_heads.as_ref().unwrap();
+        // Local KV heads derived from total - global.
+        assert_eq!(glh.num_local_key_value_heads, Some(6));
+        assert!(glh.local_attn_window_size.is_some());
+        assert_eq!(glh.local_attn_window_size, Some(1024));
+    }
+
+    #[test]
+    fn recurrent_state_explicit_with_field_evidence() {
+        // Hard gate: Recurrent state is explicit with field_evidence.
+        let bytes = load_fixture("mlx-community_Qwen3.6-27B-4bit.config.json").unwrap();
+        let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+
+        let rcg = profile.recurrent_state.as_ref().unwrap();
+        // Every populated field has evidence.
+        assert!(rcg.linear_conv_kernel_dim_evidence.is_some());
+        assert!(rcg.linear_key_head_dim_evidence.is_some());
+        assert!(rcg.linear_num_key_heads_evidence.is_some());
+        assert!(rcg.linear_num_value_heads_evidence.is_some());
+        assert!(rcg.linear_value_head_dim_evidence.is_some());
+        assert!(rcg.mamba_ssm_dtype_evidence.is_some());
+    }
+
+    #[test]
+    fn moe_expert_topology_with_field_evidence() {
+        // Hard gate: MoE experts have field_evidence.
+        let bytes = load_fixture("mlx-community_Qwen3.6-35B-A3B-4bit.config.json").unwrap();
+        let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+
+        let experts = profile.experts.as_ref().unwrap();
+        assert_eq!(experts.n_experts, 256);
+        assert!(!experts.field_evidence.is_empty());
+        assert_eq!(experts.top_k, Some(8));
+        assert!(experts.top_k_evidence.is_some());
+    }
+
+    #[test]
+    fn external_companion_from_draft_model_source() {
+        // Per A25: external drafter with model source is tracked separately.
+        let json = r#"{
+            "hidden_size": 1024,
+            "num_hidden_layers": 10,
+            "num_attention_heads": 8,
+            "draft_model": {
+                "model": "mlx-community/drafter-model",
+                "num_hidden_layers": 3
+            }
+        }"#;
+        let profile = parse_mlx_config_bytes_to_profile(json.as_bytes()).unwrap();
+
+        assert_eq!(profile.external_companions.len(), 1);
+        let companion = &profile.external_companions[0];
+        assert_eq!(companion.companion_type, CompanionType::Drafter);
+        assert_eq!(companion.source, "mlx-community/drafter-model");
+        assert_eq!(companion.provenance, "draft_model.model");
+
+        // MTP still tracked from layers.
+        assert!(profile.embedded_mtp.is_some());
+        assert_eq!(profile.embedded_mtp.as_ref().unwrap().n_layers, 3);
+    }
+
+    #[test]
+    fn no_double_counting_mtp_companions_from_main_geometry() {
+        // Hard gate: MTP/companions separate from main geometry.
+        let json = r#"{
+            "hidden_size": 1024,
+            "num_hidden_layers": 10,
+            "num_attention_heads": 8,
+            "mtp_num_hidden_layers": 2,
+            "draft_model": {
+                "model": "external-drafter",
+                "num_hidden_layers": 1
+            }
+        }"#;
+        let profile = parse_mlx_config_bytes_to_profile(json.as_bytes()).unwrap();
+
+        // Main geometry is 10 layers, not 10+2+1.
+        assert_eq!(profile.weights.n_layers.value, 10);
+        assert_eq!(profile.total_layer_count(), 10);
+
+        // MTP tracked separately.
+        assert!(profile.embedded_mtp.is_some());
+
+        // External companion tracked separately.
+        assert_eq!(profile.external_companions.len(), 1);
+    }
+
+    #[test]
+    fn gemma4_31b_dense_no_moe() {
+        // Hard gate: Gemma-4-31b global_kv=4, no MoE.
+        let bytes = load_fixture("mlx-community_gemma-4-31b-it-4bit.config.json").unwrap();
+        let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+
+        let glh = profile.global_local_heads.as_ref().unwrap();
+        assert_eq!(glh.num_global_key_value_heads, Some(4));
+
+        assert!(!profile.is_moe());
+    }
+
+    #[test]
+    fn qwen3_06b_dense_baseline() {
+        // Hard gate: Qwen3-0.6B dense geometry, no MoE/MTP/recurrent.
+        let bytes = load_fixture("mlx-community_Qwen3-0.6B-4bit.config.json").unwrap();
+        let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+
+        assert!(!profile.is_moe());
+        assert!(profile.recurrent_state.is_none());
+        assert!(profile.embedded_mtp.is_none());
+        assert_eq!(profile.full_attention_layer_count(), 28);
+        assert_eq!(profile.total_layer_count(), 28);
+    }
+
+    // ── Part C: Context ceiling propagation tests ────────────────────────────
+
+    #[test]
+    fn context_ceiling_propagated_from_flat_config_max_position_embeddings() {
+        let json = r#"{
+            "hidden_size": 1024,
+            "num_hidden_layers": 10,
+            "num_attention_heads": 8,
+            "max_position_embeddings": 16384
+        }"#;
+        let profile = parse_mlx_config_bytes_to_profile(json.as_bytes()).unwrap();
+        assert_eq!(profile.weights.max_position_embeddings.value, 16384);
+        assert_eq!(
+            profile.weights.max_position_embeddings.field_evidence,
+            "max_position_embeddings"
+        );
+        assert_eq!(profile.model_context_limit, Some(16384));
+    }
+
+    #[test]
+    fn context_ceiling_propagated_from_nested_text_config() {
+        let json = r#"{
+            "model_type": "test",
+            "text_config": {
+                "hidden_size": 1024,
+                "num_hidden_layers": 10,
+                "num_attention_heads": 8,
+                "max_position_embeddings": 131072
+            }
+        }"#;
+        let profile = parse_mlx_config_bytes_to_profile(json.as_bytes()).unwrap();
+        assert_eq!(profile.weights.max_position_embeddings.value, 131072);
+        assert_eq!(
+            profile.weights.max_position_embeddings.field_evidence,
+            "text_config.max_position_embeddings"
+        );
+        assert_eq!(profile.model_context_limit, Some(131072));
+    }
+
+    #[test]
+    fn context_ceiling_fallback_to_model_max_length() {
+        // When max_position_embeddings is absent, model_max_length is used as fallback.
+        let json = r#"{
+            "hidden_size": 1024,
+            "num_hidden_layers": 10,
+            "num_attention_heads": 8,
+            "model_max_length": 65536
+        }"#;
+        let profile = parse_mlx_config_bytes_to_profile(json.as_bytes()).unwrap();
+        assert_eq!(profile.weights.max_position_embeddings.value, 65536);
+        assert_eq!(
+            profile.weights.max_position_embeddings.field_evidence,
+            "model_max_length"
+        );
+        assert_eq!(profile.model_context_limit, Some(65536));
+    }
+
+    #[test]
+    fn context_ceiling_max_position_embeddings_takes_precedence_over_model_max_length() {
+        // max_position_embeddings is the canonical field; model_max_length only used as fallback.
+        let json = r#"{
+            "hidden_size": 1024,
+            "num_hidden_layers": 10,
+            "num_attention_heads": 8,
+            "max_position_embeddings": 32768,
+            "model_max_length": 65536
+        }"#;
+        let profile = parse_mlx_config_bytes_to_profile(json.as_bytes()).unwrap();
+        assert_eq!(profile.weights.max_position_embeddings.value, 32768);
+        assert_eq!(
+            profile.weights.max_position_embeddings.field_evidence,
+            "max_position_embeddings"
+        );
+        assert_eq!(profile.model_context_limit, Some(32768));
+    }
+
+    #[test]
+    fn context_ceiling_all_fixtures_with_max_position_embeddings() {
+        // Hard gate: context ceiling present for ALL fixtures where config provides it.
+        for name in [
+            "mlx-community_Qwen3-0.6B-4bit.config.json",
+            "mlx-community_Qwen3-30B-A3B-4bit.config.json",
+            "mlx-community_Qwen3.6-27B-4bit.config.json",
+            "mlx-community_Qwen3.6-35B-A3B-4bit.config.json",
+            "mlx-community_gemma-4-26b-a4b-it-4bit.config.json",
+            "mlx-community_gemma-4-31b-it-4bit.config.json",
+        ] {
+            let bytes = load_fixture(name).unwrap();
+            let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+            assert!(
+                profile.model_context_limit.is_some(),
+                "{name}: model_context_limit must be set"
+            );
+            assert!(
+                !profile
+                    .weights
+                    .max_position_embeddings
+                    .field_evidence
+                    .is_empty(),
+                "{name}: field_evidence must be set"
+            );
+            assert!(
+                profile.weights.max_position_embeddings.value > 0,
+                "{name}: max_position_embeddings must be > 0"
+            );
+        }
+    }
+}

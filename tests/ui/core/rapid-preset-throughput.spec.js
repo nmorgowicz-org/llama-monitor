@@ -1,0 +1,206 @@
+import { test, expect } from '@playwright/test';
+
+// The spawn wizard gained five Rapid-MLX throughput controls; the preset editor did not.
+// A preset that cannot express a field does not merely omit it -- the editor rebuilds the
+// rapid_mlx object on every save, so it writes its own defaults over whatever the wizard
+// set. These tests cover both directions: existing values must load into the controls, and
+// edited values must reach the request body.
+test.describe('Rapid-MLX preset editor throughput fields', () => {
+  const SEED = {
+    name: 'throughput probe',
+    backend: 'rapid_mlx',
+    rapid_mlx: {
+      port: 8080,
+      model_source: '/tmp/Qwen3-8B-4bit',
+      gpu_memory_utilization: 0.85,
+      max_num_seqs: 8,
+      max_concurrent_requests: 32,
+      pflash_policy: 'auto',
+    },
+  };
+
+  // Edit mode, not seeded-new: only the edit path loads stored values into the controls,
+  // and editing an existing preset is the path where a dropped field overwrites real data.
+  async function openSeeded(page) {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.evaluate(async (seed) => {
+      const { sessionState } = await import('/js/core/app-state.js');
+      const mod = await import('/js/features/presets.js');
+      sessionState.presets = [{ id: 'probe', ...seed }];
+      const sel = document.getElementById('preset-select');
+      sel.innerHTML = '<option value="probe">throughput probe</option>';
+      sel.value = 'probe';
+      mod.openPresetModal('edit');
+    }, SEED);
+    await page.locator('#preset-modal .preset-nav-item[data-section="context"]').click();
+  }
+
+  test('@in-memory-test stored values load into the controls', async ({ page }) => {
+    await openSeeded(page);
+    await expect(page.locator('#modal-rapid-gpu-memory-utilization')).toHaveValue('0.85');
+    await expect(page.locator('#modal-rapid-max-num-seqs')).toHaveValue('8');
+    await expect(page.locator('#modal-rapid-max-concurrent-requests')).toHaveValue('32');
+    await expect(page.locator('#modal-rapid-pflash-policy')).toHaveValue('auto');
+  });
+
+  test('@in-memory-test edited values reach the save request', async ({ page }) => {
+    await openSeeded(page);
+
+    let body = null;
+    await page.route('**/api/presets/**', async (route, request) => {
+      if (request.method() === 'PUT') body = request.postDataJSON();
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"id":"probe"}' });
+    });
+
+    await page.selectOption('#modal-rapid-gpu-memory-utilization', '0.95');
+    await page.selectOption('#modal-rapid-max-num-seqs', '4');
+    await page.selectOption('#modal-rapid-pflash-policy', 'on');
+    // Editing an existing preset is a two-step save: the first call renders a change
+    // summary and flips the button to "Confirm Save", the second issues the PUT.
+    await page.evaluate(async () => {
+      const mod = await import('/js/features/presets.js');
+      await mod.savePreset(new Event('submit'));
+    });
+    await expect(page.locator('#preset-change-summary')).toBeVisible();
+    await expect(page.locator('#preset-change-summary-list')).toContainText('0.95');
+    await page.evaluate(async () => {
+      const mod = await import('/js/features/presets.js');
+      await mod.savePreset(new Event('submit'));
+    });
+
+    expect(body, 'save request was never issued').not.toBeNull();
+    expect(body.rapid_mlx.gpu_memory_utilization).toBe(0.95);
+    expect(body.rapid_mlx.max_num_seqs).toBe(4);
+    expect(body.rapid_mlx.pflash_policy).toBe('on');
+    // Untouched controls keep the seeded values rather than reverting to a default.
+    expect(body.rapid_mlx.max_concurrent_requests).toBe(32);
+  });
+
+  // The reason Auto writes null instead of omitting the key: `out` is spread over the stored
+  // rapid_mlx object, so an omitted key leaves the previous value untouched and selecting Auto
+  // on a preset that already had a value would silently do nothing.
+  test('@in-memory-test selecting Auto clears a stored value', async ({ page }) => {
+    await openSeeded(page);
+    await expect(page.locator('#modal-rapid-max-concurrent-requests')).toHaveValue('32');
+    await page.selectOption('#modal-rapid-max-concurrent-requests', '');
+
+    let body = null;
+    await page.route('**/api/presets/**', async (route, request) => {
+      if (request.method() === 'PUT') body = request.postDataJSON();
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"id":"probe"}' });
+    });
+    for (const _ of [0, 1]) {
+      await page.evaluate(async () => {
+        const mod = await import('/js/features/presets.js');
+        await mod.savePreset(new Event('submit'));
+      });
+    }
+
+    expect(body, 'save request was never issued').not.toBeNull();
+    expect(body.rapid_mlx.max_concurrent_requests).toBeNull();
+  });
+
+  // The generalisation of the bug above. Every Rapid control in the save path used the
+  // `if (value) out.x = value` idiom, so "(unset)" and "Auto" were unreachable states on any
+  // preset that already had a value -- the spread restored the old one and it kept reaching
+  // argv. This walks the whole set rather than the four that were noticed first.
+  test('@in-memory-test every Rapid control can be returned to its unset state', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.evaluate(async () => {
+      const { sessionState } = await import('/js/core/app-state.js');
+      const mod = await import('/js/features/presets.js');
+      sessionState.presets = [{
+        id: 'probe', name: 'fully set', backend: 'rapid_mlx',
+        rapid_mlx: {
+          port: 8080, model_source: '/tmp/Qwen3-8B-4bit',
+          enable_thinking: true, kv_cache_dtype: 'int8', turboquant_mode: 'k8v4',
+          tool_call_parser: 'hermes', reasoning_parser: 'deepseek_r1', sampling_mode: 'coding',
+          default_temperature: 0.7, default_top_p: 0.9, default_top_k: 40, default_min_p: 0.05,
+          default_repetition_penalty: 1.1, default_presence_penalty: 0.5, max_tokens: 4096,
+        },
+      }];
+      const sel = document.getElementById('preset-select');
+      sel.innerHTML = '<option value="probe">fully set</option>';
+      sel.value = 'probe';
+      mod.openPresetModal('edit');
+    });
+    // Return every control to the option that means "do not send this".
+    await page.locator('#preset-modal .preset-nav-item[data-section="generation"]').click();
+    await page.selectOption('#modal-rapid-enable-thinking', '');
+    await page.selectOption('#modal-rapid-tool-call-parser', '');
+    await page.selectOption('#modal-rapid-reasoning-parser', '');
+    await page.selectOption('#modal-rapid-sampling-mode', 'auto');
+    for (const id of ['modal-temperature', 'modal-top-p', 'modal-top-k', 'modal-min-p',
+                      'modal-repeat-penalty', 'modal-presence-penalty']) {
+      await page.fill(`#${id}`, '');
+    }
+    await page.locator('#preset-modal .preset-nav-item[data-section="context"]').click();
+    await page.selectOption('#modal-rapid-kv-cache-dtype', '');
+    await page.selectOption('#modal-rapid-turboquant-mode', 'auto');
+    await page.locator('#preset-modal .preset-nav-item[data-section="generation"]').click();
+    await page.fill('#modal-max-tokens', '');
+
+    let body = null;
+    await page.route('**/api/presets/**', async (route, request) => {
+      if (request.method() === 'PUT') body = request.postDataJSON();
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"id":"probe"}' });
+    });
+    for (const _ of [0, 1]) {
+      await page.evaluate(async () => {
+        const mod = await import('/js/features/presets.js');
+        await mod.savePreset(new Event('submit'));
+      });
+    }
+
+    expect(body, 'save request was never issued').not.toBeNull();
+    const stuck = Object.entries({
+      enable_thinking: body.rapid_mlx.enable_thinking,
+      kv_cache_dtype: body.rapid_mlx.kv_cache_dtype,
+      turboquant_mode: body.rapid_mlx.turboquant_mode,
+      tool_call_parser: body.rapid_mlx.tool_call_parser,
+      reasoning_parser: body.rapid_mlx.reasoning_parser,
+      sampling_mode: body.rapid_mlx.sampling_mode,
+      default_temperature: body.rapid_mlx.default_temperature,
+      default_top_p: body.rapid_mlx.default_top_p,
+      default_top_k: body.rapid_mlx.default_top_k,
+      default_min_p: body.rapid_mlx.default_min_p,
+      default_repetition_penalty: body.rapid_mlx.default_repetition_penalty,
+      default_presence_penalty: body.rapid_mlx.default_presence_penalty,
+      max_tokens: body.rapid_mlx.max_tokens,
+    }).filter(([, v]) => v !== null && v !== undefined);
+    expect(stuck, 'controls cleared by the user but still carrying their old value').toEqual([]);
+  });
+
+  test('@in-memory-test Auto writes null rather than pinning a default', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.evaluate(async () => {
+      const mod = await import('/js/features/presets.js');
+      mod.openPresetModal('new', null, {
+        name: 'bare', backend: 'rapid_mlx',
+        rapid_mlx: { port: 8080, model_source: '/tmp/Qwen3-8B-4bit' },
+      });
+    });
+    await page.locator('#preset-modal .preset-nav-item[data-section="context"]').click();
+
+    let body = null;
+    await page.route('**/api/presets', async (route, request) => {
+      if (request.method() === 'POST') body = request.postDataJSON();
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"id":"probe"}' });
+    });
+    await page.evaluate(async () => {
+      const mod = await import('/js/features/presets.js');
+      await mod.savePreset(new Event('submit'));
+    });
+
+    expect(body, 'save request was never issued').not.toBeNull();
+    // null, not absent: `out` is spread over the stored rapid_mlx, so Auto has to write
+    // something or it could never clear a value that was already there. Serde reads null
+    // into the same None the missing key would have produced.
+    expect(body.rapid_mlx.gpu_memory_utilization).toBeNull();
+    expect(body.rapid_mlx.max_num_seqs).toBeNull();
+    expect(body.rapid_mlx.max_concurrent_requests).toBeNull();
+  });
+});

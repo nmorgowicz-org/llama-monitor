@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(feature = "webview-popover")]
@@ -38,7 +39,7 @@ fn try_install_webview2() {
             Ok(s) if s.success() => {
                 eprintln!(
                     "[tray] winget install Microsoft.EdgeWebView2Runtime succeeded. \
-                     Please restart llama-monitor to enable the tray popover."
+                     Please restart Local LLM Foundry to enable the tray popover."
                 );
             }
             Ok(s) => {
@@ -67,6 +68,8 @@ use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalPosition;
 #[cfg(feature = "webview-popover")]
 use winit::dpi::PhysicalSize;
+#[cfg(all(not(target_os = "linux"), feature = "webview-popover"))]
+use winit::dpi::Position;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::WindowId;
@@ -89,9 +92,13 @@ use crate::system::SystemMetrics;
 #[cfg(feature = "webview-popover")]
 const POPOVER_WIDTH: f64 = 240.0;
 #[cfg(feature = "webview-popover")]
+const POPOVER_MIN_WIDTH: f64 = 200.0;
+#[cfg(feature = "webview-popover")]
+const POPOVER_MAX_WIDTH: f64 = 520.0;
+#[cfg(feature = "webview-popover")]
 const POPOVER_INITIAL_HEIGHT: f64 = 220.0;
 #[cfg(feature = "webview-popover")]
-const POPOVER_MIN_HEIGHT: f64 = 96.0;
+const POPOVER_MIN_HEIGHT: f64 = POPOVER_INITIAL_HEIGHT;
 #[cfg(feature = "webview-popover")]
 const POPOVER_MAX_HEIGHT: f64 = 520.0;
 
@@ -103,41 +110,38 @@ type TrayMetrics = (
 );
 
 fn create_tray_icon() -> Icon {
-    let size = 22u32;
-    let mut rgba = vec![0u8; (size * size * 4) as usize];
+    let png_bytes = crate::web::static_assets::TOKEN_INGOT_22_PNG;
+    let decoded = (|| {
+        let decoder = png::Decoder::new(std::io::Cursor::new(png_bytes));
+        let mut reader = decoder.read_info().ok()?;
+        let mut buffer = vec![0; reader.output_buffer_size()?];
+        let output = reader.next_frame(&mut buffer).ok()?;
+        let bytes = &buffer[..output.buffer_size()];
+        let rgba = match output.color_type {
+            png::ColorType::Rgba => bytes.to_vec(),
+            png::ColorType::Rgb => bytes
+                .chunks_exact(3)
+                .flat_map(|pixel| [pixel[0], pixel[1], pixel[2], 255])
+                .collect(),
+            png::ColorType::GrayscaleAlpha => bytes
+                .chunks_exact(2)
+                .flat_map(|pixel| [pixel[0], pixel[0], pixel[0], pixel[1]])
+                .collect(),
+            png::ColorType::Grayscale => bytes
+                .iter()
+                .flat_map(|pixel| [*pixel, *pixel, *pixel, 255])
+                .collect(),
+            _ => return None,
+        };
+        Some((rgba, output.width, output.height))
+    })();
 
-    let mut set = |x: u32, y: u32| {
-        if x < size && y < size {
-            let idx = ((y * size + x) * 4) as usize;
-            rgba[idx + 3] = 255;
-        }
-    };
-
-    for x in 2..=19 {
-        set(x, 3);
-        set(x, 4);
-        set(x, 13);
-    }
-    for y in 3..=13 {
-        set(2, y);
-        set(3, y);
-        set(18, y);
-        set(19, y);
-    }
-    for y in 14..=16 {
-        set(10, y);
-        set(11, y);
-    }
-    for x in 7..=14 {
-        set(x, 17);
-        set(x, 18);
-    }
-
-    Icon::from_rgba(rgba, size, size)
-        .unwrap_or_else(|_| Icon::from_rgba(vec![0, 0, 0, 255], 1, 1).unwrap())
+    decoded
+        .and_then(|(rgba, width, height)| Icon::from_rgba(rgba, width, height).ok())
+        .unwrap_or_else(|| Icon::from_rgba(vec![0, 0, 0, 255], 1, 1).unwrap())
 }
 
-pub fn run_tray(state: AppState, port: u16) -> anyhow::Result<()> {
+pub fn run_tray(state: AppState, port: u16, app_root: PathBuf) -> anyhow::Result<()> {
     #[cfg(not(feature = "webview-popover"))]
     let _ = port;
 
@@ -174,6 +178,7 @@ pub fn run_tray(state: AppState, port: u16) -> anyhow::Result<()> {
         tray: None,
         icon: create_tray_icon(),
         port,
+        app_root,
         menu_quit_id: None,
         menu_open_id: None,
         menu_open_logs_id: None,
@@ -202,6 +207,7 @@ struct TrayApp {
     tray: Option<TrayIcon>,
     icon: Icon,
     port: u16,
+    app_root: PathBuf,
     /// Right-click context-menu item ids (so every platform/config has a way to quit
     /// and open the dashboard, independent of the WebView2 popover).
     menu_quit_id: Option<tray_icon::menu::MenuId>,
@@ -234,6 +240,8 @@ struct Popover {
 #[serde(tag = "action", rename_all = "snake_case")]
 enum PopoverMessage {
     Resize { width: f64, height: f64 },
+    Drag,
+    Move { dx: i32, dy: i32 },
     Close,
 }
 
@@ -290,7 +298,7 @@ impl ApplicationHandler for TrayApp {
             let menu = tray_icon::menu::Menu::new();
             let open_item = tray_icon::menu::MenuItem::new("Open Dashboard", true, None);
             let open_logs_item = tray_icon::menu::MenuItem::new("Open Logs Folder", true, None);
-            let quit_item = tray_icon::menu::MenuItem::new("Quit Llama Monitor", true, None);
+            let quit_item = tray_icon::menu::MenuItem::new("Quit Local LLM Foundry", true, None);
             let _ = menu.append(&open_item);
             let _ = menu.append(&open_logs_item);
             let _ = menu.append(&tray_icon::menu::PredefinedMenuItem::separator());
@@ -300,7 +308,7 @@ impl ApplicationHandler for TrayApp {
             self.menu_quit_id = Some(quit_item.id().clone());
 
             let builder = TrayIconBuilder::new()
-                .with_tooltip("Llama Monitor")
+                .with_tooltip(crate::identity::PRODUCT_NAME)
                 .with_menu(Box::new(menu))
                 // Keep left-click for the popover toggle; menu is right-click only.
                 .with_menu_on_left_click(false)
@@ -343,7 +351,7 @@ impl ApplicationHandler for TrayApp {
             } else if self.menu_open_id.as_ref() == Some(&menu_event.id) {
                 open_dashboard(self.port);
             } else if self.menu_open_logs_id.as_ref() == Some(&menu_event.id) {
-                open_logs_folder();
+                open_logs_folder(&self.app_root);
             }
         }
 
@@ -388,6 +396,28 @@ impl ApplicationHandler for TrayApp {
                 match message {
                     PopoverMessage::Resize { width, height } => {
                         latest = Some((width, height));
+                    }
+                    PopoverMessage::Drag =>
+                    {
+                        #[cfg(not(target_os = "linux"))]
+                        if let Some(popover) = self.popover.as_ref() {
+                            let _ = popover.window.drag_window();
+                        }
+                    }
+                    PopoverMessage::Move { dx, dy } => {
+                        #[cfg(not(target_os = "linux"))]
+                        if let Some(popover) = self.popover.as_ref()
+                            && let Ok(position) = popover.window.outer_position()
+                        {
+                            popover.window.set_outer_position(Position::Physical(
+                                PhysicalPosition::new(
+                                    position.x.saturating_add(dx),
+                                    position.y.saturating_add(dy),
+                                ),
+                            ));
+                        }
+                        #[cfg(target_os = "linux")]
+                        let _ = (dx, dy);
                     }
                     PopoverMessage::Close => close_requested = true,
                 }
@@ -482,6 +512,9 @@ impl TrayApp {
             .with_surface_size(winit::dpi::LogicalSize::new(width, height))
             .with_position(PhysicalPosition::new(x as i32, y as i32))
             .with_decorations(false)
+            // Keep the Windows popover user-resizable. The compact page still
+            // reports content-driven height through IPC, while this enables
+            // normal edge/corner resizing from the borderless Winit window.
             .with_resizable(false)
             .with_window_level(WindowLevel::AlwaysOnTop)
             .with_visible(true);
@@ -529,7 +562,7 @@ impl TrayApp {
                     if likely_missing_runtime {
                         eprintln!(
                             "[tray] Tray popover unavailable: WebView2 runtime not found. \
-                             Attempting automatic install — restart llama-monitor afterward. \
+                             Attempting automatic install — restart Local LLM Foundry afterward. \
                              Manual download: \
                              https://developer.microsoft.com/microsoft-edge/webview2/"
                         );
@@ -573,12 +606,12 @@ impl TrayApp {
     }
 
     #[cfg(feature = "webview-popover")]
-    fn resize_popover(&mut self, _reported_width: f64, height: f64) {
+    fn resize_popover(&mut self, reported_width: f64, height: f64) {
         let Some(popover) = self.popover.as_mut() else {
             return;
         };
 
-        let width = POPOVER_WIDTH;
+        let width = reported_width.clamp(POPOVER_MIN_WIDTH, POPOVER_MAX_WIDTH);
         let height = height.clamp(POPOVER_MIN_HEIGHT, POPOVER_MAX_HEIGHT);
         if (popover.width - width).abs() < 1.0 && (popover.height - height).abs() < 1.0 {
             return;
@@ -751,13 +784,9 @@ fn open_dashboard(port: u16) {
 /// - Linux: xdg-open
 ///
 /// If the logs directory doesn't exist, creates it.
-fn open_logs_folder() {
-    let Some(config_dir) = dirs::config_dir() else {
-        eprintln!("[tray] failed to open logs folder: could not determine config dir");
-        return;
-    };
-
-    let logs_dir = config_dir.join("llama-monitor").join("logs");
+fn open_logs_folder(app_root: &std::path::Path) {
+    let config_dir = app_root.to_path_buf();
+    let logs_dir = crate::paths::AppPaths::from_root(config_dir.clone()).logs_dir();
 
     // Defensive: canonicalize and ensure it is still under config_dir
     // to guard against future config_dir overrides with .. segments.
@@ -918,6 +947,8 @@ mod tests {
                 assert_eq!(width, 240.0);
                 assert_eq!(height, 180.0);
             }
+            PopoverMessage::Drag => panic!("expected resize message"),
+            PopoverMessage::Move { .. } => panic!("expected resize message"),
             PopoverMessage::Close => panic!("expected resize message"),
         }
     }

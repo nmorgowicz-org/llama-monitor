@@ -1,0 +1,21 @@
+{
+  "fixture_version": 1,
+  "legacy_parser_assets": [
+    "llama-monitor-linux-x86_64",
+    "llama-monitor-linux-aarch64",
+    "llama-monitor-windows-x86_64.zip",
+    "llama-monitor-macos-aarch64.tar.gz"
+  ],
+  "canonical_assets": [
+    "local-llm-foundry-linux-x86_64",
+    "local-llm-foundry-linux-aarch64",
+    "local-llm-foundry-windows-x86_64.zip",
+    "local-llm-foundry-macos-aarch64.tar.gz"
+  ],
+  "negative_cases": [
+    "missing checksum entry",
+    "checksum mismatch",
+    "legacy Windows archive missing WebView2Loader.dll",
+    "macOS archive with canonical filename but legacy payload"
+  ]
+}

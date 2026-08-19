@@ -17,6 +17,20 @@ npm test -- --headless=false
 npm test -- --debug
 ```
 
+### Reading a local result
+
+The suite runs **one worker, serially** — locally and in CI alike (`fullyParallel: false`,
+`workers: 1`). Do not pass `--workers=N` to "speed things up" and then treat what comes back
+as a verdict on the tests. Several specs share module-level wizard state and a single test
+server; running them concurrently produces failures that say nothing about the code, and CI
+will never reproduce them because CI never runs that way.
+
+If you want parallelism deliberately, set `PLAYWRIGHT_PARALLEL=1`. Results from such a run
+are for your own iteration speed only and must not be reported as a suite status.
+
+Local retries are 0 where CI uses 2, on purpose: local is stricter, so a local pass implies
+a CI pass. A local failure is worth investigating; it is not automatically a CI failure.
+
 To exercise form-auth mode, pass extra server args through `LLAMA_MONITOR_TEST_ARGS`:
 
 ```bash
@@ -35,7 +49,7 @@ The UI suite covers:
 
 ## Screenshot and GIF capture harness
 
-All repo-managed screenshots and GIFs go through `tests/ui/capture.mjs`.
+All repo-managed screenshots and GIFs go through `tests/ui/capture/index.mjs`.
 
 The harness:
 
@@ -60,17 +74,37 @@ cargo build --release
 ### Listing scenarios
 
 ```bash
-node tests/ui/capture.mjs --list-scenarios
+node tests/ui/capture/index.mjs --list-scenarios
 ```
+
+### Wizard capture contract
+
+Wizard still scenarios declare an intent and exact final output filenames. Before a run, the harness
+removes only those filenames from that scenario's assigned artifact group; on success it writes a
+`<scenario>--receipt.json` beside the images with the produced names and viewports. A missing,
+unexpected, or unrealistic-viewport screenshot fails the scenario. Check static call-site metadata
+without starting the app with:
+
+```bash
+node tests/ui/capture/cli-manifest.mjs --strict
+```
+
+Rapid wizard stills belong in `artifacts/wizard-rapidmlx`; llama.cpp wizard stills belong in
+`artifacts/wizard-llamacpp`. Runtime/dashboard scenarios are grouped by their own feature area.
 
 ### Current scenarios
 
 | Scenario | Purpose |
 |----------|---------|
 | `welcome` | Welcome/setup screen plus form-auth shell without remote attach |
+| `free-cache` | Native Free Cache confirmation shown over the welcome/setup screen |
 | `chat` | Core chat view, telemetry overlay, and logs |
 | `guided-gen` | Context notes, suggestions, quick guide, director, surprise, explicit mode |
 | `sidebar` | Chat sidebar, message-search flyout, context menu, title filter |
+| `models-v2` | Typed model inventory, Import Lab, and Hugging Face download surfaces |
+| `model-discovery` | HF Download tab search/discovery: scope selector, sort, category/qualification badges (real HF data, not the Library tab — `models-v2` covers Library) |
+| `preset-editor` | llama.cpp preset model, GPU, and advanced sections |
+| `rapid-preset` | Rapid-MLX welcome cards and preset editor with legacy and typed model-source fixtures |
 | `settings` | Settings modal, performance tab, advanced tab, user preferences, persona, models, shortcuts |
 | `panels` | Behavior, model, style, and prompt-debug surfaces |
 | `dashboard` | Server tab and GPU section |
@@ -84,39 +118,45 @@ node tests/ui/capture.mjs --list-scenarios
 
 ```bash
 # Welcome screen only
-node tests/ui/capture.mjs --scenario welcome
+node tests/ui/capture/index.mjs --scenario welcome
+
+# Free Cache confirmation
+node tests/ui/capture/index.mjs --scenario free-cache
 
 # Core chat / logs / telemetry
-SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario chat
+SCREENSHOT_PORT=8892 node tests/ui/capture/index.mjs --scenario chat
 
 # Guided-generation surfaces
-SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario guided-gen
+SCREENSHOT_PORT=9001 node tests/ui/capture/index.mjs --scenario guided-gen
 
 # Sidebar and search surfaces
-SCREENSHOT_PORT=8893 node tests/ui/capture.mjs --scenario sidebar
+SCREENSHOT_PORT=8893 node tests/ui/capture/index.mjs --scenario sidebar
+
+# Rapid-MLX preset cards and editor source-contract coverage
+SCREENSHOT_PORT=8902 node tests/ui/capture/index.mjs --scenario rapid-preset --no-attach
 
 # Settings and modal surfaces
-SCREENSHOT_PORT=8894 node tests/ui/capture.mjs --scenario settings
+SCREENSHOT_PORT=8894 node tests/ui/capture/index.mjs --scenario settings
 
 # Appearance palettes and light-mode dashboard
-SCREENSHOT_PORT=8899 node tests/ui/capture.mjs --scenario appearance-palette --no-attach
+SCREENSHOT_PORT=8899 node tests/ui/capture/index.mjs --scenario appearance-palette --no-attach
 
 # Chat configuration panels
-SCREENSHOT_PORT=8896 node tests/ui/capture.mjs --scenario panels
+SCREENSHOT_PORT=8896 node tests/ui/capture/index.mjs --scenario panels
 
 # Server tab and GPU section
-SCREENSHOT_PORT=8897 node tests/ui/capture.mjs --scenario dashboard
+SCREENSHOT_PORT=8897 node tests/ui/capture/index.mjs --scenario dashboard
 
 # Sparkline validation
-SCREENSHOT_PORT=8898 node tests/ui/capture.mjs --scenario sparkline
+SCREENSHOT_PORT=8898 node tests/ui/capture/index.mjs --scenario sparkline
 
 # GIFs
-SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs
-SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
-SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --inference-only
+SCREENSHOT_PORT=8895 node tests/ui/capture/index.mjs --scenario gifs
+SCREENSHOT_PORT=8895 node tests/ui/capture/index.mjs --scenario gifs --gpu-only
+SCREENSHOT_PORT=8895 node tests/ui/capture/index.mjs --scenario gifs --inference-only
 
 # Smoke run
-SCREENSHOT_PORT=8899 node tests/ui/capture.mjs --scenario smoke
+SCREENSHOT_PORT=8899 node tests/ui/capture/index.mjs --scenario smoke
 ```
 
 ### Useful options
@@ -155,7 +195,7 @@ When you change dashboard / metrics / server tab visuals, use this subset instea
 
 When adding or changing screenshot coverage:
 
-1. Extend an existing scenario in `tests/ui/capture.mjs` when the surface already belongs to one.
+1. Extend an existing scenario in `tests/ui/capture/index.mjs` when the surface already belongs to one.
 2. Add a new scenario only when the coverage area is clearly distinct.
 3. Register the scenario in the `SCENARIOS` map.
 4. Update the usage text in `printUsage()`.

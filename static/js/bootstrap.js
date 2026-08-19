@@ -5,6 +5,7 @@
 import './compat/globals.js'; // Set window.escapeHtml, window.formatMetricNumber
 
 import { chat } from './core/app-state.js';
+import { applyProductIdentity } from './core/identity.js';
 import { initDashboardRender } from './features/dashboard-render.js';
 import { initWebSocket } from './features/dashboard-ws.js';
 import { initPresets } from './features/presets.js';
@@ -30,6 +31,8 @@ import { initConfig } from './features/config.js';
 import { initModels } from './features/models.js';
 import { initSensorBridge } from './features/sensor-bridge.js';
 import { initToast } from './features/toast.js';
+import { initAppHomeMigration } from './features/app-home-migration.js';
+import { initModelRootMigration } from './features/model-root-migration.js';
 import { initNetworkDetection } from './features/network-detection.js';
 import { initContextSidebar } from './features/chat-notes.js';
 import { initSuggestionsDropdown, closeSuggestionsDropdown } from './features/chat-suggestions.js';
@@ -40,15 +43,20 @@ import { deriveTelemetryGrade, gradeLabel, gradeStatusClass, gradeActionCopy } f
 import { initReplyPlanUpdates } from './features/chat-reply-plan.js';
 import { initCommandPalette } from './features/workspace-command-palette.js';
 import { initSpawnWizard, showSpawnRoute, closeSpawnWizard } from './features/spawn-wizard.js';
+import './features/spawn-wizard-sticky-vram.js';
+
 import { initTunePanel } from './features/tune-panel.js';
 import { initLlamaUpdater } from './features/llama-updater.js';
+import { initRapidMlxUpdater } from './features/rapid-mlx-updater.js';
 import { initTemplateAutoupdater } from './features/template-autoupdater.js';
 import { HF_DISCOVER_CATEGORIES } from './features/hf-browse.js';
 import { initGlobalTooltip } from './core/tooltip.js';
+import { initEvidenceDrawer } from './features/evidence-drawer.js';
 import Router from './features/router.js';
 
 // Verify module loading works — if this fails, the page is broken.
 console.log('[bootstrap] Module entrypoint loaded');
+applyProductIdentity();
 
 // Helper for modules: returns headers object with Authorization if token is available.
 window.authHeaders = function(extra = {}) {
@@ -99,6 +107,7 @@ async function initializeApp() {
     }
 
     initGlobalTooltip();
+    initEvidenceDrawer();
 
     // Phase 1: Initialize rendering functions, then WebSocket.
     initDashboardRender();
@@ -143,6 +152,8 @@ async function initializeApp() {
     initModels();
     initSensorBridge();
     initToast();
+    await initAppHomeMigration();
+    await initModelRootMigration();
     initNetworkDetection();
 
     // Phase 9: Guided generation features
@@ -161,6 +172,7 @@ async function initializeApp() {
     initSpawnWizard();
     initTunePanel();
     initLlamaUpdater();
+    initRapidMlxUpdater();
     initTemplateAutoupdater();
 
     // Initialize chat tabs only after token bootstrap and feature init complete.
@@ -207,7 +219,7 @@ async function initializeApp() {
     Router.register('/settings', () => {
       // Support hash-based tab targeting: /settings#models, /settings#session, etc.
       // Sanitize against the real tab values to avoid using arbitrary hashes.
-      const allowedTabs = ['chat', 'models', 'session', 'performance', 'gpu', 'advanced', 'security', 'appearance'];
+      const allowedTabs = ['chat', 'models', 'session', 'performance', 'gpu', 'loaders', 'security', 'appearance', 'migration'];
       const hash = (location.hash || '').replace('#', '').trim();
       const tab = allowedTabs.includes(hash) ? hash : null;
       openSettingsModal(tab);
@@ -249,7 +261,12 @@ async function initializeApp() {
     Router.init();
 }
 
-initializeApp().catch(err => console.error('[bootstrap] initializeApp failed:', err));
+// `modules-ready` is the synchronization point used by the UI harness.  Keep
+// it behind the async bootstrap so consumers cannot race initialization of
+// feature event handlers (notably presets and the spawn wizard).
+initializeApp()
+    .catch(err => console.error('[bootstrap] initializeApp failed:', err))
+    .finally(() => document.documentElement.classList.add('modules-ready'));
 
 // Mutual exclusion: opening one guided panel closes the other.
 window.addEventListener('suggestionsOpened', () => closeQuickGuide());
@@ -509,6 +526,3 @@ scheduleDeferredUpdateCheck();
         }
     });
 })();
-
-// Signal that all modules are loaded and initialized
-document.documentElement.classList.add('modules-ready');

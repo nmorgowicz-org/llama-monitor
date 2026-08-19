@@ -86,7 +86,7 @@
   "initial-version": "0.1.0",
   "packages": {
     ".": {
-      "package-name": "llama-monitor",
+      "package-name": "local-llm-foundry",
       "changelog-path": "CHANGELOG.md"
     }
   }

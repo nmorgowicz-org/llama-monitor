@@ -43,6 +43,24 @@ pub fn find_quant(name: &str) -> Option<&'static QuantInfo> {
     QUANT_TABLE.iter().find(|q| q.name == lower.as_str())
 }
 
+/// Approximate a quality tier for a quant with a non-standard name (e.g. a
+/// repo's own mixed-precision scheme like "APEX-MTP-Balanced") by matching
+/// its measured bits-per-weight against the closest standard quant. Bpw is
+/// the only property we can derive purely from file size, so it stands in
+/// for quality/is_imatrix/large_moe_only when a repo doesn't use standard
+/// GGUF quant naming.
+pub fn nearest_quant_for_bpw(bpw: f64) -> &'static QuantInfo {
+    QUANT_TABLE
+        .iter()
+        .min_by(|a, b| {
+            (a.bpw - bpw)
+                .abs()
+                .partial_cmp(&(b.bpw - bpw).abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .expect("QUANT_TABLE is non-empty")
+}
+
 static QUANT_TABLE: &[QuantInfo] = &[
     // Reference
     QuantInfo {

@@ -1,0 +1,49 @@
+{
+  "model": "/Users/nick/.config/llama-monitor/models/gguf/Qwen3.6-35B-A3B-uncensored-heretic-Q4_K_M.gguf",
+  "backend": "llama.cpp",
+  "ubatch_sizes": [
+    512,
+    2048
+  ],
+  "context_sizes": [
+    32000,
+    65536,
+    131072,
+    160000,
+    200000
+  ],
+  "receipts": [
+    {
+      "label": "00-cache-ram-0-context-131072",
+      "receipt": "00-00-cache-ram-0-context-131072.json",
+      "manifest": null
+    },
+    {
+      "label": "01-cache-ram-8192-context-131072",
+      "receipt": "01-01-cache-ram-8192-context-131072.json",
+      "manifest": null
+    },
+    {
+      "label": "02-cache-ram-0-context-160000",
+      "receipt": "02-02-cache-ram-0-context-160000.json",
+      "manifest": null
+    },
+    {
+      "label": "03-cache-ram-8192-context-160000",
+      "receipt": "03-03-cache-ram-8192-context-160000.json",
+      "manifest": null
+    },
+    {
+      "label": "04-cache-ram-0-context-200000",
+      "receipt": "04-04-cache-ram-0-context-200000.json",
+      "manifest": null
+    },
+    {
+      "label": "05-cache-ram-8192-context-200000",
+      "receipt": "05-05-cache-ram-8192-context-200000.json",
+      "manifest": null
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

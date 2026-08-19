@@ -1,0 +1,44 @@
+{
+  "model": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
+  "suite": "context",
+  "receipts": [
+    {
+      "label": "00-context-8000-int8",
+      "receipt": "00-00-context-8000-int8.json",
+      "manifest": null,
+      "resumed": true
+    },
+    {
+      "label": "01-context-16000-int8",
+      "receipt": "01-01-context-16000-int8.json",
+      "manifest": null,
+      "resumed": true
+    },
+    {
+      "label": "02-context-32000-int8",
+      "receipt": "02-02-context-32000-int8.json",
+      "manifest": null,
+      "resumed": true
+    },
+    {
+      "label": "03-context-8000-int4",
+      "receipt": "03-03-context-8000-int4.json",
+      "manifest": null,
+      "resumed": true
+    },
+    {
+      "label": "04-context-16000-int4",
+      "receipt": "04-04-context-16000-int4.json",
+      "manifest": null,
+      "resumed": true
+    },
+    {
+      "label": "05-context-32000-int4",
+      "receipt": "05-05-context-32000-int4.json",
+      "manifest": null,
+      "resumed": true
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

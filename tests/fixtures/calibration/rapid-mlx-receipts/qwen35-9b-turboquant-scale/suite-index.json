@@ -1,0 +1,48 @@
+{
+  "model": "nightmedia/Qwen3.5-9B-DS9-USS-Defiant-1M-q8-hi-mlx",
+  "suite": "turboquant-scale",
+  "receipts": [
+    {
+      "label": "00-turboquant-512-none-8000",
+      "receipt": "00-00-turboquant-512-none-8000.json",
+      "manifest": null
+    },
+    {
+      "label": "01-turboquant-512-none-32000",
+      "receipt": "01-01-turboquant-512-none-32000.json",
+      "manifest": null
+    },
+    {
+      "label": "02-turboquant-512-none-65536",
+      "receipt": "02-02-turboquant-512-none-65536.json",
+      "manifest": null
+    },
+    {
+      "label": "03-turboquant-512-none-131072",
+      "receipt": "03-03-turboquant-512-none-131072.json",
+      "manifest": null
+    },
+    {
+      "label": "04-turboquant-512-k8v4-8000",
+      "receipt": "04-04-turboquant-512-k8v4-8000.json",
+      "manifest": null
+    },
+    {
+      "label": "05-turboquant-512-k8v4-32000",
+      "receipt": "05-05-turboquant-512-k8v4-32000.json",
+      "manifest": null
+    },
+    {
+      "label": "06-turboquant-512-k8v4-65536",
+      "receipt": "06-06-turboquant-512-k8v4-65536.json",
+      "manifest": null
+    },
+    {
+      "label": "07-turboquant-512-k8v4-131072",
+      "receipt": "07-07-turboquant-512-k8v4-131072.json",
+      "manifest": null
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

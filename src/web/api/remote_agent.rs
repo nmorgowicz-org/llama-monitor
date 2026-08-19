@@ -760,7 +760,7 @@ fn api_remote_agent_tls_status(app_config: Arc<AppConfig>) -> ApiRoute {
             if !bearer_matches_api_token(bearer.as_deref(), &app_config) {
                 return unauthorized_api_token();
             }
-            let certs_dir = crate::certs::certs_dir();
+            let certs_dir = crate::certs::certs_path_for(&app_config.config_dir);
             let ca_present = certs_dir.join("ca.pem").exists();
             let server_present = certs_dir.join("agent-server.pem").exists();
             let client_present = certs_dir.join("agent-client.pem").exists();

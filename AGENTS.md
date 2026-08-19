@@ -1,17 +1,55 @@
 # Llama Monitor Project Rules
 
+## Serena (IDE-level symbolic tools via MCP)
+
+Serena is connected via MCP and provides IDE-level, symbol-aware tools for navigating and editing this codebase.
+
+> **Current status**: Serena is configured for local use via OpenCode only (not in Codex or Claude Code right now). The `.serena/` directory is in the repo so Serena can operate locally on this project.
+
+### When to use Serena
+
+- **Use Serena tools for any symbol-level operation** — finding symbols, finding references, renaming symbols, replacing symbol bodies, inserting before/after symbols, safe-delete. This is faster and more reliable than naive search-and-replace.
+- **Use Serena for refactoring** — cross-file renames, moves, inlining, propagating deletions.
+- **Use Serena for exploring structure** — symbol overview (file outline), type hierarchy, diagnostics.
+- **Use OpenCode built-in tools for** — small text edits, non-code work, quick reads, shell commands, git.
+
+### How Serena is configured for this project
+
+- Context: `ide` (single-project, focused on symbolic tools; basic file/terminal tools are left to OpenCode).
+- Project is pre-activated on startup via `--project ~/SCRIPTS/CLAUDE/llama-monitor`.
+- On first use, Serena will run an onboarding pass to build memories about the project. Let it complete — this is a one-time cost.
+- Once onboarding is done, Serena will draw on its memories for better context about conventions, structure, and patterns.
+
+### Key Serena tools (names as the agent sees them)
+
+- `find_symbol` — locate a symbol by name across the project.
+- `symbol_overview` — file outline for a given file.
+- `find_references` — find all references to a symbol.
+- `replace_symbol_body` — replace the body of a function/method/struct implementation.
+- `insert_after_symbol` / `insert_before_symbol` — insert code relative to a symbol.
+- `safe_delete` — delete a symbol, propagating the change.
+- `rename_symbol` — rename a symbol across all references.
+
+### Example workflow
+
+To refactor the `AppConfig` struct:
+1. `find_symbol("AppConfig")` → get the struct's location.
+2. `find_references("AppConfig")` → see where it's used.
+3. `replace_symbol_body("AppConfig", <new body>)` → make the change.
+4. Run `cargo clippy` via shell to verify.
+
 ## UI/UX Collaboration
 
 For all UI/UX work (bars, cards, modals, layout changes, visual polish), use the screenshot harness to iterate with the user, not just code descriptions.
 
 - Always run:
   - `cargo build --release`
-  - `node tests/ui/capture.mjs --scenario <scenario>`
+  - `node tests/ui/capture/index.mjs --scenario <scenario>`
 - Use this to:
   - Confirm proposed designs in real UI.
   - Validate text, spacing, colors, and behavior.
 - Use whichever scenario matches the area being changed (e.g., welcome, chat, spawn-wizard, dashboard, settings, sidebar, panels, models-v2, etc.).
-- If new capabilities require new capture scenarios, add them to `capture.mjs` and update its usage docs.
+- If new capabilities require new capture scenarios, add them under `tests/ui/capture/scenarios/<group>/` (group = functional area, e.g. `wizard-llamacpp`, `presets`) and register them in `tests/ui/capture/index.mjs`, then update usage docs. Groups also drive `cli-group.mjs` — see Screenshots Workflow below.
 - Never rely on screenshots from other environments or imagined renders.
 - Treat screenshots as the single source of truth for "what this will look like."
 
@@ -56,6 +94,16 @@ fix(gpu): correct AMD temperature reading
 END_COMMIT_OVERRIDE
 ```
 
+## Feature Implementation Loop
+
+For complex features (e.g., Rapid-MLX integration), use a Pipelined Implementation Loop to maximize context efficiency and stability.
+
+- **The Builder (General Agent)**: Responsible for the "How". Implements a specific phase of the roadmap. Focuses on code correctness, trait implementation, and meeting the phase's "Hard Gates".
+- **The Verifier (General Agent)**: Responsible for the "What". Validates the Builder's work against the original specification. Writes integration tests, performs security reviews, and provides final sign-off for the phase.
+- **The Coordinator (Lead Agent)**: Orchestrates the loop. Manages the roadmap, handles git commits/pushes, ensures a clean handoff between Builder and Verifier, and triggers the next phase only after sign-off.
+
+This separation prevents "looping" where an agent tries to fix a bug it introduced while simultaneously implementing a feature, ensuring a higher quality bar for every merge.
+
 ## Build & Test Commands
 
 ```bash
@@ -97,6 +145,16 @@ Constant naming:
 - JS: skip `js/` prefix, join path parts with `_`, replace `.` and `-` with `_`, uppercase
 - Root: filename with `.` and `-` replaced by `_`, uppercase
 
+## Chat Template UI — Dual-Surface Change
+
+Chat-template selection UI is hand-duplicated in two places: the Spawn Wizard
+(`spawn-wizard-chat-template.js`) and the Preset Editor (`presets.js` +
+`static/index.html`'s `modal-chat-template-file` row). Any change to install/history/
+rollback/status behavior must be made in **both** — see `docs/reference/spawn-wizard.md`
+("Chat templates — two frontend surfaces, one backend") for the full breakdown, including
+the current llama.cpp-only runtime coverage gap (Rapid-MLX does not consume
+`chat_template_file` yet).
+
 ## JavaScript Linting
 
 After modifying `.js` under `static/js/`:
@@ -135,7 +193,7 @@ Full reference: `docs/agents/playwright.md`
 ## Screenshot Harness
 
 ```bash
-node tests/ui/capture.mjs --scenario <name>
+node tests/ui/capture/index.mjs --scenario <name>
 ```
 NEVER run multiple scenarios in parallel (port conflicts). Always `cargo build --release` first if `static/` changed.
 
@@ -224,14 +282,18 @@ For PRs touching multiple files or adding features, run a sub-agent check for:
 ## Screenshots Workflow
 
 - **Capture** (for debugging, UI review): use artifacts/
-  - Run: `node tests/ui/capture.mjs --scenario <name>`
-  - Files go to: `docs/screenshots/artifacts/`
+  - Single scenario: `node tests/ui/capture/index.mjs --scenario <name>`
+  - Whole group (every scenario registered under `tests/ui/capture/scenarios/<group>/`, run sequentially):
+    `SCREENSHOT_PORT=<port> node tests/ui/capture/cli-group.mjs <group> --no-attach`
+    Groups: `config`, `core`, `features`, `models`, `presets`, `validation`, `wizard-llamacpp`, `wizard-rapidmlx`.
+  - Files go to: `docs/screenshots/artifacts/<group>/<scenario-filename>.png` (subfolder per group, not flat).
   - This folder is gitignored: keep it for UX reference, debugging, comparisons.
+  - NEVER run scenarios/groups in parallel (port conflicts) — one `SCREENSHOT_PORT` at a time.
 
 - **Promote** only when actually used in docs:
   - 1) Add image reference in README.md or docs/reference/*.md.
-  - 2) Copy from artifacts/ to docs/screenshots/: 
-       `cp docs/screenshots/artifacts/<name>.png docs/screenshots/<name>.png`
+  - 2) Copy from artifacts/<group>/ to docs/screenshots/ (flat, no subfolder):
+       `cp docs/screenshots/artifacts/<group>/<name>.png docs/screenshots/<name>.png`
   - 3) Commit both: your doc changes + the promoted screenshot.
 
 - **Check for unused screenshots** (before or after PR):

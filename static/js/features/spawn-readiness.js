@@ -64,7 +64,7 @@ export async function waitForSpawnReadiness(port, timeoutMs = 30000) {
     const logs = await fetchLastLogLines();
     const hint = tryExtractHint(logs);
     const msgLines = [
-        `llama-server started but did not become reachable on port ${port} in time.`,
+        `The local model server started but did not become reachable on port ${port} in time.`,
     ];
     if (hint) {
         msgLines.push(hint);

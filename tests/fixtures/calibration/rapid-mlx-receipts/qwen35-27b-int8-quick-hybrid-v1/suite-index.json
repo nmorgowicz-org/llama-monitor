@@ -1,0 +1,18 @@
+{
+  "model": "nightmedia/Qwen3.5-27B-Architect-Deckard-Heretic-mxfp4-mlx",
+  "suite": "context",
+  "receipts": [
+    {
+      "label": "00-context-32000-int8",
+      "receipt": "00-00-context-32000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "01-context-65536-int8",
+      "receipt": "01-01-context-65536-int8.json",
+      "manifest": null
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

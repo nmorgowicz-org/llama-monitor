@@ -1,0 +1,102 @@
+{
+  "description": "Calibration fixture for Qwen3.6-27B dense hybrid DeltaNet on Rapid-MLX.",
+  "model": {
+    "name": "Qwen3.6-27B",
+    "hf_repo_id": "mlx-community/Qwen3-27B-4bit",
+    "type": "dense_hybrid_deltanet",
+    "params_billions": 27,
+    "layers": 64,
+    "attn_layers": 16,
+    "quant": "q4_k_m",
+    "estimated_size_bytes": 14_680_064_000
+  },
+  "backend": "rapid_mlx",
+  "workload_scenario": "coding_agent",
+  "test_cases": [
+    {
+      "id": "qwen36-27b-rapid-int4-16k",
+      "kv_cache_dtype": "int4",
+      "turboquant_mode": "none",
+      "context_tokens": 16384,
+      "retained_cache_tokens": 8192,
+      "parallel_slots": 1,
+      "reasoning_mode": false,
+      "expected_breakdown": {
+        "weights_bytes": 14_680_064_000,
+        "active_kv_bytes": 1_300_000_000,
+        "retained_kv_bytes": 650_000_000,
+        "linear_attn_state_bytes": 76_000_000,
+        "mtp_bytes": 0,
+        "overhead_bytes": 300_000_000,
+        "total_bytes": 17_006_064_000
+      },
+      "measurement_command": "cd ~/.rapid-mlx && RAPID_MLX_METRICS=1 python -m vllm_mlx.serve --model mlx-community/Qwen3-27B-4bit --kv-cache-dtype int4 --max-model-len 16384 --host 127.0.0.1 --port 8000 2>&1 | tee run.log; lsof -n -P -p $(pgrep -f Qwen3-27B) | grep -i memory",
+      "hardware": "Apple M5 Max, 128 GB unified memory, macOS 26.0",
+      "error_bounds": {
+        "weights_bytes": "+/- 0%",
+        "active_kv_bytes": "+/- 15%",
+        "retained_kv_bytes": "+/- 20%",
+        "total_bytes": "+/- 12%",
+        "notes": "KV estimate uses formula from GGUF metadata (n_attn_layers=16). Overhead calibrated on M5 Max with 8% MLX KV fraction pending larger-sample calibration."
+      }
+    },
+    {
+      "id": "qwen36-27b-rapid-int8-16k",
+      "kv_cache_dtype": "int8",
+      "turboquant_mode": "none",
+      "context_tokens": 16384,
+      "retained_cache_tokens": 8192,
+      "parallel_slots": 1,
+      "reasoning_mode": false,
+      "expected_breakdown": {
+        "weights_bytes": 14_680_064_000,
+        "active_kv_bytes": 2_600_000_000,
+        "retained_kv_bytes": 1_300_000_000,
+        "linear_attn_state_bytes": 76_000_000,
+        "mtp_bytes": 0,
+        "overhead_bytes": 450_000_000,
+        "total_bytes": 19_106_064_000
+      },
+      "measurement_command": "cd ~/.rapid-mlx && RAPID_MLX_METRICS=1 python -m vllm_mlx.serve --model mlx-community/Qwen3-27B-4bit --kv-cache-dtype int8 --max-model-len 16384 --host 127.0.0.1 --port 8000 2>&1 | tee run.log; lsof -n -P -p $(pgrep -f Qwen3-27B) | grep -i memory",
+      "hardware": "Apple M5 Max, 128 GB unified memory, macOS 26.0",
+      "error_bounds": {
+        "weights_bytes": "+/- 0%",
+        "active_kv_bytes": "+/- 15%",
+        "retained_kv_bytes": "+/- 20%",
+        "total_bytes": "+/- 12%",
+        "notes": "int8 KV doubles KV cache size vs int4. Overhead scales with 8% of KV."
+      }
+    },
+    {
+      "id": "qwen36-27b-rapid-int4-128k",
+      "kv_cache_dtype": "int4",
+      "turboquant_mode": "none",
+      "context_tokens": 131072,
+      "retained_cache_tokens": 32768,
+      "parallel_slots": 1,
+      "reasoning_mode": false,
+      "expected_breakdown": {
+        "weights_bytes": 14_680_064_000,
+        "active_kv_bytes": 10_400_000_000,
+        "retained_kv_bytes": 2_600_000_000,
+        "linear_attn_state_bytes": 76_000_000,
+        "mtp_bytes": 0,
+        "overhead_bytes": 1_400_000_000,
+        "total_bytes": 29_156_064_000
+      },
+      "measurement_command": "cd ~/.rapid-mlx && RAPID_MLX_METRICS=1 python -m vllm_mlx.serve --model mlx-community/Qwen3-27B-4bit --kv-cache-dtype int4 --max-model-len 131072 --host 127.0.0.1 --port 8000 2>&1 | tee run.log; lsof -n -P -p $(pgrep -f Qwen3-27B) | grep -i memory",
+      "hardware": "Apple M5 Max, 128 GB unified memory, macOS 26.0",
+      "error_bounds": {
+        "weights_bytes": "+/- 0%",
+        "active_kv_bytes": "+/- 12%",
+        "retained_kv_bytes": "+/- 15%",
+        "total_bytes": "+/- 10%",
+        "notes": "At 128K context, KV dominates. Only n_attn_layers=16 store KV (hybrid DeltaNet). This is the key calibration point for Qwen3.6 scaling."
+      }
+    }
+  ],
+  "cross_surface_equality_check": {
+    "description": "For each test_case, wizard/preset/setup-view/models surfaces must show identical MemoryBreakdown when called with matching parameters.",
+    "verification": "Run /api/vram-estimate with identical body for each scenario; diff active_kv_bytes, retained_kv_bytes, total_bytes across all surfaces."
+  }
+}

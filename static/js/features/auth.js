@@ -107,7 +107,7 @@ function renderAuthShell() {
     if (recovery) {
         recovery.textContent = authState.managedByCli
             ? 'Recovery is managed by startup flags for this instance.'
-            : `Forgot the password? Run "${authState.recoveryCommand || 'llama-monitor --clear-auth-config'}" on this machine, restart, and sign in again.`;
+            : `Forgot the password? Run "${authState.recoveryCommand || 'local-llm-foundry --clear-auth-config'}" on this machine, restart, and sign in again.`;
     }
     if (username) username.focus();
 }

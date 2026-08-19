@@ -420,9 +420,19 @@ function applyWsIntervalLive() {
 
 // ── Modal open/close ──────────────────────────────────────────────────────────
 
+// Handle for the close animation's teardown timer. Reopening within the animation window
+// used to let the *previous* close's timer fire against the now-legitimately-open modal,
+// stripping `open` and setting aria-hidden/inert on it -- a modal that reports open while
+// rendering nothing. Cancelling on open is what makes open/close/open safe.
+let closeTeardownTimer = null;
+
 export function openSettingsModal(initialTab) {
     const modal = document.getElementById('settings-modal');
     if (!modal) return;
+    if (closeTeardownTimer !== null) {
+        clearTimeout(closeTeardownTimer);
+        closeTeardownTimer = null;
+    }
     modal.removeAttribute('aria-hidden');
     modal.inert = false;
     modal.classList.remove('closing');
@@ -471,7 +481,11 @@ export function closeSettingsModal() {
         try { history.replaceState({ path: base }, '', base); } catch {}
     }
     modal.classList.add('closing');
-    setTimeout(() => {
+    // Re-entrant close (Esc twice, or a route change racing the X button) must not stack
+    // timers: the later one would fire against whatever state the modal is in by then.
+    if (closeTeardownTimer !== null) clearTimeout(closeTeardownTimer);
+    closeTeardownTimer = setTimeout(() => {
+        closeTeardownTimer = null;
         modal.classList.remove('open', 'closing');
         modal.setAttribute('aria-hidden', 'true');
         modal.inert = true;
@@ -542,11 +556,6 @@ function _bindSettingsEvents() {
             if (mainBtn) mainBtn.click();
             saveSettings();
         });
-    });
-
-    document.getElementById('settings-open-config-btn')?.addEventListener('click', () => {
-        closeSettingsModal();
-        setTimeout(() => document.getElementById('config-modal')?.classList.add('open'), 260);
     });
 
     document.getElementById('settings-advanced-open-config-btn')?.addEventListener('click', () => {
@@ -1052,7 +1061,7 @@ function _bindTlsEvents() {
     if (disableBtn) {
         disableBtn.addEventListener('click', async () => {
             await tlsPut({ mode: 'none' });
-            showToast('TLS disabled', 'success', 'Restart llama-monitor to apply.');
+            showToast('TLS disabled', 'success', 'Restart Foundry to apply.');
             await loadTlsConfig();
         });
     }
@@ -1062,7 +1071,7 @@ function _bindTlsEvents() {
     if (selfSignedBtn) {
         selfSignedBtn.addEventListener('click', async () => {
             await tlsPut({ mode: 'self-signed' });
-            showToast('Self-signed TLS enabled', 'success', 'Restart llama-monitor to apply.');
+            showToast('Self-signed TLS enabled', 'success', 'Restart Foundry to apply.');
             await loadTlsConfig();
         });
     }
@@ -1084,7 +1093,7 @@ function _bindTlsEvents() {
                 custom_cert_path: certPath,
                 custom_key_path: keyPath,
             });
-            showToast('Custom certificate configured', 'success', 'Restart llama-monitor to apply.');
+            showToast('Custom certificate configured', 'success', 'Restart Foundry to apply.');
             await loadTlsConfig();
         });
     }
@@ -1195,9 +1204,9 @@ function _bindTlsEvents() {
                 }
 
                 if (statusEl) {
-                    statusEl.textContent = 'Certificate requested. Restart llama-monitor to apply.';
+                    statusEl.textContent = 'Certificate requested. Restart Foundry to apply.';
                 }
-                showToast('ACME certificate requested', 'success', 'Restart llama-monitor to apply.');
+                showToast('ACME certificate requested', 'success', 'Restart Foundry to apply.');
                 await loadTlsConfig();
             } catch (err) {
                 if (statusEl) statusEl.textContent = 'Request failed: ' + (err.message || 'Network error');
@@ -1228,9 +1237,9 @@ function _bindTlsEvents() {
                 }
 
                 if (statusEl) {
-                    statusEl.textContent = 'Certificate renewed. Restart llama-monitor to apply.';
+                    statusEl.textContent = 'Certificate renewed. Restart Foundry to apply.';
                 }
-                showToast('ACME certificate renewed', 'success', 'Restart llama-monitor to apply.');
+                showToast('ACME certificate renewed', 'success', 'Restart Foundry to apply.');
                 await loadTlsConfig();
             } catch (err) {
                 if (statusEl) statusEl.textContent = 'Renewal failed: ' + (err.message || 'Network error');
@@ -1551,7 +1560,7 @@ export function initSettings() {
             }
 
             if (statusEl) statusEl.textContent = 'Token rotated';
-            showToast('API token rotated', 'success', 'Previous token is now invalid. Restart llama-monitor to fully apply.');
+            showToast('API token rotated', 'success', 'Previous token is now invalid. Restart Foundry to fully apply.');
         } catch (err) {
             if (statusEl) statusEl.textContent = 'Failed: ' + (err.message || 'Network error');
             showToast('Rotate API token failed', 'error', err.message || 'Network error');
@@ -1587,7 +1596,7 @@ export function initSettings() {
             }
 
             if (statusEl) statusEl.textContent = 'Token rotated';
-            showToast('DB admin token rotated', 'success', 'Previous token is now invalid. Restart llama-monitor to fully apply.');
+            showToast('DB admin token rotated', 'success', 'Previous token is now invalid. Restart Foundry to fully apply.');
         } catch (err) {
             if (statusEl) statusEl.textContent = 'Failed: ' + (err.message || 'Network error');
             showToast('Rotate DB admin token failed', 'error', err.message || 'Network error');

@@ -126,10 +126,15 @@ fn api_auth_logout(auth_manager: AuthManager) -> ApiRoute {
             let auth_manager = auth_manager.clone();
             async move {
                 auth_manager.revoke_form_session(cookie_header.as_deref());
-                Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::with_header(
+                let reply = warp::reply::with_header(
                     warp::reply::json(&serde_json::json!({ "ok": true })),
                     "Set-Cookie",
                     auth_manager.expired_session_cookie_header(),
+                );
+                Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::with_header(
+                    reply,
+                    "Set-Cookie",
+                    auth_manager.expired_legacy_session_cookie_header(),
                 )))
             }
         })
@@ -174,7 +179,7 @@ mod tests {
             .get("set-cookie")
             .and_then(|value| value.to_str().ok())
             .expect("set-cookie header");
-        assert!(set_cookie.contains("llama_monitor_session="));
+        assert!(set_cookie.contains("local_llm_foundry_session="));
 
         let status_resp = warp::test::request()
             .method("GET")

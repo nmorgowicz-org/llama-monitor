@@ -125,7 +125,7 @@ If a model qualifies for multiple categories, include it in each.
 
 ## Output destination
 
-Write the JSON to: ~/.config/llama-monitor/community-picks.json
+Write the JSON to: ~/.config/local-llm-foundry/community-picks.json
 
 Overwrite if it already exists.
 ```
@@ -135,7 +135,8 @@ Overwrite if it already exists.
 ## Schema reference (for llama-monitor integration)
 
 The app reads `community-picks.json` from `$config_dir/community-picks.json`
-(default: `~/.config/llama-monitor/community-picks.json`) via `GET /api/hf/community-picks`.
+(default: `~/.config/local-llm-foundry/community-picks.json`; legacy-active
+installs retain the old root) via `GET /api/hf/community-picks`.
 
 ### Top-level fields
 

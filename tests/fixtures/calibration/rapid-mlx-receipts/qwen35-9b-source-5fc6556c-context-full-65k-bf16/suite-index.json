@@ -1,0 +1,7 @@
+{
+  "model": "nightmedia/Qwen3.5-9B-DS9-USS-Defiant-1M-q8-hi-mlx",
+  "suite": "context",
+  "receipts": [],
+  "complete": false,
+  "failure": "/opt/homebrew/Cellar/node/26.5.0/bin/node exited 1\nRapid-MLX log tail for 00-context-65536-bf16:\n"
+}

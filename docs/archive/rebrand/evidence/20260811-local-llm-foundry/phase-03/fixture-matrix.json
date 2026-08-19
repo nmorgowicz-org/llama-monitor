@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "fixtures": [
+    {
+      "name": "fresh_empty_old_only_and_custom_root_states_are_explicit",
+      "present": true,
+      "policy": "pure-plan-and-classify"
+    },
+    {
+      "name": "both_roots_collision_is_fail_closed",
+      "present": true,
+      "policy": "pure-plan-and-classify"
+    },
+    {
+      "name": "partial_downloads_hf_cache_models_and_runtime_are_retained",
+      "present": true,
+      "policy": "pure-plan-and-classify"
+    },
+    {
+      "name": "critical_tls_certs_tokens_chat_db_and_wal_are_copy_candidates",
+      "present": true,
+      "policy": "pure-plan-and-classify"
+    },
+    {
+      "name": "symlink_and_special_entry_are_rejected_before_mutation",
+      "present": true,
+      "policy": "refuse-before-mutation"
+    },
+    {
+      "name": "cross_volume_simulation_has_stable_plan_id_and_no_preview_writes",
+      "present": true,
+      "policy": "pure-plan-and-classify"
+    }
+  ]
+}

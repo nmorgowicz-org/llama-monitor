@@ -1807,16 +1807,24 @@ function openDebugModal() {
     if (!overlay) return;
     debugInspectorView = 'slice';
     document.getElementById('debug-payload-section')?.classList.add('hidden');
+    if (debugModalCloseTimer !== null) { clearTimeout(debugModalCloseTimer); debugModalCloseTimer = null; }
+    overlay.querySelector('.debug-modal')?.classList.remove('closing');
     overlay.classList.add('active');
     populateDebugModal();
 }
+
+let debugModalCloseTimer = null;
 
 function closeDebugModal() {
     const overlay = document.getElementById('debug-prompt-modal');
     if (!overlay) return;
     const modal = overlay.querySelector('.debug-modal');
     if (modal) modal.classList.add('closing');
-    setTimeout(() => {
+    // Same stale-timer race as settings.js: without cancelling, reopening inside the
+    // animation window let the previous close strip `active` off the reopened overlay.
+    if (debugModalCloseTimer !== null) clearTimeout(debugModalCloseTimer);
+    debugModalCloseTimer = setTimeout(() => {
+        debugModalCloseTimer = null;
         overlay.classList.remove('active');
         if (modal) modal.classList.remove('closing');
     }, 200);

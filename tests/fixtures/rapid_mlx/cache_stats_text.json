@@ -1,0 +1,4 @@
+{
+  "message": "Vision cache stats not available for text-only models",
+  "model_type": "llm"
+}

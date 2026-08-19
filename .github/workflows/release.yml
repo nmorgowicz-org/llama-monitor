@@ -30,20 +30,20 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            artifact: llama-monitor-linux-x86_64
+            artifact: local-llm-foundry-linux-x86_64
           - target: aarch64-unknown-linux-gnu
-            artifact: llama-monitor-linux-aarch64
+            artifact: local-llm-foundry-linux-aarch64
           - target: x86_64-pc-windows-gnu
-            artifact: llama-monitor-windows-x86_64.zip
+            artifact: local-llm-foundry-windows-x86_64.zip
           - target: aarch64-apple-darwin
-            artifact: llama-monitor-macos-aarch64.tar.gz
+            artifact: local-llm-foundry-macos-aarch64.tar.gz
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           prefix-key: "v0-rust"
-          shared-key: "llama-monitor-${{ matrix.target }}-${{ hashFiles('Cargo.lock') }}"
+          shared-key: "local-llm-foundry-${{ matrix.target }}-${{ hashFiles('Cargo.lock') }}"
 
       - name: Preflight release toolchain
         run: bash scripts/release-preflight.sh
@@ -57,40 +57,59 @@ jobs:
 
       - name: Package artifact
         run: |
+          set -euo pipefail
           case "${{ matrix.target }}" in
             x86_64-unknown-linux-gnu)
+              cp target/x86_64-unknown-linux-gnu/release/local-llm-foundry local-llm-foundry-linux-x86_64
               cp target/x86_64-unknown-linux-gnu/release/llama-monitor llama-monitor-linux-x86_64
-              chmod +x llama-monitor-linux-x86_64
+              chmod +x local-llm-foundry-linux-x86_64 llama-monitor-linux-x86_64
               ;;
             aarch64-unknown-linux-gnu)
+              cp target/aarch64-unknown-linux-gnu/release/local-llm-foundry local-llm-foundry-linux-aarch64
               cp target/aarch64-unknown-linux-gnu/release/llama-monitor llama-monitor-linux-aarch64
-              chmod +x llama-monitor-linux-aarch64
+              chmod +x local-llm-foundry-linux-aarch64 llama-monitor-linux-aarch64
               ;;
             x86_64-pc-windows-gnu)
-              mkdir -p windows-bundle
-              cp target/x86_64-pc-windows-gnu/release/llama-monitor.exe windows-bundle/llama-monitor.exe
-              cp sensor_bridge/publish/sensor_bridge.exe windows-bundle/sensor_bridge.exe
+              mkdir -p windows-bundle-canonical windows-bundle-legacy
+              cp target/x86_64-pc-windows-gnu/release/local-llm-foundry.exe windows-bundle-canonical/local-llm-foundry.exe
+              cp target/x86_64-pc-windows-gnu/release/llama-monitor.exe windows-bundle-legacy/llama-monitor.exe
+              cp sensor_bridge/publish/sensor_bridge.exe windows-bundle-canonical/sensor_bridge.exe
+              cp sensor_bridge/publish/sensor_bridge.exe windows-bundle-legacy/sensor_bridge.exe
               # The WebView2 tray popover (wry, enabled via native-tray,webview-popover)
               # dynamically links WebView2Loader.dll on the GNU target. It must ship next
               # to the exe — the WebView2 *runtime* does not place it on the system path,
               # so without it the app fails to launch (STATUS_DLL_NOT_FOUND, 0xC0000135).
               webview2_dll=$(find target/x86_64-pc-windows-gnu/release/build -path '*webview2-com-sys*/out/x64/WebView2Loader.dll' | head -1)
               if [ -z "$webview2_dll" ]; then echo "ERROR: WebView2Loader.dll not found in build output" >&2; exit 1; fi
-              cp "$webview2_dll" windows-bundle/WebView2Loader.dll
-              (cd windows-bundle && zip -9 -r ../llama-monitor-windows-x86_64.zip .)
+              cp "$webview2_dll" windows-bundle-canonical/WebView2Loader.dll
+              cp "$webview2_dll" windows-bundle-legacy/WebView2Loader.dll
+              (cd windows-bundle-canonical && zip -9 -r ../local-llm-foundry-windows-x86_64.zip .)
+              (cd windows-bundle-legacy && zip -9 -r ../llama-monitor-windows-x86_64.zip .)
               ;;
             aarch64-apple-darwin)
+              cp target/aarch64-apple-darwin/release/local-llm-foundry local-llm-foundry-macos-aarch64
               cp target/aarch64-apple-darwin/release/llama-monitor llama-monitor-macos-aarch64
-              chmod +x llama-monitor-macos-aarch64
+              chmod +x local-llm-foundry-macos-aarch64 llama-monitor-macos-aarch64
+              tar -czf local-llm-foundry-macos-aarch64.tar.gz local-llm-foundry-macos-aarch64
               tar -czf llama-monitor-macos-aarch64.tar.gz llama-monitor-macos-aarch64
               ;;
           esac
+
+          mkdir -p release-assets
+          for asset in \
+            local-llm-foundry-linux-x86_64 llama-monitor-linux-x86_64 \
+            local-llm-foundry-linux-aarch64 llama-monitor-linux-aarch64 \
+            local-llm-foundry-windows-x86_64.zip llama-monitor-windows-x86_64.zip \
+            local-llm-foundry-macos-aarch64.tar.gz llama-monitor-macos-aarch64.tar.gz; do
+            if [ -f "$asset" ]; then cp "$asset" release-assets/; fi
+          done
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}
+          path: release-assets
+          if-no-files-found: error
           retention-days: 1
 
   release:
@@ -109,15 +128,20 @@ jobs:
       - name: Download all build artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          pattern: llama-monitor-*
+          pattern: 'local-llm-foundry-*'
           merge-multiple: true
           path: .
 
       - name: Generate SHA-256 checksums
         run: |
+          set -euo pipefail
           VERSION="${{ github.event_name == 'release' && github.ref_name || github.event.inputs.tag_name }}"
           JSON='{"version":"'${VERSION}'","checksums":{}}'
           for f in \
+            local-llm-foundry-linux-x86_64 \
+            local-llm-foundry-linux-aarch64 \
+            local-llm-foundry-windows-x86_64.zip \
+            local-llm-foundry-macos-aarch64.tar.gz \
             llama-monitor-linux-x86_64 \
             llama-monitor-linux-aarch64 \
             llama-monitor-windows-x86_64.zip \
@@ -126,10 +150,14 @@ jobs:
               H=$(sha256sum "$f" | awk '{print $1}')
               JSON=$(echo "$JSON" | jq --arg n "$f" --arg h "$H" \
                 '.checksums[$n] = $h')
+            else
+              echo "ERROR: missing required release asset $f" >&2
+              exit 1
             fi
           done
           echo "$JSON" | jq . > checksums.json
           cat checksums.json
+          node scripts/validate-release-contract.mjs --dir . --version "$VERSION"
 
       - name: Update published release with artifacts
         if: github.event_name == 'release'
@@ -138,6 +166,10 @@ jobs:
           tag_name: ${{ github.ref_name }}
           body: ${{ github.event.release.body }}
           files: |
+            local-llm-foundry-linux-x86_64
+            local-llm-foundry-linux-aarch64
+            local-llm-foundry-windows-x86_64.zip
+            local-llm-foundry-macos-aarch64.tar.gz
             llama-monitor-linux-x86_64
             llama-monitor-linux-aarch64
             llama-monitor-windows-x86_64.zip
@@ -153,6 +185,10 @@ jobs:
           tag_name: ${{ github.event.inputs.tag_name }}
           generate_release_notes: true
           files: |
+            local-llm-foundry-linux-x86_64
+            local-llm-foundry-linux-aarch64
+            local-llm-foundry-windows-x86_64.zip
+            local-llm-foundry-macos-aarch64.tar.gz
             llama-monitor-linux-x86_64
             llama-monitor-linux-aarch64
             llama-monitor-windows-x86_64.zip

@@ -4486,7 +4486,7 @@
   font-weight: 600;
   margin-bottom: 2px;
   overflow-wrap: anywhere;
-  word-break: break-all;
+  word-break: normal;
 }
 
 .toast-message {
@@ -4494,7 +4494,7 @@
   font-size: var(--text-xs);
   line-height: 1.4;
   overflow-wrap: anywhere;
-  word-break: break-all;
+  word-break: normal;
 }
 
 .toast-close {

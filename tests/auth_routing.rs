@@ -359,10 +359,9 @@ fn simulate_auth_guard(
         .and_then(|h| h.strip_prefix("Bearer "))
         .map(str::trim)
         .filter(|t| !t.is_empty())
+        && check_api_token(&Some(format!("Bearer {}", token)), cfg)
     {
-        if check_api_token(&Some(format!("Bearer {}", token)), cfg) {
-            return true;
-        }
+        return true;
     }
 
     false
@@ -556,6 +555,25 @@ fn endpoint_remote_agent_install_requires_db_admin_token() {
         !matches_wrong,
         "wrong token must reject remote-agent install"
     );
+}
+
+#[test]
+fn endpoint_spawn_session_requires_db_admin_token_for_all_backends() {
+    let cfg = cfg_db_only();
+    let live = cfg.live_db_admin_token();
+    use subtle::ConstantTimeEq;
+
+    let authorized = |token: Option<&str>| match (token, live.as_deref()) {
+        (Some(got), Some(expected)) if !expected.is_empty() => {
+            got.as_bytes().ct_eq(expected.as_bytes()).into()
+        }
+        (None, Some(expected)) if !expected.is_empty() => false,
+        _ => true,
+    };
+
+    assert!(authorized(Some(TEST_DB_ADMIN_TOKEN)));
+    assert!(!authorized(Some("wrong")));
+    assert!(!authorized(None));
 }
 
 #[test]

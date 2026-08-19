@@ -226,7 +226,8 @@
   flex: 1;
   min-height: 0;
   max-height: none;
-  overflow: auto;
+  overflow: hidden;
+  scrollbar-gutter: auto;
 }
 
 #settings-modal .settings-tabs {
@@ -238,6 +239,7 @@
   background: rgba(0, 0, 0, 0.08);
   align-content: start;
   overflow-y: auto;
+  min-width: 0;
 }
 
 #settings-modal .settings-tab {
@@ -321,6 +323,7 @@
   padding: 24px 32px 24px 24px;
   overflow-y: auto;
   position: relative;
+  min-width: 0;
   background:
     radial-gradient(circle at top right, rgba(255, 255, 255, 0.02), transparent 22%),
     linear-gradient(145deg, rgba(32, 40, 50, 0.6), rgba(22, 28, 36, 0.8));

@@ -1,0 +1,13 @@
+{
+  "model": "ailexleon/gemma-4-26B-A4B-it-qat-uncensored-heretic-mlx-lm-4Bit",
+  "suite": "cache",
+  "receipts": [
+    {
+      "label": "00-cache-8k-none",
+      "receipt": "00-00-cache-8k-none.json",
+      "manifest": null
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

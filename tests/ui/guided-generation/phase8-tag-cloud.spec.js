@@ -271,6 +271,8 @@ test.describe('Phase 8 - Tag Cloud', () => {
     await expect(genresHeader).toHaveAttribute('aria-expanded', 'false');
 
     // Re-expand Story Tools
+    await expect(storyToolsHeader).toHaveAttribute('data-tag-cloud-bound', '1');
+    expect(await storyToolsHeader.evaluate(header => header.isConnected)).toBe(true);
     await storyToolsHeader.click();
     await expect(storyToolsHeader).toHaveAttribute('aria-expanded', 'true');
     await expect(genresHeader).toHaveAttribute('aria-expanded', 'false');

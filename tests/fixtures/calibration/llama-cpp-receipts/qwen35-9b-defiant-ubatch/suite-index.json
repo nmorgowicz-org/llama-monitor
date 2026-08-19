@@ -1,0 +1,69 @@
+{
+  "model": "/Users/nick/.config/llama-monitor/models/gguf/Qwen3.5-9B-The-Defiant-Fable-Uncnr-Heretic-NEO-MAX-MTP-Q4_K_M.gguf",
+  "backend": "llama.cpp",
+  "ubatch_sizes": [
+    512,
+    2048
+  ],
+  "context_sizes": [
+    32000,
+    65536,
+    131072,
+    160000,
+    200000
+  ],
+  "receipts": [
+    {
+      "label": "00-ubatch-512-context-32000",
+      "receipt": "00-00-ubatch-512-context-32000.json",
+      "manifest": null
+    },
+    {
+      "label": "01-ubatch-512-context-65536",
+      "receipt": "01-01-ubatch-512-context-65536.json",
+      "manifest": null
+    },
+    {
+      "label": "02-ubatch-512-context-131072",
+      "receipt": "02-02-ubatch-512-context-131072.json",
+      "manifest": null
+    },
+    {
+      "label": "03-ubatch-512-context-160000",
+      "receipt": "03-03-ubatch-512-context-160000.json",
+      "manifest": null
+    },
+    {
+      "label": "04-ubatch-512-context-200000",
+      "receipt": "04-04-ubatch-512-context-200000.json",
+      "manifest": null
+    },
+    {
+      "label": "05-ubatch-2048-context-32000",
+      "receipt": "05-05-ubatch-2048-context-32000.json",
+      "manifest": null
+    },
+    {
+      "label": "06-ubatch-2048-context-65536",
+      "receipt": "06-06-ubatch-2048-context-65536.json",
+      "manifest": null
+    },
+    {
+      "label": "07-ubatch-2048-context-131072",
+      "receipt": "07-07-ubatch-2048-context-131072.json",
+      "manifest": null
+    },
+    {
+      "label": "08-ubatch-2048-context-160000",
+      "receipt": "08-08-ubatch-2048-context-160000.json",
+      "manifest": null
+    },
+    {
+      "label": "09-ubatch-2048-context-200000",
+      "receipt": "09-09-ubatch-2048-context-200000.json",
+      "manifest": null
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

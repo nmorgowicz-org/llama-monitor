@@ -44,7 +44,7 @@ export let lastServerState = null;
 
 /** Last known llama metrics from WebSocket */
 export let lastLlamaMetrics = null;
-
+export let lastRapidMlxMetrics = null;
 /** Normalized context capacity: actual loaded limit, not stale KV-only reports */
 export let contextCapacityTokens = null;
 
@@ -110,6 +110,8 @@ export let wsData = null;
 export function setWsData(data) { wsData = data; }
 export function setLastServerState(v) { lastServerState = v; }
 export function setLastLlamaMetrics(v) { lastLlamaMetrics = v; }
+export function setLastRapidMlxMetrics(v) { lastRapidMlxMetrics = v; }
+export function getLastRapidMlxMetrics() { return lastRapidMlxMetrics; }
 export function setContextCapacityTokens(v) { contextCapacityTokens = v; }
 export function setLastSystemMetrics(v) { lastSystemMetrics = v; }
 export function setLastGpuMetrics(v) { lastGpuMetrics = v; }

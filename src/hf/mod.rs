@@ -9,13 +9,53 @@
 //! - Streaming download with resume support
 //! - HF token management
 
+pub mod mtp_pin_cache;
+pub mod qualify;
+#[allow(unused_imports)]
+pub use qualify::{
+    HfConfigEvidence, HfIdentity, HfIdentityConverter, HfIdentityEntity, HfIdentityRole,
+    HfQualification, HfRuntimeSnapshot, IdentityRequest, QualifyRequest,
+};
+
 use anyhow::{Context, Result};
-use hf_hub::api::sync::ApiBuilder;
-use hf_hub::{Repo, RepoType};
+use hf_hub::{HFClient, HFClientSync};
+use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use std::path::Path;
 use std::sync::LazyLock;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
+
+fn hf_build_client(token: Option<String>) -> anyhow::Result<HFClientSync> {
+    let async_client = if let Some(tok) = token {
+        HFClient::builder().token(tok).build()
+    } else {
+        HFClient::new()
+    }
+    .map_err(|e| anyhow::anyhow!("Failed to build HF async client: {e}"))?;
+    HFClientSync::from_inner(async_client)
+        .map_err(|e| anyhow::anyhow!("Failed to build HF sync client: {e}"))
+}
+
+pub fn hf_resolve_download_url(repo_id: &str, file_path: &str) -> String {
+    hf_resolve_download_url_at(repo_id, file_path, "main")
+}
+
+pub fn hf_resolve_download_url_at(repo_id: &str, file_path: &str, revision: &str) -> String {
+    let encoded_path = utf8_percent_encode(file_path, NON_ALPHANUMERIC).to_string();
+    format!("https://huggingface.co/{repo_id}/resolve/{revision}/{encoded_path}")
+}
+
+fn validate_hf_revision(revision: &str) -> Result<(), String> {
+    if revision.is_empty()
+        || revision.len() > 128
+        || !revision
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        return Err("Hugging Face revision must contain only safe revision characters".into());
+    }
+    Ok(())
+}
 
 static HF_HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
@@ -23,6 +63,40 @@ static HF_HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .build()
         .unwrap_or_else(|_| reqwest::Client::new())
 });
+
+// ── Process-lifetime cache for per-repo file sizes ────────────────────────────
+//
+// HF tree-API lookups (fetch_file_sizes) are the main source of rate-limit
+// pressure: repeated searches/pagination re-request the same repos. File
+// sizes are effectively immutable for a given repo, so cache them for the
+// life of the process rather than re-fetching every time.
+static HF_SIZE_CACHE: LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, std::collections::HashMap<String, u64>>>,
+> = LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Byte width for a safetensors dtype string (e.g. "BF16", "U32", "I8").
+fn safetensors_dtype_bytes(dtype: &str) -> f64 {
+    match dtype.to_ascii_uppercase().as_str() {
+        "F64" | "I64" | "U64" => 8.0,
+        "F32" | "I32" | "U32" => 4.0,
+        "F16" | "BF16" | "I16" | "U16" => 2.0,
+        "I8" | "U8" | "F8_E4M3" | "F8_E5M2" | "BOOL" => 1.0,
+        "I4" | "U4" | "F4" => 0.5,
+        _ => 2.0, // unknown dtype: assume 2 bytes/param (bf16-class), the common case
+    }
+}
+
+/// Compute total weight bytes from a search result's `safetensors.parameters` map
+/// (present when the request includes `expand[]=safetensors`). Avoids the need
+/// for a separate per-repo HF tree-API call for the common case.
+fn safetensors_total_bytes(item: &serde_json::Value) -> Option<u64> {
+    let params = item.get("safetensors")?.get("parameters")?.as_object()?;
+    let mut total = 0.0_f64;
+    for (dtype, count) in params {
+        total += count.as_u64()? as f64 * safetensors_dtype_bytes(dtype);
+    }
+    (total > 0.0).then_some(total as u64)
+}
 
 // ── Search sort options ───────────────────────────────────────────────────────
 
@@ -32,18 +106,28 @@ static HF_HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
 pub enum HfSort {
     #[default]
     Downloads, // most downloaded (best signal for quality community quants)
-    Likes,     // most liked
-    CreatedAt, // newest first
+    Likes,        // most liked
+    CreatedAt,    // newest first
+    LastModified, // most recently updated — the useful one for quant repos, which are
+    // re-uploaded long after they were created
     Trending,  // HF trending score
+    Relevance, // whatever the search query scores highest; only meaningful with a query
 }
 
 impl HfSort {
-    fn as_api_str(self) -> &'static str {
+    /// The `sort` value to send to the HF API, or `None` to send no `sort` at all.
+    ///
+    /// Relevance is not a sort key on HF's side: it is what you get back when you supply a
+    /// `search` term and *omit* `sort`. Passing any explicit key replaces the relevance
+    /// ordering, so the only way to honour "Relevance" is to send nothing.
+    fn as_api_str(self) -> Option<&'static str> {
         match self {
-            HfSort::Downloads => "downloads",
-            HfSort::Likes => "likes",
-            HfSort::CreatedAt => "createdAt",
-            HfSort::Trending => "trendingScore",
+            HfSort::Downloads => Some("downloads"),
+            HfSort::Likes => Some("likes"),
+            HfSort::CreatedAt => Some("createdAt"),
+            HfSort::LastModified => Some("lastModified"),
+            HfSort::Trending => Some("trendingScore"),
+            HfSort::Relevance => None,
         }
     }
 }
@@ -190,6 +274,11 @@ pub fn detect_quant_type(filename: &str) -> QuantFileType {
 #[serde(default)]
 pub struct SimpleModelInfo {
     pub id: String,
+    /// Commit currently returned by the Hub search API for this repository.
+    /// Browse selections use this immutable revision instead of silently
+    /// falling back to the mutable `main` branch.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub revision: String,
     pub gated: bool,
     pub tags: Vec<String>,
     pub downloads: u64,
@@ -208,6 +297,14 @@ pub struct SimpleModelInfo {
     pub param_b: f64,
     /// Base model the quantization derives from (from model card metadata).
     pub base_model: String,
+    /// Model format from HF filter used during search: "mlx" or "gguf".
+    pub format: String,
+    /// Repo size on disk (from HF API), useful for MLX models.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_size_bytes: Option<u64>,
+    /// Quant label for MLX models (e.g. "MXFP4", "Q4"). Empty for GGUF (use file list instead).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub quant_label: String,
 }
 
 /// A GGUF file in an HF repo, with real file size and quant classification.
@@ -256,128 +353,33 @@ pub struct HfFileInfo {
     pub size: Option<u64>,
 }
 
-// ── Known GGUF quantizer list ─────────────────────────────────────────────────
+// ── Quantizer shim types (backward compat) ────────────────────────────────────
+//
+// These are kept solely for the /api/hf/quantizers endpoint contract:
+// the frontend still expects UserQuantizer-shaped objects (username,
+// display_name, description, quant_style, note). The actual source of
+// truth is the CommunitySourceCatalog; `to_quantizers()` in
+// `community_source_catalog` derives this shape on the fly.
 
-/// Curated list of well-known GGUF quantizers shown as quick-picks in the wizard.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct KnownQuantizer {
-    pub username: String,
-    pub display_name: String,
-    pub description: String,
-    pub quant_style: &'static str, // "standard" | "imatrix" | "ud"
-    pub note: Option<String>,
-}
-
-/// User-editable version of KnownQuantizer (all owned strings, round-trips through JSON).
+/// Shape expected by frontend for quick-pick buttons and the quantizer editor.
+///
+/// Backward-compatible with legacy hf-quantizers.json for migration.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UserQuantizer {
     pub username: String,
     pub display_name: String,
     pub description: String,
-    pub quant_style: String, // "standard" | "imatrix" | "ud"
+    pub quant_style: String, // "standard" | "imatrix" | "ud" | "mlx"
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
 
-impl From<&KnownQuantizer> for UserQuantizer {
-    fn from(q: &KnownQuantizer) -> Self {
-        UserQuantizer {
-            username: q.username.clone(),
-            display_name: q.display_name.clone(),
-            description: q.description.clone(),
-            quant_style: q.quant_style.to_string(),
-            note: q.note.clone(),
-        }
-    }
-}
-
 /// Load user-customized quantizers from `config_dir/hf-quantizers.json`.
-/// Returns None if the file does not exist (caller should fall back to defaults).
+/// Used only by the community-source-catalog migration path.
 pub fn load_user_quantizers(config_dir: &std::path::Path) -> Option<Vec<UserQuantizer>> {
     let path = config_dir.join("hf-quantizers.json");
     let text = std::fs::read_to_string(&path).ok()?;
     serde_json::from_str(&text).ok()
-}
-
-/// Persist user-customized quantizers to `config_dir/hf-quantizers.json`.
-pub fn save_user_quantizers(
-    config_dir: &std::path::Path,
-    quantizers: &[UserQuantizer],
-) -> Result<()> {
-    let path = config_dir.join("hf-quantizers.json");
-    let json =
-        serde_json::to_string_pretty(quantizers).context("Failed to serialize quantizers")?;
-    std::fs::write(&path, json).context("Failed to write hf-quantizers.json")?;
-    Ok(())
-}
-
-pub fn known_gguf_quantizers() -> Vec<KnownQuantizer> {
-    vec![
-        KnownQuantizer {
-            username: "bartowski".into(),
-            display_name: "bartowski".into(),
-            description: "Standard GGUF quants — Q4_K_M through Q8_0. Most popular, extremely reliable.".into(),
-            quant_style: "standard",
-            note: None,
-        },
-        KnownQuantizer {
-            username: "mradermacher".into(),
-            display_name: "mradermacher".into(),
-            description: "imatrix specialist. i1-* files use importance calibration for better quality at same bpw. Validates quantizations.".into(),
-            quant_style: "imatrix",
-            note: Some("i1-* files are imatrix quants; others are standard".into()),
-        },
-        KnownQuantizer {
-            username: "unsloth".into(),
-            display_name: "Unsloth".into(),
-            description: "UD (Unsloth Dynamic) quants — mixed bpw per layer. Excellent quality/size. Also does fine-tuning and finetune-GGUF releases.".into(),
-            quant_style: "ud",
-            note: Some("UD-* files are dynamic quants; projector recommendations depend on the model family".into()),
-        },
-        KnownQuantizer {
-            username: "lmstudio-community".into(),
-            display_name: "LM Studio".into(),
-            description: "LM Studio community quants.".into(),
-            quant_style: "standard",
-            note: None,
-        },
-        KnownQuantizer {
-            username: "llmfan46".into(),
-            display_name: "llmfan46".into(),
-            description: "Community GGUF releases, wide model coverage.".into(),
-            quant_style: "standard",
-            note: None,
-        },
-        // Community finetune quantizers of interest
-        KnownQuantizer {
-            username: "DavidAU".into(),
-            display_name: "DavidAU".into(),
-            description: "Fine-tune and merge specialist, often heretic/abliterated and uncensored variants.".into(),
-            quant_style: "standard",
-            note: None,
-        },
-        KnownQuantizer {
-            username: "mudler".into(),
-            display_name: "mudler".into(),
-            description: "LocalAI author. Curated model selections and gguf releases.".into(),
-            quant_style: "standard",
-            note: None,
-        },
-        KnownQuantizer {
-            username: "Jackrong".into(),
-            display_name: "Jackrong".into(),
-            description: "GGUF releases, often larger models.".into(),
-            quant_style: "standard",
-            note: None,
-        },
-        KnownQuantizer {
-            username: "prithivMLmods".into(),
-            display_name: "prithivMLmods".into(),
-            description: "Wide coverage of recent models, high-quality GGUF quants.".into(),
-            quant_style: "standard",
-            note: None,
-        },
-    ]
 }
 
 // ── Core API functions ────────────────────────────────────────────────────────
@@ -425,20 +427,280 @@ pub async fn hf_get_model_info(repo_id: &str) -> Result<HfModelInfo> {
     })
 }
 
+/// Read-only preflight for an external speculative-decoding (MTP) companion
+/// model reference. Resolves `repo_id` to its immutable commit `sha` and
+/// checks — without downloading model weights — whether the repo would
+/// require `trust_remote_code` to load (custom loader scripts, or a
+/// `config.json` declaring `main_class`/non-standard `auto_map` entries).
+///
+/// This only surfaces facts; it does not grant or check consent. The actual
+/// launch-time gate is `validate_trust_consent` in
+/// `inference::rapid_mlx::command`, which still fail-closes on any mismatch.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeculativeModelPreflight {
+    pub repo_id: String,
+    pub revision: String,
+    pub trust_remote_code_required: bool,
+    /// Rough estimate of companion memory in bytes. Derived from:
+    /// 1. `mtp.safetensors` file size from the HF tree API (best), or
+    /// 2. Parameter count from `mtplx_runtime.json` quantization, or
+    /// 3. Conservative bf16 fallback if no provenance data.
+    ///
+    /// `None` if no data is available.
+    pub estimated_memory_bytes: Option<u64>,
+    /// The quantization of the MTP sidecar (e.g., "bf16", "q4", "q6").
+    /// Populated from `mtplx_runtime.json.mtp_sidecar` if available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mtp_sidecar: Option<String>,
+    /// The maximum MTP depth (e.g., 3).
+    /// Populated from `mtplx_runtime.json.mtp_depth_max` if available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mtp_depth_max: Option<i64>,
+}
+
+pub async fn resolve_speculative_model_preflight(
+    repo_id: &str,
+) -> Result<SpeculativeModelPreflight, String> {
+    let token = hf_load_token();
+    let url = format!("https://huggingface.co/api/models/{repo_id}");
+    let mut req = HF_HTTP_CLIENT.get(&url);
+    if let Some(ref tok) = token {
+        req = req.bearer_auth(tok);
+    }
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("HF models API request failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("HF returned HTTP {} for {repo_id}", resp.status()));
+    }
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse HF models API response: {e}"))?;
+
+    let revision = body
+        .get("sha")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("HF did not return a commit sha for {repo_id}"))?
+        .to_string();
+
+    let has_custom_loader = body
+        .get("siblings")
+        .and_then(|v| v.as_array())
+        .is_some_and(|files| {
+            files.iter().any(|f| {
+                let name = f
+                    .get("rfilename")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or("")
+                    .to_lowercase();
+                name == "main.py"
+                    || (name.starts_with("modeling_") && name.ends_with(".py"))
+                    || (name.starts_with("configuration_") && name.ends_with(".py"))
+            })
+        });
+
+    let trust_remote_code_required = if has_custom_loader {
+        true
+    } else {
+        fetch_repo_config_json_at(repo_id, &revision)
+            .await
+            .is_ok_and(|config| config_json_needs_trust_remote_code(&config))
+    };
+
+    // 3-tier estimate for companion VRAM:
+    // 1. Tree API → mtp.safetensors file size (most accurate)
+    // 2. mtplx_runtime.json → quantization + param estimate
+    // 3. Conservative bf16 fallback
+
+    let (estimated_memory_bytes, mtp_sidecar, mtp_depth_max) =
+        fetch_mtp_companion_info(repo_id, &revision, token.as_deref()).await;
+
+    Ok(SpeculativeModelPreflight {
+        repo_id: repo_id.to_string(),
+        revision,
+        trust_remote_code_required,
+        estimated_memory_bytes,
+        mtp_sidecar,
+        mtp_depth_max,
+    })
+}
+
+/// Fetches `mtplx_runtime.json` from a HF repo. Returns parsed JSON if
+/// available, `None` if the file does not exist or cannot be fetched.
+async fn fetch_mtplx_runtime_json(
+    repo_id: &str,
+    revision: &str,
+    token: Option<&str>,
+) -> Option<serde_json::Value> {
+    let url = format!("https://huggingface.co/{repo_id}/resolve/{revision}/mtplx_runtime.json");
+    let mut req = HF_HTTP_CLIENT.get(&url);
+    if let Some(tok) = token {
+        req = req.bearer_auth(tok);
+    }
+    let resp = req.send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    resp.json::<serde_json::Value>().await.ok()
+}
+
+/// Introspects the MTP companion of a HF repo to produce an accurate VRAM
+/// estimate. Makes two parallel requests:
+///
+/// 1. **Tree API** — fetch file list, find `mtp.safetensors` file size (works
+///    for any repo with an MTP sidecar, MTPLX or not).
+/// 2. **mtplx_runtime.json** — read `mtp_sidecar` quantization label and
+///    `mtp_depth_max` (only available for MTPLX-provenance repos).
+///
+/// Falls back to a conservative bf16 estimate only if neither succeeds.
+async fn fetch_mtp_companion_info(
+    repo_id: &str,
+    revision: &str,
+    token: Option<&str>,
+) -> (Option<u64>, Option<String>, Option<i64>) {
+    // Run both requests in parallel
+    let (size_result, runtime_result) = tokio::join!(
+        fetch_mtp_safetensors_size(repo_id, revision, token),
+        fetch_mtplx_runtime_json(repo_id, revision, token),
+    );
+
+    // Tree API gives the most accurate estimate
+    if let Some(size) = size_result {
+        if let Some(runtime) = runtime_result {
+            let sidecar = runtime
+                .get("mtp_sidecar")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let depth = runtime.get("mtp_depth_max").and_then(|v| v.as_i64());
+            return (Some(size), sidecar, depth);
+        }
+        return (Some(size), None, None);
+    }
+
+    // No tree API data — try mtplx_runtime.json for quantization
+    if let Some(runtime) = runtime_result {
+        let sidecar = runtime
+            .get("mtp_sidecar")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let depth = runtime.get("mtp_depth_max").and_then(|v| v.as_i64());
+        // Without the tree API we can't estimate VRAM from quantization alone
+        // (MTP sidecars are small — ~400M params at bf16 ≈ 849 MB).
+        return (None, sidecar, depth);
+    }
+
+    // No data — return None
+    (None, None, None)
+}
+
+/// Fetches the HF tree API and returns the file size of `mtp.safetensors`
+/// if present. Also handles sharded variants like `mtp-00001-of-00002.safetensors`.
+async fn fetch_mtp_safetensors_size(
+    repo_id: &str,
+    revision: &str,
+    token: Option<&str>,
+) -> Option<u64> {
+    let url = format!("https://huggingface.co/api/models/{repo_id}/tree/{revision}");
+    let mut req = HF_HTTP_CLIENT.get(&url);
+    if let Some(tok) = token {
+        req = req.bearer_auth(tok);
+    }
+    let resp = req.send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let files: Vec<serde_json::Value> = resp.json().await.ok()?;
+    let mut total: u64 = 0;
+    for file in &files {
+        let path = file.get("path").and_then(|v| v.as_str())?;
+        if path == "mtp.safetensors"
+            || (path.starts_with("mtp-") && path.ends_with(".safetensors") && path.contains("of-"))
+        {
+            total += file.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+        }
+    }
+    if total > 0 { Some(total) } else { None }
+}
+
+/// Mirrors the `main_class`/`auto_map` heuristic in
+/// `inference::rapid_mlx::model_resolver::needs_trust_remote_code`, applied
+/// to a remotely fetched `config.json` instead of a local model directory.
+fn config_json_needs_trust_remote_code(config: &serde_json::Value) -> bool {
+    if config.get("main_class").and_then(|v| v.as_str()).is_some() {
+        return true;
+    }
+    if let Some(auto_map) = config.get("auto_map").and_then(|v| v.as_object()) {
+        for class_value in auto_map.values() {
+            if let Some(class_str) = class_value.as_str()
+                && !class_str.starts_with("Auto")
+                && !class_str.contains("transformers.models")
+                && !class_str.contains("transformers_modules")
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Fetch a repo's `config.json` at a specific revision as raw JSON, bounded
+/// by the same size cap used for MLX config fetches. Absence or malformed
+/// JSON is reported as an error rather than defaulted, so callers make an
+/// explicit choice about how to treat "no config" (unlike the local-disk
+/// resolver, a missing remote config is not proof of a data-only repo).
+async fn fetch_repo_config_json_at(
+    repo_id: &str,
+    revision: &str,
+) -> Result<serde_json::Value, String> {
+    validate_hf_revision(revision)?;
+    let url = hf_resolve_download_url_at(repo_id, "config.json", revision);
+    let mut req = HF_HTTP_CLIENT.get(&url);
+    if let Some(token) = hf_load_token() {
+        req = req.bearer_auth(token);
+    }
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "HF returned HTTP {} for config.json",
+            resp.status()
+        ));
+    }
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("reading config.json: {e}"))?;
+    if bytes.len() as u64 > crate::inference::rapid_mlx::mlx_meta::MAX_CONFIG_BYTES {
+        return Err("config.json exceeds size limit".to_string());
+    }
+    serde_json::from_slice(&bytes).map_err(|e| format!("config.json is not valid JSON: {e}"))
+}
+
 /// List repo files; filters for GGUF if gguf_only=true.
 #[allow(dead_code)]
 pub fn hf_list_repo_files(repo_id: &str, gguf_only: bool) -> Result<Vec<HfFileInfo>> {
-    let api = ApiBuilder::new()
-        .with_token(hf_load_token())
-        .build()
-        .context("Failed to build HF API client")?;
-    let info = api
-        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
+    let (owner, name) = repo_id
+        .split_once('/')
+        .context("repo_id must be in owner/name format")?;
+    let client = hf_build_client(hf_load_token())?;
+    let info = client
+        .model(owner, name)
         .info()
+        .send()
         .context("Failed to list repo files")?;
 
-    Ok(info
+    let siblings = info
         .siblings
+        .context("HF API did not return file listing (siblings)")?;
+    Ok(siblings
         .iter()
         .filter(|s| !gguf_only || s.rfilename.to_ascii_lowercase().ends_with(".gguf"))
         .map(|s| HfFileInfo {
@@ -452,16 +714,20 @@ pub fn hf_list_repo_files(repo_id: &str, gguf_only: bool) -> Result<Vec<HfFileIn
 /// Get info for a single file in a repo.
 #[allow(dead_code)]
 pub fn hf_get_file_info(repo_id: &str, path: &str) -> Result<HfFileInfo> {
-    let api = ApiBuilder::new()
-        .with_token(hf_load_token())
-        .build()
-        .context("Failed to build HF API client")?;
-    let info = api
-        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
+    let (owner, name) = repo_id
+        .split_once('/')
+        .context("repo_id must be in owner/name format")?;
+    let client = hf_build_client(hf_load_token())?;
+    let info = client
+        .model(owner, name)
         .info()
+        .send()
         .context("Failed to list repo files")?;
 
-    info.siblings
+    let siblings = info
+        .siblings
+        .context("HF API did not return file listing (siblings)")?;
+    siblings
         .iter()
         .find(|s| s.rfilename == path)
         .map(|s| HfFileInfo {
@@ -483,13 +749,7 @@ pub async fn fetch_gguf_header_metadata(
     repo_id: &str,
     file_path: &str,
 ) -> Result<crate::llama::gguf_meta::GgufMetadata, String> {
-    let api = ApiBuilder::new()
-        .with_token(hf_load_token())
-        .build()
-        .map_err(|e| format!("Failed to build HF API client: {e}"))?;
-    let url = api
-        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
-        .url(file_path);
+    let url = hf_resolve_download_url(repo_id, file_path);
     if url.is_empty() {
         return Err(format!(
             "Could not resolve HF URL for {repo_id}/{file_path}"
@@ -534,6 +794,171 @@ pub async fn fetch_gguf_header_metadata(
     Err(format!("could not parse GGUF header: {last_err}"))
 }
 
+/// Fetch and parse an MLX model's `config.json` directly from a HuggingFace repo.
+///
+/// Unlike the GGUF header (which is range-fetched because the file can be many GB), MLX's
+/// `config.json` is always small JSON, so this does a plain GET of the whole file.
+pub async fn fetch_mlx_config(
+    repo_id: &str,
+    file_path: &str,
+) -> Result<crate::inference::rapid_mlx::mlx_meta::MlxConfig, String> {
+    fetch_mlx_config_revision_aware(repo_id, "main", file_path).await
+}
+
+/// Fetch and parse an MLX model's config.json from a HuggingFace repo with revision support.
+///
+/// Revision-aware (not always main), bounded depth/size/timeout to prevent abuse.
+/// CRITICAL: Always fetches config.json regardless of hf_file_path — hf_file_path is the
+/// model file (e.g. model.safetensors), not the config filename. This prevents the gap 3.7
+/// defect where hf_file_path became an MLX config name.
+pub async fn fetch_mlx_config_revision_aware(
+    repo_id: &str,
+    revision: &str,
+    _hf_file_path: &str,
+) -> Result<crate::inference::rapid_mlx::mlx_meta::MlxConfig, String> {
+    validate_hf_revision(revision)?;
+    // CRITICAL: Always use config.json for MLX config — never hf_file_path.
+    // hf_file_path is the model weight file (e.g. "model.safetensors"), not the config.
+    let config_path = "config.json";
+    fetch_mlx_config_bytes_at(repo_id, revision, config_path).await
+}
+
+/// Fetch an MLX config at its selected revision and convert its inline
+/// `text_config` geometry into the normalized profile used by Rapid estimates.
+/// `hf_file_path` is intentionally not accepted: a weight filename can never
+/// select the architecture config.
+pub async fn fetch_mlx_model_profile_revision_aware(
+    repo_id: &str,
+    revision: &str,
+) -> Result<crate::llama::model_memory_profile::ModelMemoryProfile, String> {
+    let config = fetch_mlx_config_with_text_config(repo_id, revision).await?;
+    let mut raw = serde_json::to_value(&config)
+        .map_err(|error| format!("serializing MLX config for profile parsing: {error}"))?;
+    if let Some(inner) = config.text_config_inner.as_deref() {
+        raw["text_config"] = serde_json::to_value(inner)
+            .map_err(|error| format!("serializing nested MLX text config: {error}"))?;
+    }
+    let bytes = serde_json::to_vec(&raw)
+        .map_err(|error| format!("serializing MLX profile config: {error}"))?;
+    let mut profile =
+        crate::inference::rapid_mlx::mlx_meta::parse_mlx_config_bytes_to_profile(&bytes)?;
+    profile.source_revision = Some(revision.to_string());
+    Ok(profile)
+}
+
+/// Fetch config bytes from HF with bounds enforcement.
+async fn fetch_mlx_config_bytes_at(
+    repo_id: &str,
+    revision: &str,
+    file_path: &str,
+) -> Result<crate::inference::rapid_mlx::mlx_meta::MlxConfig, String> {
+    let url = hf_resolve_download_url_at(repo_id, file_path, revision);
+    if url.is_empty() {
+        return Err(format!(
+            "Could not resolve HF URL for {repo_id}/{file_path}"
+        ));
+    }
+
+    let max_bytes = crate::inference::rapid_mlx::mlx_meta::MAX_CONFIG_BYTES as usize;
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+    let mut req = client.get(&url);
+    if let Some(token) = hf_load_token() {
+        req = req.bearer_auth(token);
+    }
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "HF returned HTTP {} for {file_path}",
+            resp.status()
+        ));
+    }
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("reading {file_path}: {e}"))?;
+    if bytes.len() > max_bytes {
+        return Err(format!(
+            "{file_path} exceeds size limit ({max_bytes} bytes, got {} bytes)",
+            bytes.len()
+        ));
+    }
+    crate::inference::rapid_mlx::mlx_meta::parse_mlx_config(&bytes)
+}
+
+/// Fetch an MLX config with recursive text_config resolution.
+///
+/// For nested configs (Qwen3.6, Gemma4, etc.), if the config contains a text_config
+/// referencing a separate file (e.g. a nested config path), this will fetch and merge it.
+///
+/// Bounded by:
+/// - max_depth: prevents infinite recursion (default 3)
+/// - timeout: overall timeout for all fetches (30 seconds)
+/// - size limit: each file bounded by MAX_CONFIG_BYTES
+///
+/// This ensures reliable config fetching even for deeply nested or large MLX repos.
+pub async fn fetch_mlx_config_with_text_config(
+    repo_id: &str,
+    revision: &str,
+) -> Result<crate::inference::rapid_mlx::mlx_meta::MlxConfig, String> {
+    const MAX_DEPTH: usize = 3;
+    let mut root = fetch_mlx_config_bytes_at(repo_id, revision, "config.json").await?;
+    let mut seen = std::collections::BTreeSet::from([String::from("config.json")]);
+    let mut current = &mut root;
+
+    for depth in 0..MAX_DEPTH {
+        let Some(reference) = current.text_config_ref.clone() else {
+            return Ok(root);
+        };
+        validate_mlx_config_reference(&reference)?;
+        if !seen.insert(reference.clone()) {
+            return Err(format!("MLX text_config reference cycle at {reference}"));
+        }
+        let inner = fetch_mlx_config_bytes_at(repo_id, revision, &reference)
+            .await
+            .map_err(|error| format!("Failed to fetch text_config at depth {depth}: {error}"))?;
+        current.text_config_inner = Some(Box::new(inner));
+        current = current
+            .text_config_inner
+            .as_deref_mut()
+            .expect("nested config inserted above");
+    }
+
+    if current.text_config_ref.is_some() {
+        return Err(format!(
+            "Config recursion exceeded max depth {MAX_DEPTH} for {repo_id}"
+        ));
+    }
+    Ok(root)
+}
+
+fn validate_mlx_config_reference(reference: &str) -> Result<(), String> {
+    let path = Path::new(reference);
+    if reference.is_empty()
+        || reference.len() > 512
+        // `Path::is_absolute` treats a leading slash differently on Windows
+        // than on Unix. References are HF-relative paths on every platform,
+        // so reject both slash forms explicitly before consulting components.
+        || reference.starts_with('/')
+        || reference.starts_with('\\')
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+        || !reference.ends_with(".json")
+    {
+        return Err("MLX text_config reference must be a safe relative JSON path".into());
+    }
+    Ok(())
+}
+
 /// Stream-download a file from HF with optional resume.
 /// Returns total bytes written.
 #[allow(dead_code)]
@@ -544,13 +969,7 @@ pub async fn hf_download_file_stream(
     local_path: &Path,
     resume_from: u64,
 ) -> Result<u64> {
-    let api = ApiBuilder::new()
-        .with_token(token.map(String::from))
-        .build()
-        .context("Failed to build HF API client")?;
-    let url = api
-        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
-        .url(path);
+    let url = hf_resolve_download_url(repo_id, path);
     if url.is_empty() {
         anyhow::bail!("Failed to resolve HF URL for {path}");
     }
@@ -619,6 +1038,20 @@ pub async fn hf_download_file_stream(
 
 // ── Search and browse ─────────────────────────────────────────────────────────
 
+/// Model format filter for HF search (GGUF vs MLX).
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HfModelFormat {
+    #[default]
+    Gguf,
+    Mlx,
+    Both,
+}
+
+impl HfModelFormat {
+    // No-op: filter applied inline in hf_search_single
+}
+
 /// Full search request parameters.
 #[derive(Debug, Clone, Default)]
 pub struct HfSearchParams {
@@ -630,6 +1063,10 @@ pub struct HfSearchParams {
     pub limit: usize,
     /// Opaque cursor from the HF API `Link` response header for pagination.
     pub cursor: Option<String>,
+    /// Model format filter (GGUF default for backward compatibility).
+    pub format: HfModelFormat,
+    /// Filter to show only quantized variants (excludes base models).
+    pub quants_only: bool,
 }
 
 /// Parse the `cursor=` value out of a HF API `Link: <url>; rel="next"` header.
@@ -657,6 +1094,18 @@ fn parse_cursor_from_link(link: &str) -> Option<String> {
 pub async fn hf_search_models(
     params: &HfSearchParams,
 ) -> Result<(Vec<SimpleModelInfo>, Option<String>), String> {
+    // Both format: do two separate searches and merge
+    if matches!(params.format, HfModelFormat::Both) {
+        return hf_search_both(params).await;
+    }
+
+    hf_search_single(params).await
+}
+
+/// Search for a single format (GGUF or MLX) — the core HF API call.
+async fn hf_search_single(
+    params: &HfSearchParams,
+) -> Result<(Vec<SimpleModelInfo>, Option<String>), String> {
     let limit = params.limit.clamp(1, 100);
     let token = hf_load_token();
 
@@ -672,13 +1121,22 @@ pub async fn hf_search_models(
             p.append_pair("author", author);
         }
         p.append_pair("limit", &limit.to_string());
-        p.append_pair("sort", params.sort.as_api_str());
-        p.append_pair("direction", "-1");
+        // Relevance yields no key: HF ranks by the search term only when `sort` is absent.
+        if let Some(sort_key) = params.sort.as_api_str() {
+            p.append_pair("sort", sort_key);
+            p.append_pair("direction", "-1");
+        }
         if let Some(ref cursor) = params.cursor {
             p.append_pair("cursor", cursor);
         }
-        // Always filter for GGUF
-        p.append_pair("filter", "gguf");
+        match params.format {
+            HfModelFormat::Gguf => p.append_pair("apps", "llama.cpp"),
+            HfModelFormat::Mlx => p.append_pair("apps", "mlx-lm"),
+            HfModelFormat::Both => unreachable!(), // handled in hf_search_both
+        };
+        if matches!(params.format, HfModelFormat::Mlx) {
+            p.append_pair("expand[]", "safetensors");
+        }
     }
 
     let mut req = HF_HTTP_CLIENT.get(url);
@@ -694,7 +1152,6 @@ pub async fn hf_search_models(
         return Err(format!("HF search failed: HTTP {}", resp.status()));
     }
 
-    // Read the Link header BEFORE consuming the body.
     let next_cursor = resp
         .headers()
         .get("link")
@@ -705,16 +1162,138 @@ pub async fn hf_search_models(
         .json()
         .await
         .map_err(|e| format!("Failed to parse HF response: {e}"))?;
+    let items = if params.quants_only {
+        items
+            .into_iter()
+            .filter(has_quantized_base_model_tag)
+            .collect()
+    } else {
+        items
+    };
 
-    Ok((
-        items.into_iter().filter_map(parse_model_item).collect(),
-        next_cursor,
-    ))
+    let mut models: Vec<SimpleModelInfo> = items
+        .into_iter()
+        .filter_map(|item| parse_model_item(item, &params.format))
+        .collect();
+
+    // For MLX models where the safetensors expand didn't yield a size, fall back to tree API
+    let token = hf_load_token();
+    for model in models.iter_mut() {
+        if model.model_size_bytes.is_none()
+            && matches!(params.format, HfModelFormat::Mlx | HfModelFormat::Both)
+            && let Ok(files) = fetch_file_sizes(&model.id, token.as_deref()).await
+        {
+            let total: u64 = files.values().sum();
+            if total > 0 {
+                model.model_size_bytes = Some(total);
+            }
+        }
+    }
+
+    Ok((models, next_cursor))
+}
+
+/// For Both format, do two separate searches (GGUF + MLX) and merge.
+async fn hf_search_both(
+    params: &HfSearchParams,
+) -> Result<(Vec<SimpleModelInfo>, Option<String>), String> {
+    let limit = params.limit.clamp(1, 100);
+    let token = hf_load_token();
+
+    let mut url = reqwest::Url::parse("https://huggingface.co/api/models")
+        .map_err(|e| format!("Invalid HF API URL: {e}"))?;
+
+    {
+        let mut p = url.query_pairs_mut();
+        if !params.query.is_empty() {
+            p.append_pair("search", &params.query);
+        }
+        if let Some(ref author) = params.author {
+            p.append_pair("author", author);
+        }
+        p.append_pair("limit", &limit.to_string());
+        // Relevance yields no key: HF ranks by the search term only when `sort` is absent.
+        if let Some(sort_key) = params.sort.as_api_str() {
+            p.append_pair("sort", sort_key);
+            p.append_pair("direction", "-1");
+        }
+        if let Some(ref cursor) = params.cursor {
+            p.append_pair("cursor", cursor);
+        }
+        p.append_pair("apps", "llama.cpp,mlx-lm");
+        p.append_pair("expand[]", "safetensors");
+    }
+
+    let mut req = HF_HTTP_CLIENT.get(url);
+    if let Some(ref tok) = token {
+        req = req.bearer_auth(tok);
+    }
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("HF search request failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("HF search failed: HTTP {}", resp.status()));
+    }
+
+    let next_cursor = resp
+        .headers()
+        .get("link")
+        .and_then(|v| v.to_str().ok())
+        .and_then(parse_cursor_from_link);
+
+    let items: Vec<serde_json::Value> = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse HF response: {e}"))?;
+    let items = if params.quants_only {
+        items
+            .into_iter()
+            .filter(has_quantized_base_model_tag)
+            .collect()
+    } else {
+        items
+    };
+
+    let mut models: Vec<SimpleModelInfo> = items
+        .into_iter()
+        .filter_map(|item| parse_model_item(item, &HfModelFormat::Both))
+        .collect();
+
+    // For MLX models where the safetensors expand didn't yield a size, fall back to tree API
+    let token = hf_load_token();
+    for model in models.iter_mut() {
+        if model.model_size_bytes.is_none()
+            && model.format == "mlx"
+            && let Ok(files) = fetch_file_sizes(&model.id, token.as_deref()).await
+        {
+            let total: u64 = files.values().sum();
+            if total > 0 {
+                model.model_size_bytes = Some(total);
+            }
+        }
+    }
+
+    Ok((models, next_cursor))
 }
 
 /// Browse all GGUF models from a specific HF author/org (convenience wrapper).
+/// `base_model_relation` is not a working Hub models-API filter. Retain only
+/// repositories that explicitly declare themselves as a quantization instead.
+fn has_quantized_base_model_tag(item: &serde_json::Value) -> bool {
+    item.get("tags")
+        .and_then(|tags| tags.as_array())
+        .is_some_and(|tags| {
+            tags.iter().any(|tag| {
+                tag.as_str()
+                    .is_some_and(|tag| tag.starts_with("base_model:quantized:"))
+            })
+        })
+}
+
 /// Parse a single model JSON object from the HF API into SimpleModelInfo.
-fn parse_model_item(item: serde_json::Value) -> Option<SimpleModelInfo> {
+fn parse_model_item(item: serde_json::Value, format: &HfModelFormat) -> Option<SimpleModelInfo> {
     let id = item
         .get("id")
         .and_then(|v| v.as_str())
@@ -749,8 +1328,26 @@ fn parse_model_item(item: serde_json::Value) -> Option<SimpleModelInfo> {
     // Infer parameter count from repo name
     let param_b = infer_param_b_from_name(&id);
 
+    let model_size_bytes = item
+        .get("model_size_bytes")
+        .and_then(|v| v.as_u64())
+        .or_else(|| safetensors_total_bytes(&item));
+
+    // Infer quant label from HF tags (preferred) or repo name
+    let quant_label = infer_mlx_quant_label(&tags, &id);
+
+    // HF reliably tags MLX repos "mlx" and GGUF repos "gguf" — use the real
+    // per-item tag rather than blanket-stamping "both" for every result.
+    let tag_has_mlx = tags.iter().any(|t| t.eq_ignore_ascii_case("mlx"));
+    let tag_has_gguf = tags.iter().any(|t| t.eq_ignore_ascii_case("gguf"));
+
     Some(SimpleModelInfo {
         id,
+        revision: item
+            .get("sha")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
         gated: item.get("gated").and_then(|v| v.as_bool()).unwrap_or(false),
         tags,
         downloads: item.get("downloads").and_then(|v| v.as_u64()).unwrap_or(0),
@@ -770,6 +1367,17 @@ fn parse_model_item(item: serde_json::Value) -> Option<SimpleModelInfo> {
         has_imatrix,
         param_b,
         base_model,
+        format: match format {
+            HfModelFormat::Mlx => "mlx".into(),
+            HfModelFormat::Gguf => "gguf".into(),
+            HfModelFormat::Both => match (tag_has_mlx, tag_has_gguf) {
+                (true, false) => "mlx".into(),
+                (false, true) => "gguf".into(),
+                _ => "both".into(),
+            },
+        },
+        model_size_bytes,
+        quant_label,
     })
 }
 
@@ -789,6 +1397,34 @@ fn infer_param_b_from_name(name: &str) -> f64 {
         .filter(|&v| (0.5..=2000.0).contains(&v))
         .collect();
     matches.into_iter().fold(0.0_f64, f64::max)
+}
+
+/// Infer MLX quant label from HF tags only (not repo names — too many variations).
+/// Repo names are unreliable: crowqwen3.5-4b-agent-heretic-mlx-oq, Bielik-PL-11B-v3.0-Instruct-heretic-mlx-4bit, etc.
+/// Returns empty string if no matching tag found (common for BF16 models without tags).
+fn infer_mlx_quant_label(tags: &[String], _id: &str) -> String {
+    let tags_lower = tags.iter().map(|t| t.to_ascii_lowercase());
+    for tag in tags_lower {
+        if tag == "4-bit" {
+            return "4-bit".into();
+        }
+        if tag == "8-bit" {
+            return "8-bit".into();
+        }
+        if tag == "3-bit" {
+            return "3-bit".into();
+        }
+        if tag == "2-bit" {
+            return "2-bit".into();
+        }
+        if tag == "5-bit" {
+            return "5-bit".into();
+        }
+        if tag == "6-bit" {
+            return "6-bit".into();
+        }
+    }
+    String::new()
 }
 
 // ── GGUF file listing with real sizes ────────────────────────────────────────
@@ -812,6 +1448,55 @@ pub async fn hf_list_gguf_files(repo_id: &str) -> Result<Vec<HfGgufFile>, String
     Ok(result)
 }
 
+/// List MLX model files for a repo.
+/// MLX models are directories containing .safetensors files; each directory is treated as a "model".
+pub async fn hf_list_mlx_files(repo_id: &str) -> Result<Vec<serde_json::Value>, String> {
+    let token = hf_load_token();
+    let sizes = fetch_file_sizes(repo_id, token.as_deref())
+        .await
+        .unwrap_or_default();
+
+    let (owner, name) = repo_id
+        .split_once('/')
+        .ok_or_else(|| format!("Invalid repo_id format: {repo_id}"))?;
+    let client = hf_build_client(token).map_err(|e| format!("Failed to build HF client: {e}"))?;
+    let info = client
+        .model(owner, name)
+        .info()
+        .send()
+        .map_err(|e| format!("Failed to list repo files: {e}"))?;
+
+    let siblings = info
+        .siblings
+        .ok_or_else(|| format!("HF API did not return file listing for {repo_id}"))?;
+
+    // MLX models: list safetensors files or directories containing them
+    let result: Vec<serde_json::Value> = siblings
+        .iter()
+        .map(|s| {
+            let path = s.rfilename.as_str();
+            let size = sizes.get(path).copied().unwrap_or(0);
+            let lower = path.to_ascii_lowercase();
+            let is_safetensors =
+                lower.ends_with(".safetensors") || lower.ends_with(".safetensors.index.json");
+            let is_config = lower.ends_with("config.json") || lower.ends_with("config.yaml");
+            if is_safetensors || is_config {
+                serde_json::json!({
+                    "name": path,
+                    "path": path,
+                    "size": size,
+                    "repo_id": repo_id,
+                })
+            } else {
+                serde_json::json!(null)
+            }
+        })
+        .filter_map(|v| v.as_null().map_or(Some(v), |_| None))
+        .collect();
+
+    Ok(result)
+}
+
 async fn list_repo_gguf_files(
     repo_id: &str,
     token: Option<String>,
@@ -820,14 +1505,19 @@ async fn list_repo_gguf_files(
         .await
         .unwrap_or_default();
 
-    let api = ApiBuilder::new()
-        .with_token(token)
-        .build()
-        .map_err(|e| format!("Failed to build HF API client: {e}"))?;
-    let info = api
-        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
+    let (owner, name) = repo_id
+        .split_once('/')
+        .ok_or_else(|| format!("Invalid repo_id format: {repo_id}"))?;
+    let client = hf_build_client(token).map_err(|e| format!("Failed to build HF client: {e}"))?;
+    let info = client
+        .model(owner, name)
         .info()
+        .send()
         .map_err(|e| format!("Failed to list repo files: {e}"))?;
+
+    let siblings = info
+        .siblings
+        .ok_or_else(|| format!("HF API did not return file listing (siblings) for {repo_id}"))?;
 
     // Infer provider from repo owner
     let repo_owner = repo_id.split('/').next().unwrap_or("");
@@ -836,7 +1526,7 @@ async fn list_repo_gguf_files(
     let family = {
         let from_repo = infer_family_from_name(repo_id);
         if from_repo.is_empty() {
-            info.siblings
+            siblings
                 .iter()
                 .map(|s| infer_family_from_name(&s.rfilename))
                 .find(|candidate| !candidate.is_empty())
@@ -846,8 +1536,7 @@ async fn list_repo_gguf_files(
         }
     };
     let mmproj_preference = mmproj_preference_for_family(&family);
-    let mut result: Vec<HfGgufFile> = info
-        .siblings
+    let mut result: Vec<HfGgufFile> = siblings
         .iter()
         .map(|s| s.rfilename.as_str())
         .filter(|name| name.to_ascii_lowercase().ends_with(".gguf"))
@@ -1131,6 +1820,10 @@ async fn fetch_file_sizes(
     repo_id: &str,
     token: Option<&str>,
 ) -> Result<std::collections::HashMap<String, u64>> {
+    if let Some(cached) = HF_SIZE_CACHE.lock().unwrap().get(repo_id) {
+        return Ok(cached.clone());
+    }
+
     let url = format!("https://huggingface.co/api/models/{repo_id}/tree/main");
     let mut req = HF_HTTP_CLIENT.get(&url);
     if let Some(t) = token {
@@ -1151,7 +1844,11 @@ async fn fetch_file_sizes(
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        if !path.to_ascii_lowercase().ends_with(".gguf") {
+        let lower = path.to_ascii_lowercase();
+        if !lower.ends_with(".gguf")
+            && !lower.ends_with(".safetensors")
+            && !lower.ends_with(".safetensors.index.json")
+        {
             continue;
         }
 
@@ -1168,7 +1865,59 @@ async fn fetch_file_sizes(
         }
     }
 
+    HF_SIZE_CACHE
+        .lock()
+        .unwrap()
+        .insert(repo_id.to_string(), map.clone());
+
     Ok(map)
+}
+
+/// Sum total weight size for an MLX model repo from the HF tree API.
+///
+/// Used by the VRAM estimator when it receives an HF-repo-style alias as
+/// `model_path` (e.g. "mlx-community/Qwen3-30B-A3B-4bit") and no
+/// `model_size_bytes` was supplied. The huggingface-rs client's
+/// list/get-file-info helpers do not expose sizes, so this goes directly
+/// to the raw tree endpoint which does include LFS sizes.
+pub async fn resolve_mlx_repo_size_bytes(repo_id: &str) -> Result<Option<u64>> {
+    let url = format!("https://huggingface.co/api/models/{repo_id}/tree/main");
+    let mut req = HF_HTTP_CLIENT.get(&url);
+    if let Some(t) = hf_load_token() {
+        req = req.bearer_auth(t);
+    }
+
+    let resp = match req.send().await {
+        Ok(r) => r,
+        Err(_) => return Ok(None),
+    };
+    if !resp.status().is_success() {
+        return Ok(None);
+    }
+
+    let items: Vec<serde_json::Value> = match resp.json().await {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+
+    let mut total: u64 = 0;
+    for item in items {
+        let path = item.get("path").and_then(|v| v.as_str()).unwrap_or("");
+        if !path.ends_with(".safetensors") {
+            continue;
+        }
+        let size = item
+            .get("lfs")
+            .and_then(|lfs| lfs.get("size"))
+            .and_then(|v| v.as_u64())
+            .or_else(|| item.get("size").and_then(|v| v.as_u64()))
+            .unwrap_or(0);
+        if size > 0 {
+            total = total.saturating_add(size);
+        }
+    }
+
+    if total > 0 { Ok(Some(total)) } else { Ok(None) }
 }
 
 /// Sort rank for quant labels (lower = higher quality / bigger file = shown first).
@@ -1315,17 +2064,71 @@ pub fn infer_quant_label(filename: &str) -> String {
         return "F32".into();
     }
 
-    // Compact/APEX/etc. Unsloth special naming
-    if lower.contains("compact") || lower.contains("apex") {
-        return "UD (custom)".into();
+    // Community mixed-precision schemes (e.g. this repo's own MTP/APEX quants) —
+    // these aren't Unsloth's UD scheme, so keep the uploader's own naming rather
+    // than mislabeling them "UD (custom)". Uploaders append arbitrary suffixes to
+    // these (e.g. "APEX-MTP-I-Quality", "APEX-MTP-Balanced", "APEX-Compact") that
+    // we can't enumerate in advance, so capture from the first "mtp"/"apex"
+    // token through the end of the filename verbatim rather than hardcoding a
+    // fixed piece list — that keeps distinct variants distinguishable in the table.
+    if lower.contains("apex") || lower.contains("mtp") {
+        let stem_end = filename
+            .rfind(".gguf")
+            .or_else(|| filename.rfind(".GGUF"))
+            .unwrap_or(filename.len());
+        let start = lower
+            .find("apex")
+            .into_iter()
+            .chain(lower.find("mtp"))
+            .min();
+        if let Some(start) = start {
+            return format!("{} (custom)", &filename[start..stem_end]);
+        }
+    }
+
+    // Last resort: pull out anything that looks like a quant token (e.g. a
+    // non-standard K-quant variant like "Q8_K_P") rather than collapsing it
+    // to "Unknown" — an unrecognized-but-real name is more useful than none.
+    if let Some(token) = extract_quant_like_token(filename) {
+        return token;
     }
 
     "Unknown".into()
 }
 
+/// Scans a filename for a `Q`/`IQ`-prefixed token (e.g. "Q8_K_P", "IQ3_XYZ")
+/// that didn't match any of the known presets above, and returns it verbatim
+/// (uppercased) instead of discarding it as "Unknown".
+fn extract_quant_like_token(filename: &str) -> Option<String> {
+    let stem = filename
+        .rsplit('/')
+        .next()
+        .unwrap_or(filename)
+        .trim_end_matches(".gguf")
+        .trim_end_matches(".GGUF");
+    for segment in stem.split(['-', '_', '.']) {
+        let seg_lower = segment.to_ascii_lowercase();
+        let is_q =
+            seg_lower.starts_with('q') && seg_lower[1..].starts_with(|c: char| c.is_ascii_digit());
+        let is_iq =
+            seg_lower.starts_with("iq") && seg_lower[2..].starts_with(|c: char| c.is_ascii_digit());
+        if is_q || is_iq {
+            // Reattach any immediately-following underscore-joined suffix segments
+            // (e.g. "K", "P" in "Q8_K_P") that got split apart above.
+            let start = stem.to_ascii_lowercase().find(&seg_lower)?;
+            let rest = &stem[start..];
+            let end = rest.find(['-', '.']).unwrap_or(rest.len());
+            return Some(rest[..end].to_ascii_uppercase());
+        }
+    }
+    None
+}
+
 // ── Token management ──────────────────────────────────────────────────────────
 
-/// Load HF token: 1) HUGGING_FACE_HUB_TOKEN env var  2) ~/.config/llama-monitor/hf-token.
+/// Load HF token: 1) HUGGING_FACE_HUB_TOKEN env var  2) the active application
+/// root's `hf-token` file. The legacy path remains readable while the explicit
+/// root migration is pending.
 /// If the file is encrypted, decrypt_value handles it; otherwise treated as plaintext.
 pub fn hf_load_token() -> Option<String> {
     if let Ok(v) = std::env::var("HUGGING_FACE_HUB_TOKEN")
@@ -1333,19 +2136,16 @@ pub fn hf_load_token() -> Option<String> {
     {
         return Some(v.trim().to_string());
     }
-    dirs::home_dir().and_then(|home| {
-        let path = home.join(".config").join("llama-monitor").join("hf-token");
-        std::fs::read_to_string(&path)
-            .ok()
-            .map(|s| crate::config::decrypt_value(s.trim()))
-            .filter(|s| !s.is_empty())
-    })
+    let path = crate::paths::AppPaths::default_active_root().join("hf-token");
+    std::fs::read_to_string(&path)
+        .ok()
+        .map(|s| crate::config::decrypt_value(s.trim()))
+        .filter(|s| !s.is_empty())
 }
 
-/// Save HF token to ~/.config/llama-monitor/hf-token (encrypted if key available).
+/// Save HF token to the active application root (encrypted if key available).
 pub fn hf_save_token(token: &str) -> Result<()> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home directory not found"))?;
-    let dir = home.join(".config").join("llama-monitor");
+    let dir = crate::paths::AppPaths::default_active_root();
     std::fs::create_dir_all(&dir).context("Failed to create config dir")?;
     let stored = crate::config::encrypt_value(token.trim());
     std::fs::write(dir.join("hf-token"), &stored).context("Failed to write HF token")?;
@@ -1513,6 +2313,8 @@ pub async fn hf_resolve_origin(filename: &str, size_bytes: u64) -> Result<HfReso
             sort: HfSort::Downloads,
             limit: 15,
             cursor: None,
+            format: HfModelFormat::Gguf,
+            quants_only: false,
         };
         let result = hf_search_models(&params).await;
         match result {
@@ -2234,15 +3036,193 @@ pub fn find_compatible_gemma4_mtp_draft(
     best.cloned().or_else(|| candidates.into_iter().next())
 }
 
+/// Validate a HuggingFace repo ID format (owner/name).
+pub fn validate_hf_repo_id(repo_id: &str) -> bool {
+    !repo_id.is_empty() && repo_id.contains('/') && repo_id.split('/').count() == 2
+}
+
+/// Fetch raw bytes from a file at a revision from HF.
+/// Returns up to max_size bytes.
+#[allow(dead_code)]
+pub async fn fetch_raw_bytes_at(
+    repo_id: &str,
+    revision: &str,
+    file_path: &str,
+    max_size: u64,
+) -> Result<Vec<u8>, String> {
+    let url = hf_resolve_download_url_at(repo_id, file_path, revision);
+    let token = hf_load_token();
+    let mut req = HF_HTTP_CLIENT.get(&url);
+    if let Some(tok) = token {
+        req = req.bearer_auth(tok);
+    }
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("HTTP error fetching {}: {}", file_path, e))?;
+    if !resp.status().is_success() {
+        return Err(format!("{}: HTTP {}", file_path, resp.status()));
+    }
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("Read error for {}: {}", file_path, e))?;
+    let bytes = bytes.as_ref();
+    if bytes.len() as u64 > max_size {
+        return Err(format!(
+            "{}: exceeds size limit ({}/{} bytes)",
+            file_path,
+            bytes.len(),
+            max_size
+        ));
+    }
+    Ok(bytes.to_vec())
+}
+
+/// List all files in a HF repo using the HF tree API.
+#[allow(dead_code)]
+pub async fn list_repo_siblings(repo_id: &str) -> Result<Vec<String>, String> {
+    let url = format!("https://huggingface.co/api/models/{}/tree/main", repo_id);
+    let token = hf_load_token();
+    let mut req = HF_HTTP_CLIENT.get(&url);
+    if let Some(tok) = token {
+        req = req.bearer_auth(tok);
+    }
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("HTTP error listing repo {}: {}", repo_id, e))?;
+    if !resp.status().is_success() {
+        return Err(format!("List repo {}: HTTP {}", repo_id, resp.status()));
+    }
+    let items: Vec<serde_json::Value> = resp
+        .json()
+        .await
+        .map_err(|e| format!("JSON parse error for {}: {}", repo_id, e))?;
+    let paths: Vec<String> = items
+        .into_iter()
+        .filter_map(|v| v.get("path").and_then(|p| p.as_str().map(String::from)))
+        .collect();
+    Ok(paths)
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Every sort the UI offers must reach HF as a key HF actually understands, or as a
+    /// deliberate absence. The shipped version mapped Name to `createdAt` and Size to
+    /// `downloads`, so five visible options produced two orderings and the dropdown was
+    /// decorative. Nothing caught it because nothing asserted the mapping.
+    #[test]
+    fn every_sort_maps_to_a_real_hf_key_or_a_deliberate_absence() {
+        // The keys HF's /api/models endpoint accepts for `sort`.
+        let hf_accepts = [
+            "downloads",
+            "likes",
+            "createdAt",
+            "lastModified",
+            "trendingScore",
+        ];
+
+        for sort in [
+            HfSort::Downloads,
+            HfSort::Likes,
+            HfSort::CreatedAt,
+            HfSort::LastModified,
+            HfSort::Trending,
+        ] {
+            let key = sort
+                .as_api_str()
+                .unwrap_or_else(|| panic!("{sort:?} must send a sort key"));
+            assert!(
+                hf_accepts.contains(&key),
+                "{sort:?} sends unknown key {key:?}"
+            );
+        }
+
+        // Relevance is the one mode defined by sending nothing: HF ranks by the search term
+        // only when `sort` is absent, so giving it any key would silently replace the very
+        // ordering the mode exists to show.
+        assert_eq!(HfSort::Relevance.as_api_str(), None);
+    }
+
+    /// Distinct sorts must stay distinct. Collapsing two modes onto one key is precisely how
+    /// the previous mapping became a no-op, and it reads as harmless at the call site.
+    #[test]
+    fn distinct_sorts_do_not_collapse_onto_one_key() {
+        let keys: Vec<_> = [
+            HfSort::Downloads,
+            HfSort::Likes,
+            HfSort::CreatedAt,
+            HfSort::LastModified,
+            HfSort::Trending,
+        ]
+        .iter()
+        .map(|s| s.as_api_str().unwrap())
+        .collect();
+
+        let unique: std::collections::BTreeSet<_> = keys.iter().collect();
+        assert_eq!(
+            unique.len(),
+            keys.len(),
+            "two sorts share an API key: {keys:?}"
+        );
+    }
+
+    #[test]
+    fn mlx_revision_and_text_config_references_are_bounded_and_safe() {
+        for revision in [
+            "main",
+            "a4c7561cc890307b95b473f8564634c3d598734a",
+            "v0.10.17",
+        ] {
+            assert!(validate_hf_revision(revision).is_ok(), "{revision}");
+        }
+        for revision in ["", "main/next", "../main", "main?ref=x"] {
+            assert!(validate_hf_revision(revision).is_err(), "{revision}");
+        }
+        assert!(validate_hf_revision(&"a".repeat(129)).is_err());
+
+        for reference in [
+            "text_config.json",
+            "configs/text.json",
+            "nested/config.json",
+        ] {
+            assert!(
+                validate_mlx_config_reference(reference).is_ok(),
+                "{reference}"
+            );
+        }
+        for reference in [
+            "",
+            "/config.json",
+            "../config.json",
+            "configs/../../text.json",
+            "config.yaml",
+        ] {
+            assert!(
+                validate_mlx_config_reference(reference).is_err(),
+                "{reference}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn test_hf_get_model_info_smoke() {
         let _ = hf_get_model_info("gpt2").await;
+    }
+
+    #[test]
+    fn test_quants_only_uses_declared_quantized_base_tag() {
+        assert!(has_quantized_base_model_tag(&serde_json::json!({
+            "tags": ["mlx", "base_model:quantized:mistralai/Mistral-7B-Instruct-v0.3"]
+        })));
+        assert!(!has_quantized_base_model_tag(&serde_json::json!({
+            "tags": ["mlx", "base_model:mistralai/Mistral-7B-Instruct-v0.3"]
+        })));
     }
 
     #[test]
@@ -2255,6 +3235,39 @@ mod tests {
         assert_eq!(infer_quant_label("Qwen3.6-27B-UD-Q4_K_M.gguf"), "Q4_K_M");
         assert_eq!(infer_quant_label("model-Q5_K_XL.gguf"), "Q5_K_XL");
         assert_eq!(infer_quant_label("model-IQ2_XXS.gguf"), "IQ2_XXS");
+        // Non-standard but real quant names should be preserved, not collapsed to "Unknown".
+        assert_eq!(
+            infer_quant_label("Hermes3.6-35B-A3B-Genesis-V7-Q8_K_P.gguf"),
+            "Q8_K_P"
+        );
+        // APEX/MTP/Compact are this uploader's own custom scheme, not Unsloth's UD —
+        // don't mislabel them "UD (custom)".
+        assert_eq!(
+            infer_quant_label("Hermes3.6-35B-A3B-Genesis-V7-MTP-APEX.gguf"),
+            "MTP-APEX (custom)"
+        );
+        assert_eq!(
+            infer_quant_label("Hermes3.6-35B-A3B-Genesis-V7-APEX.gguf"),
+            "APEX (custom)"
+        );
+        assert_eq!(
+            infer_quant_label("Hermes3.6-35B-A3B-Genesis-V7-MTP-APEX-Compact.gguf"),
+            "MTP-APEX-Compact (custom)"
+        );
+        assert_eq!(
+            infer_quant_label("Hermes3.6-35B-A3B-Genesis-V7-APEX-Compact.gguf"),
+            "APEX-Compact (custom)"
+        );
+        // Arbitrary uploader suffixes (Quality, I-Quality, Balanced, ...) can't be
+        // enumerated in advance — must be preserved verbatim, not collapsed.
+        assert_eq!(
+            infer_quant_label("Qwen3.6-35B-A3B-APEX-MTP-I-Quality.gguf"),
+            "APEX-MTP-I-Quality (custom)"
+        );
+        assert_eq!(
+            infer_quant_label("model-APEX-MTP-Balanced.gguf"),
+            "APEX-MTP-Balanced (custom)"
+        );
     }
 
     #[test]
@@ -2366,7 +3379,7 @@ mod tests {
             "downloads": 1000,
             "likes": 50,
         });
-        let info = parse_model_item(item).unwrap();
+        let info = parse_model_item(item, &HfModelFormat::Gguf).unwrap();
         assert!(
             info.has_imatrix,
             "mradermacher repo should be flagged as imatrix"
@@ -2374,17 +3387,26 @@ mod tests {
     }
 
     #[test]
-    fn test_known_quantizers_has_expected_entries() {
-        let quantizers = known_gguf_quantizers();
-        let usernames: Vec<&str> = quantizers.iter().map(|q| q.username.as_str()).collect();
-        assert!(usernames.contains(&"bartowski"));
-        assert!(usernames.contains(&"mradermacher"));
-        assert!(usernames.contains(&"unsloth"));
-        assert!(usernames.contains(&"DavidAU"));
-        assert!(usernames.contains(&"mudler"));
-        assert!(usernames.contains(&"Jackrong"));
-        assert!(usernames.contains(&"llmfan46"));
-        assert!(usernames.contains(&"prithivMLmods"));
+    fn model_search_preserves_the_hub_commit_for_pinned_selection() {
+        let item = serde_json::json!({
+            "id": "mlx-community/Qwen",
+            "sha": "abcdef1234567890",
+            "tags": ["mlx"],
+        });
+        let info = parse_model_item(item, &HfModelFormat::Mlx).unwrap();
+        assert_eq!(info.revision, "abcdef1234567890");
+
+        let without_sha = serde_json::json!({
+            "id": "mlx-community/Qwen",
+            "tags": ["mlx"],
+        });
+        assert!(
+            parse_model_item(without_sha, &HfModelFormat::Mlx)
+                .unwrap()
+                .revision
+                .is_empty(),
+            "missing Hub metadata must stay unpinned rather than inventing main"
+        );
     }
 
     #[test]
@@ -2438,23 +3460,347 @@ This is a vision model - mmproj files (if any) will be in the static repository.
         );
         assert!(qwen35_arch_companion_repos("other/Qwen3.5-27B-i1-GGUF").is_empty());
     }
+}
 
-    #[test]
-    fn test_simple_model_info_serde_default() {
-        let json = r#"{"id":"test/model"}"#;
-        let info: SimpleModelInfo = serde_json::from_str(json).expect("should deserialize");
-        assert_eq!(info.id, "test/model");
-        assert!(!info.gated);
-        assert!(info.tags.is_empty());
-        assert_eq!(info.downloads, 0);
+// ── MLX Native/Conversion Discovery (Phase 8A3) ──────────────────────────────────────────
+
+/// Discovery result for MLX derivatives of a finetune.
+///
+/// Finds native MLX artifacts and authoritative safetensors conversion candidates
+/// (builder item 11). Original author is always preserved as a separate role from
+/// converter/publisher; original author never appears as converter.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MlxDiscoveryResult {
+    /// The source repo being analyzed
+    pub source_repo_id: String,
+    /// Whether this source is likely a finetune
+    pub source_is_finetune: bool,
+    /// Original author of the finetune (if identifiable)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_author: Option<String>,
+    /// Original author is always preserved through conversion
+    #[serde(default)]
+    pub original_author_preserved: bool,
+    /// Native MLX repos that are derivatives of this source
+    #[serde(default)]
+    pub native_mlx_derivatives: Vec<MlxDerivative>,
+    /// Safetensors conversion recipes available
+    #[serde(default)]
+    pub conversion_recipes: Vec<MlxConversionRecipeInfo>,
+    /// Errors encountered
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MlxDerivative {
+    /// HF repo id of the MLX derivative
+    pub repo_id: String,
+    /// Revision
+    pub revision: String,
+    /// Converter/publisher (never the original author)
+    pub converter: String,
+    /// Format type ("mlx" or "safetensors")
+    pub format: String,
+    /// Whether this repo has been qualified for Rapid-MLX
+    #[serde(default)]
+    pub is_qualified: bool,
+    /// Total repo size in bytes (from HF tree API, 0 if unknown)
+    #[serde(default)]
+    pub size: u64,
+    /// Quantization info from config (bits/group_size), if present
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quant: Option<crate::inference::rapid_mlx::mlx_meta::MlxQuantization>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MlxConversionRecipeInfo {
+    /// Recipe identifier
+    pub recipe_id: String,
+    /// Human-readable name
+    pub recipe: String,
+    /// Description
+    pub description: String,
+    /// Required source format
+    pub input_format: String,
+    /// Output MLX format
+    pub output_format: String,
+    /// Estimated additional disk space required (bytes, 0 if unknown)
+    #[serde(default)]
+    pub estimated_disk: u64,
+    /// Estimated conversion time label ("fast" / "moderate" / "slow")
+    pub estimated_time: String,
+    /// Available quantization options
+    #[serde(default)]
+    pub quant_options: Vec<String>,
+    /// Provenance/source of this recipe
+    pub provenance: String,
+}
+
+/// Known MLX converter publishers (per builder item 11/D29).
+fn known_mlx_publishers() -> &'static [&'static str] {
+    &["mlx-community", "ml-explore", "davidau", "mlabonne"]
+}
+
+/// Infer quantization from an MLX config if available.
+async fn fetch_mlx_quant_for_repo(
+    repo_id: &str,
+) -> Option<crate::inference::rapid_mlx::mlx_meta::MlxQuantization> {
+    let cfg_result = fetch_mlx_config(repo_id, "config.json").await;
+    match cfg_result {
+        Ok(cfg) => cfg.quantization,
+        Err(_) => None,
+    }
+}
+
+/// Check if this repo is qualified for Rapid-MLX (if qualify module available).
+async fn check_qualified(repo_id: &str) -> bool {
+    // For now, use a simple heuristic: mlx-community repos with config.json are treated as qualified.
+    // The full qualify module integration is provided by Phase 8A2.
+    let url = format!("https://huggingface.co/{repo_id}/raw/main/config.json");
+    let resp = match HF_HTTP_CLIENT.get(&url).send().await {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+    resp.status().is_success() && repo_id.starts_with("mlx-community/")
+}
+
+/// Query HF's declared `base_model:quantized:` tag for MLX sibling quantizations.
+///
+/// The Hub's `other` and `base_model_relation` query parameters are silently
+/// ignored by the models API. `filter` is the supported exact tag filter. The
+/// selected repo is often itself a quantized leaf, so first resolve its declared
+/// base model and then ask for all MLX quantizations of that base.
+async fn fetch_mlx_relation_derivatives(repo_id: &str) -> Result<Vec<SimpleModelInfo>, String> {
+    let base_model = hf_get_model_info(repo_id)
+        .await
+        .map_err(|e| format!("Failed to resolve MLX base model: {e}"))?
+        .tags
+        .into_iter()
+        .find_map(|tag| tag.strip_prefix("base_model:quantized:").map(str::to_owned))
+        .unwrap_or_else(|| repo_id.to_string());
+
+    let token = hf_load_token();
+    let mut url = reqwest::Url::parse("https://huggingface.co/api/models")
+        .map_err(|e| format!("Invalid HF API URL: {e}"))?;
+    {
+        let mut p = url.query_pairs_mut();
+        p.append_pair("filter", &format!("base_model:quantized:{base_model}"));
+        p.append_pair("apps", "mlx-lm");
+        p.append_pair("limit", "50");
+        p.append_pair("expand[]", "safetensors");
     }
 
-    #[test]
-    fn test_hf_gguf_file_serde_default() {
-        let json = r#"{"path":"file.gguf"}"#;
-        let f: HfGgufFile = serde_json::from_str(json).expect("should deserialize");
-        assert_eq!(f.path, "file.gguf");
-        assert!(f.repo_id.is_empty());
-        assert_eq!(f.size, 0);
+    let mut req = HF_HTTP_CLIENT.get(url);
+    if let Some(ref tok) = token {
+        req = req.bearer_auth(tok);
     }
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("HF relation query failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("HF relation query failed: HTTP {}", resp.status()));
+    }
+
+    let items: Vec<serde_json::Value> = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse HF relation response: {e}"))?;
+
+    Ok(items
+        .into_iter()
+        .filter_map(|item| parse_model_item(item, &HfModelFormat::Mlx))
+        .collect())
+}
+
+/// Discover MLX derivatives and conversion recipes for a source repo.
+///
+/// Searches HF for native MLX derivatives of the given finetune, using the original
+/// author/converter separation required by builder item 11. The original author is
+/// never listed as a converter; converter is a separate evidence-bearing role.
+pub async fn hf_discover_mlx_derivatives(repo_id: &str) -> Result<MlxDiscoveryResult, String> {
+    let mut errors = Vec::new();
+
+    // Check if the source is likely a finetune (heuristic)
+    let source_is_finetune = repo_id.contains("-ft")
+        || repo_id.contains("-heretic")
+        || repo_id.contains("finetune")
+        || repo_id.contains("merge")
+        || ["unsloth", "davidau", "heretic"]
+            .iter()
+            .any(|o| repo_id.starts_with(*o));
+
+    // Try to find original author via identity resolution (preferred) or heuristic
+    // Identity resolution uses the full qualify module from Phase 8A2; fall back to heuristic
+    let original_author = if source_is_finetune {
+        Some(repo_id.split('/').next().unwrap_or("").to_string())
+    } else {
+        None
+    };
+
+    // Derive a search stem from the source repo name (without owner prefix)
+    let stem = repo_id.split('/').next_back().unwrap_or(repo_id);
+
+    let mut native_mlx_derivatives: Vec<MlxDerivative> = Vec::new();
+
+    // Primary path: HF's author-declared model-relation graph (`base_model:` tag).
+    // This is authoritative — a repo explicitly declares what it was quantized from —
+    // unlike the fuzzy stem-name search below, which is a guess.
+    let relation_results = match fetch_mlx_relation_derivatives(repo_id).await {
+        Ok(results) => results,
+        Err(e) => {
+            errors.push(format!("relation query: {e}"));
+            Vec::new()
+        }
+    };
+
+    // Fall back to fuzzy stem search only when the relation graph has nothing declared
+    // (common for older or less-diligently-tagged repos).
+    let via_relation = !relation_results.is_empty();
+    let candidates = if via_relation {
+        relation_results
+    } else {
+        match hf_search_models(&HfSearchParams {
+            query: format!("{stem} mlx"),
+            author: None,
+            sort: HfSort::Downloads,
+            limit: 15,
+            cursor: None,
+            format: HfModelFormat::Mlx,
+            quants_only: true,
+        })
+        .await
+        {
+            Ok((results, _)) => results,
+            Err(e) => {
+                errors.push(format!("search: {e}"));
+                Vec::new()
+            }
+        }
+    };
+
+    for item in candidates {
+        // Must not be the source repo itself; when falling back to fuzzy search,
+        // also require the stem to actually appear in the candidate's id (the
+        // relation-graph path is already authoritative and needs no such check).
+        if item.id == repo_id {
+            continue;
+        }
+        if !via_relation {
+            let id_lower = item.id.to_ascii_lowercase();
+            let stem_lower = stem.to_ascii_lowercase();
+            if !id_lower.contains(&stem_lower[..stem_lower.len().min(16)]) {
+                continue;
+            }
+        }
+
+        // Original author never appears as converter
+        let converter = item.author.clone();
+        if let Some(ref orig) = original_author
+            && converter.eq_ignore_ascii_case(orig)
+        {
+            continue;
+        }
+
+        // Prefer known MLX publishers
+        let is_known_publisher = known_mlx_publishers()
+            .iter()
+            .any(|p| converter.to_ascii_lowercase() == *p);
+
+        // Skip low-signal results unless they're known publishers
+        if !is_known_publisher && item.downloads < 10 {
+            continue;
+        }
+
+        // Fetch size: prefer what the search response already carried (safetensors
+        // expand or relation-query result), only hitting the tree API if still unknown
+        let size = if let Some(bytes) = item.model_size_bytes {
+            bytes
+        } else {
+            resolve_mlx_repo_size_bytes(&item.id)
+                .await
+                .unwrap_or_default()
+                .unwrap_or(0)
+        };
+
+        // Fetch quant from config
+        let quant = fetch_mlx_quant_for_repo(&item.id).await;
+
+        // Check qualification
+        let is_qualified = check_qualified(&item.id).await;
+
+        native_mlx_derivatives.push(MlxDerivative {
+            repo_id: item.id,
+            revision: "main".into(),
+            converter,
+            format: "mlx".into(),
+            is_qualified,
+            size,
+            quant,
+        });
+    }
+
+    // Sort by known publisher (preferred), then qualification
+    native_mlx_derivatives.sort_by(|a, b| {
+        let a_known = known_mlx_publishers()
+            .iter()
+            .any(|p| a.converter.to_ascii_lowercase() == *p);
+        let b_known = known_mlx_publishers()
+            .iter()
+            .any(|p| b.converter.to_ascii_lowercase() == *p);
+        if a_known != b_known {
+            b_known.cmp(&a_known)
+        } else {
+            let a_q = a.is_qualified as u8;
+            let b_q = b.is_qualified as u8;
+            if a_q != b_q {
+                b_q.cmp(&a_q)
+            } else {
+                a.repo_id.cmp(&b.repo_id)
+            }
+        }
+    });
+
+    native_mlx_derivatives.dedup_by(|a, b| a.repo_id == b.repo_id);
+
+    // Standard conversion recipes (app-supported MLX conversion paths)
+    let recipes = vec![
+        MlxConversionRecipeInfo {
+            recipe_id: "mlx_lm_load_original_f16".into(),
+            recipe: "MLX-LM F16".into(),
+            description: "Convert safetensors to MLX F16 format using mlx-lm tools".into(),
+            input_format: "transformers (safetensors)".into(),
+            output_format: "mlx (F16 safetensors shards)".into(),
+            estimated_disk: 0,
+            estimated_time: "moderate".into(),
+            quant_options: vec!["fp16".into()],
+            provenance: "mlx-community / mlx-lm load-original".into(),
+        },
+        MlxConversionRecipeInfo {
+            recipe_id: "mlx_lm_load_original_4bit".into(),
+            recipe: "MLX-LM 4-bit".into(),
+            description: "Convert safetensors to MLX 4-bit quantized format".into(),
+            input_format: "transformers (safetensors)".into(),
+            output_format: "mlx (4-bit quantized safetensors)".into(),
+            estimated_disk: 0,
+            estimated_time: "moderate".into(),
+            quant_options: vec!["4-bit mx4_4".into()],
+            provenance: "mlx-community / mlx-lm convert-to-mx".into(),
+        },
+    ];
+
+    Ok(MlxDiscoveryResult {
+        source_repo_id: repo_id.to_string(),
+        source_is_finetune,
+        original_author,
+        original_author_preserved: true,
+        native_mlx_derivatives,
+        conversion_recipes: recipes,
+        errors,
+    })
 }

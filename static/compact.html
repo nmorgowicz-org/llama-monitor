@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset='utf-8'>
-<title>Llama Monitor</title>
+<title>Local LLM Foundry</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <link rel="stylesheet" href="/css/tokens.css">
 <style>
@@ -11,7 +11,9 @@
    Theme/palette are applied to <html> from shared localStorage in compact.js. */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
-    width: 240px;
+    width: 100%;
+    min-width: 200px;
+    min-height: 220px;
     overflow: hidden;
 }
 body {
@@ -155,11 +157,12 @@ body {
     font-weight: 600;
     margin-bottom: 4px;
 }
+.header { user-select: none; -webkit-user-select: none; cursor: move; touch-action: none; }
 </style>
 </head>
 <body>
 <div class="header">
-    <h1>llama-monitor</h1>
+    <h1>Local LLM Foundry</h1>
     <button class="close-btn" id="compact-close">&times;</button>
 </div>
 <div class="status-bar" id="status-bar">Connecting...</div>
@@ -188,7 +191,6 @@ body {
 
 <div id="gpu-sections" data-capability="gpu"></div>
 <div class="status-bar" id="capability-note" style="display:none;"></div>
-
 <div class="inference-section">
     <div class="section-title">Inference</div>
     <div class="inference-row">
@@ -208,6 +210,6 @@ body {
 <script>
 window.__COMPACT_PORT__ = __PORT__;
 </script>
-<script src="/js/compact.js"></script>
+<script type="module" src="/js/compact.js"></script>
 </body>
 </html>

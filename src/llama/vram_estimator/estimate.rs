@@ -3,6 +3,7 @@
 use super::arch_heuristics::*;
 #[allow(unused_imports)]
 use super::quant_table::*;
+use super::rapid_slopes::*;
 
 // ── KV cache formula ──────────────────────────────────────────────────────────
 
@@ -278,6 +279,192 @@ pub fn compute_headroom(available_vram_bytes: u64, is_unified_memory: bool) -> f
     f64::min(base_fraction, cap_fraction)
 }
 
+// ── Backend-neutral estimator input ───────────────────────────────────────────
+
+/// Which inference backend the estimate is for. Both backends share the same `ModelArch` and
+/// `VramBreakdown` shapes; this only selects the overhead/headroom calibration, since llama.cpp
+/// (Metal/CUDA/ROCm) and Rapid-MLX have different runtime memory behavior even when both run on
+/// the same unified-memory hardware.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Backend {
+    /// llama.cpp (CUDA/ROCm/Metal via `is_unified_memory`).
+    #[default]
+    LlamaCpp,
+    /// Rapid-MLX. Apple-Silicon/unified-memory only; never uses the discrete-GPU overhead path
+    /// regardless of `is_unified_memory`.
+    RapidMlx,
+}
+
+/// How much of a `VramBreakdown` is backed by real measurements versus a formula-based
+/// approximation or a degraded (heuristic-fallback) architecture guess.
+///
+/// llama.cpp's Metal/discrete overhead constants are calibrated against real hardware
+/// measurements (see `metal_overhead_bytes` / `discrete_overhead_bytes` doc comments) — those
+/// paths report `Measured`. Rapid-MLX has no equivalent hardware calibration yet (see
+/// `mlx_overhead_bytes`), so any estimate using it must report `Approximate`, never `Measured`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EstimateEvidence {
+    /// Overhead calibration is backed by real hardware measurements and architecture fields
+    /// came from real metadata (GGUF tensor directory / MLX config + safetensors index).
+    #[default]
+    Measured,
+    /// Architecture fields are real, but the overhead model itself is a documented formula-based
+    /// approximation pending real hardware calibration (currently: all Rapid-MLX estimates).
+    Approximate,
+    /// One or more required architecture fields were missing/unrecognized and a name/param
+    /// heuristic was used instead of real model metadata.
+    Degraded,
+}
+
+/// Extra, backend-specific inputs to `full_estimate` that don't apply to every backend and
+/// therefore default to inert values (`Backend::LlamaCpp`, `EstimateEvidence::Measured`, zero
+/// prefix-cache reservation) for all existing GGUF callers.
+#[derive(Debug, Clone)]
+pub struct EstimatorOptions {
+    pub backend: Backend,
+    pub evidence: EstimateEvidence,
+    /// HuggingFace repo ID (e.g. "mlx-community/Qwen3-30B-A3B-4bit").
+    /// Stored for provenance/debugging; KV slope selection now uses ModelArch fields only.
+    #[allow(dead_code)]
+    pub hf_repo_id: Option<String>,
+    /// Rapid-MLX prefix-cache compression (int4/int8) budget, in bytes, computed by the caller
+    /// via `mlx_prefix_cache_bytes`. This is a SEPARATE stored-cache budget, not a reduction of
+    /// active-context KV: cached entries are decompressed before being reused as active KV, so
+    /// compressing them does not shrink the active KV footprint. Always 0 for GGUF.
+    pub mlx_prefix_cache_bytes: u64,
+    /// Rapid-MLX TurboQuant mode (from execution_policy.rs). Controls retained-KV savings.
+    /// Only applies to qualified models via capability snapshot (D31).
+    pub turboquant_mode: Option<super::execution_policy::TurboQuantMode>,
+    /// Planning-context tokens for Rapid-MLX estimation. This is the configurable max tokens
+    /// for the scenario (e.g. "128K for coding agent"), NOT the current active token count.
+    /// Active KV scales with this; retained KV is the prefix-cache budget. They are distinct.
+    /// Zero means use the legacy unified `context_size` parameter for backward compatibility.
+    pub rapid_planning_context_tokens: u64,
+    /// Retained prefix-cache tokens (separate from active generation tokens).
+    /// For Rapid-MLX: tokens of prefix cached between turns, subject to TurboQuant savings.
+    /// For llama.cpp: not applicable (0).
+    pub rapid_retained_cache_tokens: u64,
+    /// TurboQuant eligibility for the model. Per D31: unknown finetunes do NOT inherit
+    /// alias qualification. Unknown/unqualified models → TurboQuant Disabled.
+    pub turboquant_eligibility: super::execution_policy::TurboQuantEligibility,
+    /// Builder item 13: MTP configuration for Rapid-MLX estimation.
+    /// Controls embedded vs external MTP memory accounting.
+    pub mtp_config: Option<super::workload_scenarios::MtpConfig>,
+    /// Builder item 14: Client type for external-client vs app_fit variants.
+    pub client_type: super::workload_scenarios::ClientType,
+    /// D25: Concurrency policy for MTP admission.
+    /// Workload the estimate is being admitted against. `None` means the caller did
+    /// not state one, and admission falls back to `WorkloadScenario::default()`
+    /// (`CodingAgent`) — a defensible shape, but an assumption rather than a fact, so
+    /// the resulting admission is reported as scenario-defaulted rather than measured.
+    pub workload_scenario: Option<super::workload_scenarios::WorkloadScenario>,
+}
+
+impl Default for EstimatorOptions {
+    /// Backward-compatible defaults: llama.cpp, Measured evidence, zero Rapid-specific fields.
+    fn default() -> Self {
+        Self {
+            backend: Backend::LlamaCpp,
+            evidence: EstimateEvidence::Measured,
+            hf_repo_id: None,
+            mlx_prefix_cache_bytes: 0,
+            turboquant_mode: None,
+            rapid_planning_context_tokens: 0,
+            rapid_retained_cache_tokens: 0,
+            turboquant_eligibility: Default::default(),
+            mtp_config: None,
+            client_type: Default::default(),
+            workload_scenario: None,
+        }
+    }
+}
+
+/// Rapid-MLX (unified-memory) overhead — context-INDEPENDENT part, in bytes.
+///
+/// **Not yet calibrated against real Apple Silicon Rapid-MLX measurements.** Rapid-MLX's
+/// graph-compile/buffer-pooling behavior differs from llama.cpp's Metal backend (different
+/// kernel fusion, KV cache layout, and MLX's lazy-evaluation graph cache), so llama.cpp's
+/// Metal constants (`metal_overhead_base_bytes`) are deliberately NOT reused here. This is a
+/// documented, formula-based approximation, partially calibrated against real Rapid-MLX
+/// 0.10.12 hardware measurements on an Apple M5 Max (see per-branch notes below). Any estimate
+/// using this function MUST be reported with `EstimateEvidence::Approximate`, never `Measured`,
+/// since only two architectures have been directly measured so far.
+pub fn mlx_overhead_base_bytes(arch: &ModelArch, ubatch_size: u32) -> u64 {
+    if arch.n_layers == 0 {
+        return 256 * 1024 * 1024; // unknown arch: flat reserve
+    }
+    let mib = 1024.0 * 1024.0;
+    const SAFETY_MARGIN: f64 = 1.25;
+    // Dense (non-local-attn): validated against mlx-community/Qwen3-0.6B-4bit (28 layers) —
+    // predicted total (596MB) matched the server's self-reported steady-state Metal `active`
+    // memory (0.6GB) to within ~1% at ctx=2048. The original Metal-derived 4.3 value holds.
+    //
+    // Local-attn (Gemma3/Gemma4-style sliding window): the previous 8.8 value was an unvalidated
+    // copy of llama.cpp's Metal local-attn coefficient. Measured against
+    // mlx-community/gemma-3-1b-it-4bit (26 layers, sliding_window=512): the server's
+    // self-reported Metal `active` memory stayed flat at 0.8GB across the whole generation
+    // (steps 256-1792), while the old coefficient predicted a 1061MB total against a 732MB
+    // weight file — a ~260MB (33%) overhead over-prediction. Lowered to 5.5, which predicts a
+    // ~938MB total (still conservative, ~17% over the observed 800MB) for the same run.
+    // Single-model sample — recalibrate once a larger Gemma4 local-attn model has been measured.
+    let per_layer = (if arch.has_local_attn() { 5.5 } else { 4.3 }) * SAFETY_MARGIN;
+    let base = per_layer * arch.n_layers as f64 + 0.035 * ubatch_size as f64 * SAFETY_MARGIN;
+    (base.max(160.0) * mib) as u64
+}
+
+/// Fraction of KV-cache bytes reserved for Rapid-MLX context-scaling working buffers.
+///
+/// Approximation only (see `mlx_overhead_base_bytes`): derived from Metal's measured 6.5%
+/// (`METAL_KV_OVERHEAD_FRACTION`), inflated to a more conservative 8% given the lack of a
+/// direct Rapid-MLX measurement to validate against.
+pub const MLX_KV_OVERHEAD_FRACTION: f64 = 0.08;
+
+/// Rapid-MLX context-SCALING overhead, in bytes. See `mlx_overhead_base_bytes` for the
+/// approximate-evidence caveat that applies to this function too.
+pub fn mlx_overhead_ctx_bytes(kv_cache_bytes: u64) -> u64 {
+    (kv_cache_bytes as f64 * MLX_KV_OVERHEAD_FRACTION) as u64
+}
+
+/// Total Rapid-MLX (unified-memory-only) overhead beyond weights + KV + mmproj + MTP, in
+/// bytes. Formula-based approximation — see `mlx_overhead_base_bytes` for why llama.cpp's
+/// Metal constants are not reused and why this must be reported as `EstimateEvidence::Approximate`.
+pub fn mlx_overhead_bytes(arch: &ModelArch, ubatch_size: u32, kv_cache_bytes: u64) -> u64 {
+    mlx_overhead_base_bytes(arch, ubatch_size) + mlx_overhead_ctx_bytes(kv_cache_bytes)
+}
+
+/// Rapid-MLX compressed prefix-cache budget, in bytes.
+///
+/// This models the SEPARATE stored-cache budget for previously-computed prefixes that
+/// Rapid-MLX keeps compressed (int4/int8) on disk/in memory. It is intentionally NOT a
+/// reduction of `kv_cache_bytes`: cached entries are decompressed back to the active compute
+/// dtype before being reused as active KV, so the active-request KV footprint is unaffected by
+/// how much prefix cache exists. `cached_tokens` is the number of tokens' worth of prefix the
+/// caller wants budgeted (0 = no reservation, the default when the caller hasn't configured a
+/// cache budget). `compression_bits` is 4 or 8; any other value is treated as 8 (uncompressed
+/// int8 baseline) to fail safe (never under-reserve).
+#[cfg(test)]
+pub fn mlx_prefix_cache_bytes(arch: &ModelArch, cached_tokens: u64, compression_bits: u8) -> u64 {
+    if cached_tokens == 0 || arch.n_layers == 0 {
+        return 0;
+    }
+    let bytes_per_elem = match compression_bits {
+        4 => 0.5,
+        8 => 1.0,
+        _ => 1.0,
+    };
+    let effective_layers = if arch.is_hybrid_attn() {
+        arch.n_attn_layers
+    } else {
+        arch.n_layers
+    } as f64;
+    let kv_heads = arch.n_kv_heads.max(1) as f64;
+    let head_dim = arch.head_dim.max(1) as f64;
+    // K + V, one "slot" (prefix cache is shared, not per-parallel-slot).
+    (effective_layers * kv_heads * head_dim * cached_tokens as f64 * 2.0 * bytes_per_elem) as u64
+}
+
 // ── Estimate model file size from param count ─────────────────────────────────
 
 /// Default bits-per-weight for unknown quantizations.
@@ -292,8 +479,21 @@ pub fn estimate_model_size_bytes(param_b: f64, quant: &str) -> u64 {
 /// Inverse of estimate_model_size_bytes: rough param_b from file size.
 ///
 /// Used when GGUF introspection fails and we must guess param_b from the file size.
+/// Correctly converts bytes→bits with the *8 factor: params = (bytes × 8) / 1e9 / bpw.
 pub fn estimate_param_b_from_size(size_bytes: u64, bpw: f64) -> f64 {
-    (size_bytes as f64) / 1e9 / bpw
+    if bpw <= 0.0 {
+        return 0.0;
+    }
+    (size_bytes as f64 * 8.0) / 1e9 / bpw
+}
+
+fn kv_dtype_from_estimator_quant(quant: &str) -> super::execution_policy::KvCacheDtype {
+    match quant {
+        "f16" => super::execution_policy::KvCacheDtype::Bf16,
+        "q8_0" => super::execution_policy::KvCacheDtype::Int8,
+        "q4_0" => super::execution_policy::KvCacheDtype::Int4,
+        _ => super::execution_policy::KvCacheDtype::Int4,
+    }
 }
 
 // ── Full VRAM estimate with breakdown ─────────────────────────────────────────
@@ -301,12 +501,30 @@ pub fn estimate_param_b_from_size(size_bytes: u64, bpw: f64) -> f64 {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct VramBreakdown {
     pub weights_bytes: u64,
+    /// Total KV cache bytes. For llama.cpp and legacy Rapid calls: unified value.
+    /// For Rapid-MLX with planning context: sum of active_kv_bytes + retained_kv_bytes.
     pub kv_cache_bytes: u64,
+    /// Active KV cache for tokens in the current generation sequence (planning context).
+    /// For Rapid-MLX: scales with planning_context_tokens, NOT TurboQuant-affected.
+    /// For llama.cpp/legacy: 0 (uses unified kv_cache_bytes).
+    #[serde(default)]
+    pub active_kv_bytes: u64,
+    /// Retained prefix KV cache (reusable prompt storage between turns).
+    /// For Rapid-MLX: may be reduced by TurboQuant compression (D31).
+    /// For llama.cpp/legacy: 0 (uses unified kv_cache_bytes).
+    #[serde(default)]
+    pub retained_kv_bytes: u64,
     /// Fixed recurrent state for hybrid linear-attention layers (DeltaNet / SSM).
     /// Zero for standard transformers. Does not grow with context length.
     pub linear_attn_state_bytes: u64,
     pub mmproj_bytes: u64,
     pub mtp_bytes: u64,
+    /// TurboQuant transient decompression peak bytes. During decompress→decode cycle,
+    /// both compressed retained buffer and decompressed working set coexist.
+    /// Only nonzero when TurboQuant is active on qualified retained KV (D31).
+    /// Included in total_bytes as a real (short-lived) memory cost.
+    #[serde(default)]
+    pub turboquant_transient_peak_bytes: u64,
     pub overhead_bytes: u64,
     pub total_bytes: u64,
     pub available_bytes: u64,
@@ -316,6 +534,33 @@ pub struct VramBreakdown {
     pub ram_headroom_bytes: i64,
     pub recommendation: VramRecommendation,
     pub note: String,
+    /// Rapid-MLX compressed prefix-cache budget (bytes). Always 0 for GGUF/llama.cpp. This is
+    /// a separate stored-cache budget, NOT a reduction of `kv_cache_bytes` — see
+    /// `mlx_prefix_cache_bytes` for why cached (compressed) entries don't shrink active KV.
+    #[serde(default)]
+    pub mlx_prefix_cache_bytes: u64,
+    /// How much of this breakdown is backed by real hardware measurements vs. a formula-based
+    /// approximation or a degraded (heuristic-fallback) architecture guess.
+    #[serde(default)]
+    pub evidence: EstimateEvidence,
+    /// Effective TurboQuant mode after eligibility resolution (D31). Shows what will actually
+    /// be used; may differ from requested if model is unqualified.
+    #[serde(default)]
+    pub effective_turboquant: super::execution_policy::TurboQuantMode,
+    /// Builder item 13: MTP mode used for this estimate.
+    #[serde(default)]
+    pub mtp_mode: super::workload_scenarios::MtpMode,
+    /// Builder item 13: External drafter companion estimate (if MTP mode = External).
+    /// Total = primary breakdown total_bytes + external_companion.total_bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_companion: Option<super::workload_scenarios::ExternalCompanion>,
+    /// Builder item 13: D25 MTP admission result (warnings, concurrency policy).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mtp_admission: Option<super::workload_scenarios::MtpAdmissionResult>,
+    /// Builder item 14: Client type (app vs external client).
+    /// Used to distinguish external_client_fit vs app_fit variants.
+    #[serde(default)]
+    pub client_type: super::workload_scenarios::ClientType,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -332,6 +577,14 @@ pub enum VramRecommendation {
 /// `is_unified_memory`: true for Apple Silicon and other unified-memory architectures where
 /// GPU and system RAM share the same pool. On unified memory there is no CPU spill path —
 /// exceeding available memory causes OS compression/paging, not a graceful fallback.
+///
+/// For Rapid-MLX backend:
+/// - Active KV is computed from `opts.rapid_planning_context_tokens` (scenario target, not current).
+/// - Retained KV is computed from `opts.rapid_retained_cache_tokens` (prefix-cache budget).
+/// - They are distinct; no component is double-counted.
+/// - TurboQuant (D31) applies ONLY to retained_kv_bytes; never to active KV, weights, MTP, recurrent, or prefill.
+/// - TurboQuant transient decompression peak is an explicit additive component.
+/// - If `rapid_planning_context_tokens` is 0, falls back to unified `context_size` for backward compatibility.
 #[allow(clippy::too_many_arguments)]
 pub fn full_estimate(
     model_size_bytes: u64,
@@ -346,6 +599,7 @@ pub fn full_estimate(
     available_vram_bytes: u64,
     available_ram_bytes: u64,
     is_unified_memory: bool,
+    opts: EstimatorOptions,
 ) -> VramBreakdown {
     let (weight_vram, ram) = if is_unified_memory {
         (model_size_bytes, 0)
@@ -354,21 +608,135 @@ pub fn full_estimate(
     } else {
         dense_weight_split(model_size_bytes, arch, gpu_layers)
     };
-    let kv = kv_cache_bytes(arch, context_size, parallel_slots, ctk, ctv);
+
+    // ── Active vs retained KV separation (Phase 5a Part 2) ──────────────────────
+    //
+    // For Rapid-MLX with planning-context info: active KV and retained KV are distinct.
+    // - active_kv: KV for tokens in the current generation sequence (planning context).
+    // - retained_kv: KV for prefix cache between turns, subject to TurboQuant savings.
+    // - They are NEVER double-counted.
+    //
+    // For llama.cpp or legacy Rapid calls (no planning_context_tokens): unified KV formula.
+
+    let is_rapid_with_context =
+        matches!(opts.backend, Backend::RapidMlx) && opts.rapid_planning_context_tokens > 0;
+
+    let rapid_kv_dtype = kv_dtype_from_estimator_quant(ctk);
+
+    // Receipt-based slope uses only ModelArch fields — no repo ID needed.
+    let receipt_slope = matches!(opts.backend, Backend::RapidMlx)
+        .then(|| rapid_active_kv_bytes_per_token(arch, rapid_kv_dtype));
+
+    let (active_kv, retained_kv_uncompressed) = if is_rapid_with_context {
+        let slots = parallel_slots.max(1) as f64;
+        let planning_tokens = opts.rapid_planning_context_tokens as f64;
+
+        // Active KV: use receipt-based slope when available
+        let active = if let Some(slope) = receipt_slope {
+            (slope * planning_tokens * slots) as u64
+        } else {
+            kv_cache_bytes(
+                arch,
+                opts.rapid_planning_context_tokens,
+                parallel_slots.max(1),
+                ctk,
+                ctv,
+            )
+        };
+
+        // An explicit --cache-memory-mb ceiling is the admission reservation.
+        // Token-derived retained KV is used only when no explicit byte ceiling
+        // exists; summing both would reserve the same retained state twice.
+        let retained = if opts.mlx_prefix_cache_bytes > 0 {
+            0
+        } else if let Some(slope) = receipt_slope {
+            let retained_tokens = opts.rapid_retained_cache_tokens as f64;
+            (slope * retained_tokens) as u64
+        } else {
+            kv_cache_bytes(arch, opts.rapid_retained_cache_tokens, 1, ctk, ctv)
+        };
+        (active, retained)
+    } else {
+        let kv = kv_cache_bytes(arch, context_size, parallel_slots, ctk, ctv);
+        (kv, 0)
+    };
+
+    // ── TurboQuant savings on retained KV (D31) ─────────────────────────────────
+    //
+    // TurboQuant applies ONLY to qualified retained KV components. It is NOT a global multiplier.
+    // - active_kv_bytes: NO TurboQuant savings (active generation KV at full compute dtype).
+    // - weights_bytes: NO TurboQuant savings.
+    // - mtp_bytes: NO TurboQuant savings.
+    // - recurrent_state_bytes: NO TurboQuant savings.
+    // - prefill/transient: NO TurboQuant savings.
+    // - retained_kv_bytes: YES, TurboQuant savings apply here (prefix cache compression).
+    //
+    // Per D31: unknown finetunes do NOT inherit alias qualification. If eligibility is
+    // NotQualified, effective mode is Disabled → 0% savings.
+
+    let effective_turboquant = opts
+        .turboquant_mode
+        .unwrap_or(super::execution_policy::TurboQuantMode::Disabled)
+        .ensure_qualified(opts.turboquant_eligibility);
+
+    let turboquant_savings_fraction = effective_turboquant.retained_kv_savings_fraction();
+    let retained_kv_compressed =
+        if turboquant_savings_fraction > 0.0 && retained_kv_uncompressed > 0 {
+            let savings = (retained_kv_uncompressed as f64 * turboquant_savings_fraction) as u64;
+            retained_kv_uncompressed.saturating_sub(savings)
+        } else {
+            retained_kv_uncompressed
+        };
+
+    // TurboQuant transient decompression peak: during decompress→decode cycle, both compressed
+    // retained buffer and decompressed working set coexist. The peak is the decompressed size
+    // (which equals uncompressed retained KV). This is a real, short-lived memory cost that
+    // MUST be visible in the breakdown per D31.
+    let turboquant_transient_peak =
+        if effective_turboquant.is_enabled() && retained_kv_uncompressed > 0 {
+            retained_kv_uncompressed
+        } else {
+            0
+        };
+
+    // Combined KV for overhead calculations (Metal/MLX overhead scales with total KV footprint).
+    let kv_for_overhead = active_kv + retained_kv_compressed;
+
     // For hybrid linear-attention models (e.g. Qwen3-Coder-Next / DeltaNet):
     // add the fixed recurrent state. This is constant — it does NOT grow with context.
     let linear_state = arch.linear_attn_state_bytes;
     let mmproj = arch.mmproj_bytes;
-    let mtp = mtp_overhead_bytes(model_size_bytes, arch.mtp_depth);
+    // Builder item 13: MTP memory uses explicit config when provided.
+    // Embedded MTP: counted in primary breakdown via primary_breakdown_mtp_bytes.
+    // External MTP: companion counted separately, primary_breakdown_mtp_bytes returns 0.
+    let mtp_config = opts.mtp_config.clone();
+    let mtp = match &mtp_config {
+        Some(cfg) => cfg.primary_breakdown_mtp_bytes(model_size_bytes),
+        None => mtp_overhead_bytes(model_size_bytes, arch.mtp_depth),
+    };
     // Platform-specific overhead, both calibrated against real VRAM/footprint measurements:
     // discrete GPUs → RTX-5090 model (scratch + MoE/Gemma base + context-scaling attention
     // buffers); unified memory → Apple M5 Max model (per-layer base + ~6.5% of KV).
-    let overhead = if is_unified_memory {
-        metal_overhead_bytes(arch, ubatch_size, kv)
-    } else {
-        discrete_overhead_bytes(arch, ubatch_size, context_size)
+    let overhead = match opts.backend {
+        Backend::RapidMlx => mlx_overhead_bytes(arch, ubatch_size, kv_for_overhead),
+        Backend::LlamaCpp if is_unified_memory => {
+            metal_overhead_bytes(arch, ubatch_size, kv_for_overhead)
+        }
+        Backend::LlamaCpp => discrete_overhead_bytes(arch, ubatch_size, context_size),
     };
-    let total = weight_vram + kv + linear_state + mmproj + mtp + overhead;
+    let mlx_cache = opts.mlx_prefix_cache_bytes;
+
+    // TOTAL is additive: all components summed, none double-counted.
+    // TurboQuant transient peak is INCLUDED (it's a real memory cost during decompression).
+    let total = weight_vram
+        + active_kv
+        + retained_kv_compressed
+        + linear_state
+        + mmproj
+        + mtp
+        + turboquant_transient_peak
+        + overhead
+        + mlx_cache;
     let headroom = available_vram_bytes as i64 - total as i64;
     let ram_headroom = available_ram_bytes as i64 - ram as i64;
 
@@ -420,12 +788,50 @@ pub fn full_estimate(
         )
     };
 
+    // Backward-compatible total KV for existing consumers.
+    // For Rapid-MLX with context split: active + retained. For legacy: unified value.
+    let total_kv = active_kv + retained_kv_compressed;
+
+    // Builder item 13: D25 MTP admission.
+    // Only computed when MTP config is provided.
+    let (mtp_mode, external_companion, mtp_admission) = if let Some(ref cfg) = mtp_config {
+        let mode = cfg.mode;
+        let companion = cfg.external_drafter.clone();
+
+        // Compute admission result when MTP is enabled.
+        let admission = if mode != super::workload_scenarios::MtpMode::Disabled {
+            // A caller holding the real request parameters should use
+            // `compute_with_shape` instead; the decode shape otherwise follows the
+            // scenario via `compute`.
+            let scenario = opts.workload_scenario.unwrap_or_default();
+            Some(super::workload_scenarios::MtpAdmissionResult::compute(
+                mode,
+                &scenario,
+                arch.mtp_depth,
+                parallel_slots.max(1),
+            ))
+        } else {
+            None
+        };
+
+        (mode, companion, admission)
+    } else {
+        (super::workload_scenarios::MtpMode::Disabled, None, None)
+    };
+
     VramBreakdown {
         weights_bytes: weight_vram,
-        kv_cache_bytes: kv,
+        kv_cache_bytes: total_kv,
+        active_kv_bytes: if is_rapid_with_context { active_kv } else { 0 },
+        retained_kv_bytes: if is_rapid_with_context {
+            retained_kv_compressed
+        } else {
+            0
+        },
         linear_attn_state_bytes: linear_state,
         mmproj_bytes: mmproj,
         mtp_bytes: mtp,
+        turboquant_transient_peak_bytes: turboquant_transient_peak,
         overhead_bytes: overhead,
         total_bytes: total,
         available_bytes: available_vram_bytes,
@@ -435,6 +841,13 @@ pub fn full_estimate(
         ram_headroom_bytes: ram_headroom,
         recommendation,
         note,
+        mlx_prefix_cache_bytes: mlx_cache,
+        evidence: opts.evidence,
+        effective_turboquant,
+        mtp_mode,
+        external_companion,
+        mtp_admission,
+        client_type: opts.client_type,
     }
 }
 
@@ -461,6 +874,7 @@ pub fn max_context(
     headroom_fraction: f64,
     n_ctx_train: Option<u64>,
     is_unified_memory: bool,
+    backend: Backend,
 ) -> u64 {
     if available_vram_bytes == 0 {
         return 0;
@@ -470,20 +884,24 @@ pub fn max_context(
     let mtp = mtp_overhead_bytes(model_size_bytes, arch.mtp_depth);
     let linear_state = arch.linear_attn_state_bytes; // constant; doesn't scale with context
     // Context-INDEPENDENT overhead goes into the fixed budget. The context-SCALING part is
-    // charged against the KV budget: discrete GPUs add a per-token slope; Metal's scales as a
+    // charged against the KV budget: discrete GPUs add a per-token slope; Metal/MLX scale as a
     // fraction of the KV cache, so we reserve it by shrinking the KV budget by that factor.
-    let (base_overhead, overhead_slope, kv_overhead_mult) = if is_unified_memory {
-        (
+    let (base_overhead, overhead_slope, kv_overhead_mult) = match backend {
+        Backend::RapidMlx => (
+            mlx_overhead_base_bytes(arch, ubatch_size),
+            0.0,
+            1.0 + MLX_KV_OVERHEAD_FRACTION,
+        ),
+        Backend::LlamaCpp if is_unified_memory => (
             metal_overhead_base_bytes(arch, ubatch_size),
             0.0,
             1.0 + METAL_KV_OVERHEAD_FRACTION,
-        )
-    } else {
-        (
+        ),
+        Backend::LlamaCpp => (
             discrete_overhead_base_bytes(arch, ubatch_size),
             discrete_overhead_ctx_bytes_per_token(arch, ubatch_size),
             1.0,
-        )
+        ),
     };
     let fixed = weight_vram + mmproj + mtp + linear_state + base_overhead;
 
@@ -658,6 +1076,7 @@ pub fn auto_size(
     preferred_fit_granularity: u64,
     is_unified_memory: bool,
     n_ctx_train: Option<u64>,
+    backend: Backend,
 ) -> AutoSizeResult {
     let fit_gran = preferred_fit_granularity.max(512);
     let parallel_slots = requested_parallel_slots.max(1);
@@ -678,6 +1097,7 @@ pub fn auto_size(
             available_vram_bytes,
             ubatch,
             is_unified_memory,
+            backend,
         )
     } else {
         0
@@ -703,6 +1123,7 @@ pub fn auto_size(
         headroom,
         n_ctx_train,
         is_unified_memory,
+        backend,
     );
 
     let breakdown = full_estimate(
@@ -718,6 +1139,15 @@ pub fn auto_size(
         available_vram_bytes,
         0,
         is_unified_memory,
+        EstimatorOptions {
+            backend,
+            evidence: if backend == Backend::RapidMlx {
+                EstimateEvidence::Approximate
+            } else {
+                EstimateEvidence::Measured
+            },
+            ..Default::default()
+        },
     );
 
     // ── Step 4: Warnings ──────────────────────────────────────────────────────
@@ -776,6 +1206,7 @@ pub fn auto_size(
         &kv_k,
         is_unified_memory,
         n_ctx_train,
+        backend,
     );
 
     AutoSizeResult {
@@ -810,11 +1241,12 @@ pub fn find_min_cpu_moe_to_fit_weights(
     available_vram_bytes: u64,
     ubatch_size: u32,
     is_unified_memory: bool,
+    backend: Backend,
 ) -> i32 {
-    let overhead = if is_unified_memory {
-        metal_overhead_base_bytes(arch, ubatch_size)
-    } else {
-        discrete_overhead_base_bytes(arch, ubatch_size)
+    let overhead = match backend {
+        Backend::RapidMlx => mlx_overhead_base_bytes(arch, ubatch_size),
+        Backend::LlamaCpp if is_unified_memory => metal_overhead_base_bytes(arch, ubatch_size),
+        Backend::LlamaCpp => discrete_overhead_base_bytes(arch, ubatch_size),
     };
     let target = (available_vram_bytes * 80 / 100).saturating_sub(
         overhead + arch.mmproj_bytes + mtp_overhead_bytes(model_size_bytes, arch.mtp_depth),
@@ -859,6 +1291,7 @@ fn build_scenarios(
     recommended_kv: &str,
     is_unified_memory: bool,
     n_ctx_train: Option<u64>,
+    backend: Backend,
 ) -> Vec<ContextScenario> {
     let mut scenarios = Vec::new();
     let headroom = compute_headroom(available_vram_bytes, is_unified_memory);
@@ -883,6 +1316,7 @@ fn build_scenarios(
             headroom,
             n_ctx_train,
             is_unified_memory,
+            backend,
         );
         let bd = full_estimate(
             model_size_bytes,
@@ -897,6 +1331,15 @@ fn build_scenarios(
             available_vram_bytes,
             0,
             is_unified_memory,
+            EstimatorOptions {
+                backend,
+                evidence: if backend == Backend::RapidMlx {
+                    EstimateEvidence::Approximate
+                } else {
+                    EstimateEvidence::Measured
+                },
+                ..Default::default()
+            },
         );
         let warn = if _use_case == UseCase::Agentic && kv_elem_bytes(kk) < 1.0 {
             Some("⚠ Below q8_0 — not recommended for agents".into())
@@ -933,6 +1376,7 @@ fn build_scenarios(
             headroom,
             n_ctx_train,
             is_unified_memory,
+            backend,
         );
         let bd = full_estimate(
             model_size_bytes,
@@ -947,6 +1391,15 @@ fn build_scenarios(
             available_vram_bytes,
             0,
             is_unified_memory,
+            EstimatorOptions {
+                backend,
+                evidence: if backend == Backend::RapidMlx {
+                    EstimateEvidence::Approximate
+                } else {
+                    EstimateEvidence::Measured
+                },
+                ..Default::default()
+            },
         );
         scenarios.push(ContextScenario {
             label: format!("Extended ({}× CPU offload)", aggressive_cpu),
@@ -1002,15 +1455,21 @@ pub struct QuantOption {
 /// `arch`: architecture (from introspection or `ModelArch::from_name_and_params`)
 /// `available_vram_bytes`: effective available memory (caller must subtract OS overhead on unified)
 /// `use_case`: affects the recommended-quant choice
+/// `workload_scenario`: optional workload scenario for workload-fit quant guidance.
+///   When present, replaces generic "8k context" with scenario-specific parameters.
+///   Recommended badge requires scenario-policy fit (Builder item 11).
 /// `is_unified_memory`: true for Apple Silicon — tightens headroom and fits check
+#[allow(clippy::too_many_arguments)]
 pub fn quant_comparison_table(
     param_b: f64,
     arch: &ModelArch,
     model_name: &str,
     available_vram_bytes: u64,
-    _use_case: UseCase,
+    use_case: UseCase,
+    workload_scenario: Option<super::workload_scenarios::WorkloadScenario>,
     parallel_slots: u32,
     is_unified_memory: bool,
+    backend: Backend,
 ) -> Vec<QuantOption> {
     // Quants we show in the advisor (sorted from highest to lowest quality)
     let show_quants = [
@@ -1018,80 +1477,294 @@ pub fn quant_comparison_table(
         "iq3_m", "iq3_xs", "q2_k", "iq2_xxs", "iq2_xs", "iq1_m",
     ];
 
+    let ctx = QuantTableCtx::new(
+        param_b,
+        arch,
+        model_name,
+        available_vram_bytes,
+        use_case,
+        workload_scenario,
+        parallel_slots,
+        is_unified_memory,
+        backend,
+    );
+
     let mut options: Vec<QuantOption> = Vec::new();
     let mut best_quant: Option<String> = None;
     let mut best_score = 0u64;
-    let headroom = compute_headroom(available_vram_bytes, is_unified_memory);
-    let lower_name = model_name.to_ascii_lowercase();
-    let is_gemma4_qat = (lower_name.contains("gemma-4") || lower_name.contains("gemma4"))
-        && lower_name.contains("qat");
 
     for &q_name in &show_quants {
         let qi = match find_quant(q_name) {
             Some(qi) => qi,
             None => continue,
         };
-        let quality = if is_gemma4_qat && q_name == "q4_0" {
-            QuantQuality::Excellent
-        } else {
-            qi.quality
-        };
-
         // Skip large-MoE-only quants for dense or small models
         if qi.large_moe_only && param_b < 70.0 && !arch.is_moe() {
             continue;
         }
-
-        let model_bytes = estimate_model_size_bytes(param_b, q_name);
-        let model_gb = model_bytes as f64 / 1e9;
-        // A quant "fits" only if there's also room for a minimal useful KV cache (8 K tokens at q8_0).
-        // Without this check, a model that fills all available memory shows as fitting even though
-        // there's no budget left for inference context.
-        let min_kv = kv_cache_bytes(arch, 8192, parallel_slots, "q8_0", "q8_0");
-        let oh = if is_unified_memory {
-            metal_overhead_base_bytes(arch, 512)
+        let quality = if ctx.is_gemma4_qat && q_name == "q4_0" {
+            QuantQuality::Excellent
         } else {
-            discrete_overhead_base_bytes(arch, 512)
+            qi.quality
         };
-        let fits = model_bytes + oh + min_kv < available_vram_bytes;
+        let model_bytes = estimate_model_size_bytes(param_b, q_name);
+
+        let (opt, score) = ctx.build_option(
+            q_name.to_string(),
+            qi.label.to_string(),
+            model_bytes,
+            quality,
+            qi.is_imatrix,
+            qi.large_moe_only,
+            ctx.is_gemma4_qat && q_name == "q4_0",
+        );
+        if score > best_score {
+            best_score = score;
+            best_quant = Some(q_name.to_string());
+        }
+        options.push(opt);
+    }
+
+    // Gemma 4 QAT is explicitly trained for Q4_0. Prefer that target whenever it
+    // fits instead of allowing a generic higher-bit option to win a tied score.
+    if ctx.is_gemma4_qat
+        && options
+            .iter()
+            .any(|opt| opt.quant == "q4_0" && opt.fits_vram)
+    {
+        best_quant = Some("q4_0".into());
+    }
+
+    mark_recommended(&mut options, best_quant);
+    options
+}
+
+/// Build a quant comparison table from the repo's *actual* GGUF files instead
+/// of a synthetic standard-quant list. Used when the HF repo has already been
+/// resolved and its file listing (name + size) is known — this way repos that
+/// use non-standard quant naming (imatrix "IQ4_XXS", custom mixed-precision
+/// schemes like "APEX-MTP-Balanced", etc.) get an advisor table that matches
+/// what's actually downloadable, with real sizes instead of estimates.
+///
+/// Quality/is_imatrix/large_moe_only can't be looked up by name for
+/// non-standard labels, so they're approximated from the file's measured
+/// bits-per-weight against the nearest standard quant (see
+/// `nearest_quant_for_bpw`) — the actual file size is still exact and drives
+/// every fit/context number, so the estimate is only ever "how big is this",
+/// not "how precise is this".
+#[allow(clippy::too_many_arguments)]
+pub fn quant_comparison_table_from_files(
+    param_b: f64,
+    arch: &ModelArch,
+    model_name: &str,
+    files: &[(String, u64)],
+    available_vram_bytes: u64,
+    use_case: UseCase,
+    workload_scenario: Option<super::workload_scenarios::WorkloadScenario>,
+    parallel_slots: u32,
+    is_unified_memory: bool,
+    backend: Backend,
+) -> Vec<QuantOption> {
+    let ctx = QuantTableCtx::new(
+        param_b,
+        arch,
+        model_name,
+        available_vram_bytes,
+        use_case,
+        workload_scenario,
+        parallel_slots,
+        is_unified_memory,
+        backend,
+    );
+
+    let mut options: Vec<QuantOption> = Vec::new();
+    let mut best_quant: Option<String> = None;
+    let mut best_score = 0u64;
+
+    for (label, size_bytes) in files {
+        if *size_bytes == 0 {
+            continue;
+        }
+        let measured_bpw = (*size_bytes as f64 * 8.0) / (param_b * 1e9);
+        let exact_match = find_quant(label);
+        let nearest = exact_match.unwrap_or_else(|| nearest_quant_for_bpw(measured_bpw));
+        let quality = if ctx.is_gemma4_qat && nearest.name == "q4_0" {
+            QuantQuality::Excellent
+        } else {
+            nearest.quality
+        };
+
+        let (mut opt, score) = ctx.build_option(
+            label.clone(),
+            label.clone(),
+            *size_bytes,
+            quality,
+            nearest.is_imatrix,
+            nearest.large_moe_only,
+            false,
+        );
+        if exact_match.is_none() {
+            opt.notes.push(
+                "Quality estimated from file size (non-standard quant name) — check the repo's own benchmarks for actual quality".into(),
+            );
+        }
+        if score > best_score {
+            best_score = score;
+            best_quant = Some(label.clone());
+        }
+        options.push(opt);
+    }
+
+    mark_recommended(&mut options, best_quant);
+    options
+}
+
+fn mark_recommended(options: &mut [QuantOption], best_quant: Option<String>) {
+    if let Some(best) = best_quant {
+        for opt in options.iter_mut() {
+            if opt.quant == best {
+                opt.recommended = true;
+            }
+        }
+    }
+}
+
+/// Shared per-request context (headroom, scenario params, gemma4-qat detection)
+/// used to build each row of a quant comparison table, regardless of whether
+/// the candidate list comes from the synthetic standard-quant set or a repo's
+/// real file listing.
+struct QuantTableCtx<'a> {
+    arch: &'a ModelArch,
+    available_vram_bytes: u64,
+    is_unified_memory: bool,
+    backend: Backend,
+    headroom: f64,
+    is_gemma4_qat: bool,
+    min_fit_context_tokens: u64,
+    effective_parallel_slots: u32,
+}
+
+impl<'a> QuantTableCtx<'a> {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        _param_b: f64,
+        arch: &'a ModelArch,
+        model_name: &str,
+        available_vram_bytes: u64,
+        use_case: UseCase,
+        workload_scenario: Option<super::workload_scenarios::WorkloadScenario>,
+        parallel_slots: u32,
+        is_unified_memory: bool,
+        backend: Backend,
+    ) -> Self {
+        let headroom = compute_headroom(available_vram_bytes, is_unified_memory);
+        let lower_name = model_name.to_ascii_lowercase();
+        let is_gemma4_qat = (lower_name.contains("gemma-4") || lower_name.contains("gemma4"))
+            && lower_name.contains("qat");
+
+        // Builder item 11: use workload scenario parameters if provided, otherwise fall back to
+        // generic 8k context baseline. Unsloth values are preserved for agentic/coding modes.
+        let scenario_params = workload_scenario
+            .as_ref()
+            .map(|s| s.to_estimator_params(super::workload_scenarios::ClientType::App));
+
+        // Minimum context tokens for fit check: scenario-based or generic 8k fallback.
+        // Agentic/coding scenarios use higher minimums to ensure tool-calling coherence.
+        let min_fit_context_tokens = match use_case {
+            UseCase::Agentic => scenario_params
+                .map(|p| p.planning_context_tokens.max(32_000))
+                .unwrap_or(32_000),
+            UseCase::General => scenario_params
+                .map(|p| p.planning_context_tokens.max(16_000))
+                .unwrap_or(8_192),
+            UseCase::Roleplay => scenario_params
+                .map(|p| p.planning_context_tokens.max(32_000))
+                .unwrap_or(16_000),
+        };
+
+        let effective_parallel_slots = scenario_params
+            .map(|p| p.parallel_slots)
+            .unwrap_or(parallel_slots.max(1));
+
+        Self {
+            arch,
+            available_vram_bytes,
+            is_unified_memory,
+            backend,
+            headroom,
+            is_gemma4_qat,
+            min_fit_context_tokens,
+            effective_parallel_slots,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build_option(
+        &self,
+        quant_key: String,
+        label: String,
+        model_bytes: u64,
+        quality: QuantQuality,
+        is_imatrix: bool,
+        large_moe_only: bool,
+        is_gemma4_qat_target: bool,
+    ) -> (QuantOption, u64) {
+        let model_gb = model_bytes as f64 / 1e9;
+        let min_kv = kv_cache_bytes(
+            self.arch,
+            self.min_fit_context_tokens,
+            self.effective_parallel_slots,
+            "q8_0",
+            "q8_0",
+        );
+        let oh = match self.backend {
+            Backend::RapidMlx => mlx_overhead_base_bytes(self.arch, 512),
+            Backend::LlamaCpp if self.is_unified_memory => {
+                metal_overhead_base_bytes(self.arch, 512)
+            }
+            Backend::LlamaCpp => discrete_overhead_base_bytes(self.arch, 512),
+        };
+        let fits = model_bytes + oh + min_kv < self.available_vram_bytes;
 
         let max_q8 = max_context(
             model_bytes,
-            arch,
+            self.arch,
             "q8_0",
             "q8_0",
-            parallel_slots,
+            self.effective_parallel_slots,
             512,
             0,
-            available_vram_bytes,
+            self.available_vram_bytes,
             1024,
-            headroom,
+            self.headroom,
             None, // pre-download advisor: VRAM-limited maxes only
-            is_unified_memory,
+            self.is_unified_memory,
+            self.backend,
         );
         let max_q4 = max_context(
             model_bytes,
-            arch,
+            self.arch,
             "q4_0",
             "q4_0",
-            parallel_slots,
+            self.effective_parallel_slots,
             512,
             0,
-            available_vram_bytes,
+            self.available_vram_bytes,
             1024,
-            headroom,
+            self.headroom,
             None, // pre-download advisor: VRAM-limited maxes only
-            is_unified_memory,
+            self.is_unified_memory,
+            self.backend,
         );
 
         let mut notes = Vec::new();
-        if qi.is_imatrix {
+        if is_imatrix {
             notes.push("Requires imatrix calibration for best quality".into());
         }
-        if qi.large_moe_only {
+        if large_moe_only {
             notes.push("Designed for large MoE models; poor for dense".into());
         }
-        if is_gemma4_qat && q_name == "q4_0" {
+        if is_gemma4_qat_target {
             notes.push(
                 "Official Gemma 4 QAT target; preserves near-BF16 quality at 4-bit weights".into(),
             );
@@ -1099,7 +1772,7 @@ pub fn quant_comparison_table(
         match quality {
             QuantQuality::Reference => notes.push("Bit-accurate reference quality".into()),
             QuantQuality::Excellent => {
-                if !(is_gemma4_qat && q_name == "q4_0") {
+                if !is_gemma4_qat_target {
                     notes
                         .push("Near-lossless; essentially equivalent to F16 for most tasks".into());
                 }
@@ -1125,47 +1798,25 @@ pub fn quant_comparison_table(
         } else {
             0
         };
-        if score > best_score {
-            best_score = score;
-            best_quant = Some(q_name.to_string());
-        }
 
-        options.push(QuantOption {
-            quant: q_name.to_string(),
-            label: qi.label.to_string(),
-            model_size_gb: model_gb,
-            fits_vram: fits,
-            max_ctx_q8: max_q8,
-            max_ctx_q4: max_q4,
-            quality,
-            is_imatrix: qi.is_imatrix,
-            large_moe_only: qi.large_moe_only,
-            recommended: false, // filled in below
-            quality_label: quality_label(quality),
-            notes,
-        });
+        (
+            QuantOption {
+                quant: quant_key,
+                label,
+                model_size_gb: model_gb,
+                fits_vram: fits,
+                max_ctx_q8: max_q8,
+                max_ctx_q4: max_q4,
+                quality,
+                is_imatrix,
+                large_moe_only,
+                recommended: false, // filled in by mark_recommended
+                quality_label: quality_label(quality),
+                notes,
+            },
+            score,
+        )
     }
-
-    // Gemma 4 QAT is explicitly trained for Q4_0. Prefer that target whenever it
-    // fits instead of allowing a generic higher-bit option to win a tied score.
-    if is_gemma4_qat
-        && options
-            .iter()
-            .any(|opt| opt.quant == "q4_0" && opt.fits_vram)
-    {
-        best_quant = Some("q4_0".into());
-    }
-
-    // Mark recommended
-    if let Some(ref best) = best_quant {
-        for opt in &mut options {
-            if &opt.quant == best {
-                opt.recommended = true;
-            }
-        }
-    }
-
-    options
 }
 
 fn quality_weight(q: QuantQuality) -> u64 {

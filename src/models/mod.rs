@@ -2,6 +2,21 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+pub mod community_source_catalog;
+pub mod external_cache;
+pub mod gguf_import;
+pub mod import_lab;
+// Phase 5.5 R2 is a compiled, testable research adapter with no production caller.
+// Remove this allowance only when a later gated phase deliberately wires the module.
+#[cfg_attr(not(test), allow(dead_code))]
+pub mod gguf_recovery;
+pub mod library;
+pub mod local_adopt;
+pub mod provenance;
+// Pure Phase 6 planner; migration-center wiring is owned by the later UX/API phase.
+#[cfg_attr(not(test), allow(dead_code))]
+pub mod root_relocation;
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DiscoveredModel {
     pub path: PathBuf,
@@ -98,6 +113,21 @@ pub fn scan_models_dir(dir: &Path) -> Result<Vec<DiscoveredModel>> {
     }
 
     models.sort_by(|a, b| a.filename.cmp(&b.filename));
+    Ok(models)
+}
+
+/// Discover launchable GGUF files across both the legacy flat model directory
+/// and the structured `gguf/` directory. This keeps startup, refresh, preset
+/// classification, and the typed inventory in agreement during and after a
+/// library migration.
+pub fn scan_gguf_library(dir: &Path) -> Result<Vec<DiscoveredModel>> {
+    let mut models = scan_models_dir(dir)?;
+    let structured = dir.join("gguf");
+    if structured.is_dir() {
+        models.extend(scan_models_dir(&structured)?);
+    }
+    models.sort_by(|a, b| a.path.cmp(&b.path));
+    models.dedup_by(|a, b| a.path == b.path);
     Ok(models)
 }
 
@@ -628,6 +658,16 @@ mod tests {
 
         // Cleanup
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn legacy_scanner_includes_structured_gguf_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("gguf")).unwrap();
+        std::fs::write(dir.path().join("gguf/Structured-Q4_0.gguf"), b"model").unwrap();
+        let models = scan_gguf_library(dir.path()).unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].filename, "Structured-Q4_0.gguf");
     }
 
     #[test]

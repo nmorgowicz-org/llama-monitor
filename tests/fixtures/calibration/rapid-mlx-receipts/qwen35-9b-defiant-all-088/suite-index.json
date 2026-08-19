@@ -1,0 +1,68 @@
+{
+  "model": "nightmedia/Qwen3.5-9B-DS9-USS-Defiant-1M-q8-hi-mlx",
+  "suite": "all",
+  "receipts": [
+    {
+      "label": "00-smoke-8k-int8",
+      "receipt": "00-00-smoke-8k-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "01-context-8000-int8",
+      "receipt": "01-01-context-8000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "02-context-16000-int8",
+      "receipt": "02-02-context-16000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "03-context-32000-int8",
+      "receipt": "03-03-context-32000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "04-context-8000-int4",
+      "receipt": "04-04-context-8000-int4.json",
+      "manifest": null
+    },
+    {
+      "label": "05-context-16000-int4",
+      "receipt": "05-05-context-16000-int4.json",
+      "manifest": null
+    },
+    {
+      "label": "06-context-32000-int4",
+      "receipt": "06-06-context-32000-int4.json",
+      "manifest": null
+    },
+    {
+      "label": "07-pflash-65536-int4",
+      "receipt": "07-07-pflash-65536-int4.json",
+      "manifest": null
+    },
+    {
+      "label": "08-pflash-131072-int4",
+      "receipt": "08-08-pflash-131072-int4.json",
+      "manifest": null
+    },
+    {
+      "label": "09-cache-8k-none",
+      "receipt": "09-09-cache-8k-none.json",
+      "manifest": null
+    },
+    {
+      "label": "10-cache-8k-k8v4",
+      "receipt": "10-10-cache-8k-k8v4.json",
+      "manifest": null
+    },
+    {
+      "label": "11-tools-sequential-8k",
+      "receipt": "11-11-tools-sequential-8k.json",
+      "manifest": null
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

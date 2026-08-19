@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "kind": "estimator_calibration_receipt",
+  "captured_at": "2026-07-25T23:58:40.609Z",
+  "estimator": {
+    "endpoint": "/api/vram-estimate",
+    "request": {
+      "backend": "rapid_mlx",
+      "model_path": "/Users/nick/.cache/huggingface/hub/models--nightmedia--Qwen3.5-9B-DS9-USS-Defiant-1M-q8-hi-mlx/snapshots/59b2511bfda3a1ce17b999f90d22b63e98c87f7e",
+      "n_ctx": 33126,
+      "rapid_planning_context_tokens": 33126,
+      "rapid_retained_cache_tokens": 0,
+      "kv_cache_dtype": "int8",
+      "turboquant_mode": "none",
+      "reasoning_mode": true,
+      "available_vram_bytes": 68719476736,
+      "is_unified_memory": true,
+      "parallel_slots": 1,
+      "ubatch_size": 512
+    },
+    "response": {
+      "active_kv_bytes": 1085472768,
+      "available_bytes": 68719476736,
+      "available_ram_bytes": 0,
+      "client_type": "app",
+      "effective_kv_dtype": "bf16",
+      "effective_turboquant": "none",
+      "evidence": "approximate",
+      "execution_policy": {
+        "effective_kv_dtype": "bf16",
+        "effective_turboquant": "none",
+        "kv_cache_dtype": "int8",
+        "reasoning_mode": true,
+        "turboquant": "none",
+        "turboquant_eligibility": "not_qualified"
+      },
+      "external_companion": null,
+      "headroom_bytes": 56192161746,
+      "kv_cache_bytes": 1085472768,
+      "linear_attn_state_bytes": 393216,
+      "max_cache_blocks_bytes": 0,
+      "mlx_prefix_cache_bytes": 0,
+      "mmproj_bytes": 0,
+      "mtp_admission": null,
+      "mtp_bytes": 164789675,
+      "mtp_mode": "disabled",
+      "note": "Fits with good headroom within the available unified memory budget.",
+      "ok": true,
+      "overhead_bytes": 290680995,
+      "prefix_cache_budget_bytes": 0,
+      "ram_bytes": 0,
+      "ram_headroom_bytes": 0,
+      "recommendation": "fit",
+      "retained_kv_bytes": 0,
+      "total_bytes": 12527314990,
+      "turboquant_transient_peak_bytes": 0,
+      "weights_bytes": 10985978336,
+      "workload_scenario": null
+    }
+  },
+  "runtime_receipt": {
+    "path": "tests/fixtures/calibration/rapid-mlx-receipts/qwen35-9b-v011-bf16-calibration/00-00-quant-512-none-off-32000-int8.json",
+    "cell_id": "quant-512-none-off-32000-int8",
+    "attempt_phase": "cold",
+    "fresh_server_per_cell": true,
+    "sha256": "07e429202fb7ba33e513ad4f2a8bcfe0599c68ae373f2fe5d05f222f96c33ac9",
+    "runtime_version": "rapid-mlx 0.11.0"
+  },
+  "model": {
+    "hf_repo_id": "nightmedia/Qwen3.5-9B-DS9-USS-Defiant-1M-q8-hi-mlx",
+    "revision": "59b2511bfda3a1ce17b999f90d22b63e98c87f7e",
+    "config_sha256": "367a0a2c1d4e547d8655944f6bcf87ba913df6f5abefde4d284a6f8bfa4cddf1"
+  },
+  "requested_effective_kv": {
+    "requested": "int8",
+    "effective_active": "bf16"
+  },
+  "measurement": {
+    "metric_name": "rapid_mlx_metal_peak_memory_bytes",
+    "actual_peak_bytes": 12340000000
+  },
+  "residual": {
+    "predicted_total_bytes": 12527314990,
+    "actual_peak_bytes": 12340000000,
+    "residual_bytes": -187314990,
+    "residual_pct": -1.4952524954431596,
+    "predicted_gib": 11.666971249505877,
+    "actual_gib": 11.492520570755005
+  },
+  "dataset_role": "tuning"
+}

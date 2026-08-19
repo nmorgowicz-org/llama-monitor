@@ -315,41 +315,60 @@ fn api_put_settings(
         .and(warp::put())
         .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .and_then(move |auth: Option<String>, mut updated: UiSettings| {
+        .and_then(move |auth: Option<String>, incoming: serde_json::Value| {
             let cfg = app_config.clone();
             if !check_api_token(&auth, &cfg) {
                 return futures_util::future::ready(Ok(unauthorized_api_token()));
             }
-            // Detect if this is a partial update (only ws_push_interval_ms set, rest are defaults)
-            let is_partial = updated.preset_id.is_empty()
-                && updated.port == 8001
-                && updated.llama_server_path.is_empty()
-                && updated.llama_server_cwd.is_empty()
-                && updated.models_dir.is_empty()
-                && updated.server_endpoint.is_empty()
-                && updated.llama_poll_interval == 1
-                && updated.remote_agent_url.is_empty()
-                && updated.remote_agent_token.is_empty()
-                && !updated.remote_agent_ssh_autostart
-                && updated.remote_agent_ssh_target.is_empty()
-                && updated.remote_agent_ssh_command.is_empty()
-                && updated.explicit_mode_policy.is_empty()
-                && updated.context_card_view == "gauge";
 
             let mut settings = state.ui_settings.lock().unwrap();
             let old_dir = settings.models_dir.clone();
             let old_token = settings.remote_agent_token.clone();
             let old_push_interval = settings.ws_push_interval_ms;
 
-            if is_partial {
-                settings.ws_push_interval_ms = updated.ws_push_interval_ms;
-            } else {
-                let incoming_token = updated.remote_agent_token.clone();
-                if is_masked_token(&incoming_token) && !old_token.is_empty() {
-                    updated.remote_agent_token = old_token.clone();
+            // Merge the incoming keys over the current settings instead of replacing the
+            // struct wholesale. The previous approach deserialized the body into a full
+            // `UiSettings` and then guessed, from a hand-maintained list of fields still
+            // holding their defaults, whether the caller had meant a partial update. That
+            // guess had two failure modes and both were live: a partial update that was not
+            // exactly `{ws_push_interval_ms}` silently discarded every other field in it,
+            // and a full update that happened to match all the defaults was misread as
+            // partial. Merging removes the guess — a field that was not sent is a field
+            // that does not change, and every caller that sends the whole object still
+            // behaves exactly as before.
+            let merged = match serde_json::to_value(&*settings) {
+                Ok(serde_json::Value::Object(mut base)) => {
+                    if let Some(patch) = incoming.as_object() {
+                        for (key, value) in patch {
+                            base.insert(key.clone(), value.clone());
+                        }
+                    }
+                    serde_json::Value::Object(base)
                 }
-                *settings = updated;
+                _ => incoming.clone(),
+            };
+
+            let mut updated: UiSettings = match serde_json::from_value(merged) {
+                Ok(u) => u,
+                Err(e) => {
+                    drop(settings);
+                    return futures_util::future::ready(Ok::<
+                        Box<dyn warp::reply::Reply>,
+                        warp::Rejection,
+                    >(Box::new(
+                        warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": format!("invalid settings: {e}")}),
+                        ),
+                    )));
+                }
+            };
+
+            // The GET path masks the agent token, so a read-modify-write round-trip hands
+            // the mask back to us. Never let that overwrite the real secret.
+            if is_masked_token(&updated.remote_agent_token) && !old_token.is_empty() {
+                updated.remote_agent_token = old_token.clone();
             }
+            *settings = updated;
 
             let new_dir = settings.models_dir.clone();
             let token_changed =
@@ -368,7 +387,7 @@ fn api_put_settings(
 
             if new_dir != old_dir
                 && !new_dir.is_empty()
-                && let Ok(discovered) = crate::models::scan_models_dir(&PathBuf::from(&new_dir))
+                && let Ok(discovered) = crate::models::scan_gguf_library(&PathBuf::from(&new_dir))
             {
                 *state.discovered_models.lock().unwrap() = discovered;
             }

@@ -1,0 +1,33 @@
+{
+  "precedence": [
+    "LOCAL_LLM_FOUNDRY_ENCRYPTION_KEY",
+    "LLAMA_MONITOR_ENCRYPTION_KEY"
+  ],
+  "cases": [
+    {
+      "name": "new-only",
+      "result": "canonical selected"
+    },
+    {
+      "name": "legacy-only",
+      "result": "legacy selected with deprecation policy"
+    },
+    {
+      "name": "equal-dual",
+      "result": "canonical selected without warning"
+    },
+    {
+      "name": "unequal-dual",
+      "result": "fail closed; variable names only"
+    },
+    {
+      "name": "empty-canonical-valid-legacy",
+      "result": "valid legacy selected"
+    },
+    {
+      "name": "unicode",
+      "result": "accepted without logging value"
+    }
+  ],
+  "secret_logging": "never log either value"
+}

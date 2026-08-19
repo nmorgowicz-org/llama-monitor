@@ -1,6 +1,6 @@
 // build.rs — Auto-generate static asset registration.
 // Scans static/ directory and generates:
-//   src/gen/static_assets.rs  — include_str! constants for each file
+//   src/gen/static_assets.rs  — include_str!/include_bytes! constants for each file
 //   src/gen/routes.rs         — warp route filters for each file
 //
 // This eliminates the error-prone manual 2-step registration process.
@@ -9,8 +9,10 @@
 use std::fs;
 use std::io::Write;
 use std::path::Path;
+use std::process::Command;
 
 fn main() {
+    println!("cargo:rerun-if-changed=static/css/calibration.css");
     let static_dir = "static";
     let out_dir = "src/gen";
 
@@ -28,9 +30,26 @@ fn main() {
     // Generate routes.rs
     generate_routes(&files, &format!("{}/routes.rs", out_dir));
 
+    // Keep generated Rust stable under `cargo fmt -- --check`. Without this,
+    // each Cargo invocation rewrites these tracked files in an unformatted
+    // shape and leaves the worktree dirty even when no static asset changed.
+    format_generated_file(&format!("{}/static_assets.rs", out_dir));
+    format_generated_file(&format!("{}/routes.rs", out_dir));
+
     // Tell Cargo to rerun when any file in static/ changes
     mark_rerun(static_dir);
     println!("cargo:rerun-if-changed=build.rs");
+}
+
+fn format_generated_file(path: &str) {
+    let status = Command::new("rustfmt")
+        .args(["--edition", "2024"])
+        .arg(path)
+        .status()
+        .unwrap_or_else(|error| panic!("Failed to run rustfmt on {path}: {error}"));
+    if !status.success() {
+        panic!("rustfmt failed for {path}");
+    }
 }
 
 fn mark_rerun(dir: &str) {
@@ -74,6 +93,11 @@ fn collect_files(base: &Path, prefix: &str, files: &mut Vec<(String, String, Str
                 "css"
             } else if relative.ends_with(".html") {
                 "html"
+            } else if matches!(
+                path.extension().and_then(|extension| extension.to_str()),
+                Some("png" | "ico" | "webp" | "jpg" | "jpeg" | "gif" | "icns" | "woff" | "woff2")
+            ) {
+                "binary"
             } else {
                 "other"
             };
@@ -145,13 +169,22 @@ fn generate_static_assets(files: &[(String, String, String)], output: &str) {
     )
     .unwrap();
 
-    for (relative, const_name, _category) in files {
-        writeln!(
-            f,
-            "pub const {}: &str = include_str!(\"../../static/{}\");",
-            const_name, relative
-        )
-        .unwrap();
+    for (relative, const_name, category) in files {
+        if category == "binary" {
+            writeln!(
+                f,
+                "pub static {}: &[u8] = include_bytes!(\"../../static/{}\");",
+                const_name, relative
+            )
+            .unwrap();
+        } else {
+            writeln!(
+                f,
+                "pub const {}: &str = include_str!(\"../../static/{}\");",
+                const_name, relative
+            )
+            .unwrap();
+        }
     }
 
     println!("Generated {} with {} constants", output, files.len());
@@ -233,6 +266,22 @@ fn generate_routes(files: &[(String, String, String)], output: &str) {
     )
     .unwrap();
     writeln!(f, "    }}\n").unwrap();
+    writeln!(
+        f,
+        "    // Helper: serve binary assets without UTF-8 conversion"
+    )
+    .unwrap();
+    writeln!(
+        f,
+        "    fn binary_reply(content: &'static [u8], content_type: &str) -> impl warp::Reply {{"
+    )
+    .unwrap();
+    writeln!(
+        f,
+        "        warp::reply::with_header(content, \"content-type\", content_type)"
+    )
+    .unwrap();
+    writeln!(f, "    }}\n").unwrap();
 
     // Generate individual route variables (skip index.html - handled specially in mod.rs)
     let route_files: Vec<_> = files.iter().filter(|(r, _, _)| r != "index.html").collect();
@@ -255,7 +304,15 @@ fn generate_routes(files: &[(String, String, String)], output: &str) {
         }
         writeln!(f, "        .and(warp::get())").unwrap();
 
-        if category == "other" {
+        if category == "binary" {
+            let content_type = content_type_for(relative);
+            writeln!(
+                f,
+                "        .map(|| binary_reply(static_assets::{}, {:?}));",
+                const_name, content_type
+            )
+            .unwrap();
+        } else if category == "other" {
             let content_type = content_type_for(relative);
             writeln!(
                 f,
@@ -310,6 +367,10 @@ fn content_type_for(path: &str) -> &'static str {
         "image/png"
     } else if path.ends_with(".ico") {
         "image/x-icon"
+    } else if path.ends_with(".woff") {
+        "font/woff"
+    } else if path.ends_with(".woff2") {
+        "font/woff2"
     } else {
         "application/octet-stream"
     }

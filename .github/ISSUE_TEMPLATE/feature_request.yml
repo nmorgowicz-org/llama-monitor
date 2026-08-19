@@ -13,7 +13,7 @@ body:
     attributes:
       label: What problem does this solve?
       description: Describe the use case or pain point.
-      placeholder: "It would be great if llama-monitor could..."
+      placeholder: "It would be great if Local LLM Foundry could..."
     validations:
       required: true
 

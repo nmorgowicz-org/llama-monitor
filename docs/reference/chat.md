@@ -1,6 +1,6 @@
 # Chat
 
-The chat tab provides multi-conversation streaming chat against the connected llama.cpp server, with per-conversation prompts, parameters, guided-generation tools, and live telemetry.
+The chat tab provides multi-conversation streaming chat against the connected inference backend (llama.cpp or Rapid-MLX), with per-conversation prompts, parameters, guided-generation tools, and live telemetry.
 
 ## Tab Management
 
@@ -41,8 +41,8 @@ See also: [Navigation](navigation.md)
 
 The left conversation sidebar is the main organizer for chat sessions.
 
-![Conversation Sidebar](../screenshots/sidebar-sidebar-expanded.png)
-![Conversation Sidebar Collapsed](../screenshots/sidebar-sidebar-collapsed.png)
+![Conversation Sidebar](../screenshots/sidebar--neutral--sidebar-expanded.png)
+![Conversation Sidebar Collapsed](../screenshots/sidebar--neutral--sidebar-collapsed.png)
 
 - **Recency groups** — Conversations are grouped into `Pinned`, `Today`, `Yesterday`, `This Week`, and `Older`
 - **Per-conversation status** — Each row shows the conversation name, persona label, explicit-mode badge, message count, and a context-pressure bar derived from the last known context percentage
@@ -60,13 +60,13 @@ The left conversation sidebar is the main organizer for chat sessions.
     - **Archive** — archives all selected conversations
     - **Clear** — clears the current selection
 
-![Conversation Context Menu](../screenshots/chat-context-menu.png)
+![Conversation Context Menu](../screenshots/neutral--chat-context-menu.png)
 
 ### Cross-Conversation Message Search
 
 The sidebar's `Search Messages` button opens a larger flyout beside the conversation rail and searches message bodies across stored conversations.
 
-![Conversation Search](../screenshots/sidebar-fts-search-active.png)
+![Conversation Search](../screenshots/sidebar--neutral--fts-search-active.png)
 
 - **Message search** — Searches stored message content, not just conversation names
 - **Wider results surface** — Matches render in a dedicated flyout instead of replacing the narrow sidebar list
@@ -90,9 +90,11 @@ Several appearance and chat behaviors are configurable via Settings and are appl
 
 ## Messaging
 
-- **Streaming** — Real-time SSE streaming via `POST /api/chat`, which relays to the connected llama.cpp server at `/v1/chat/completions`
+- **Streaming** — Real-time SSE streaming via `POST /api/chat`, which proxies to the active backend session (llama.cpp or Rapid-MLX) at `/v1/chat/completions`
+- **Backend-safe controls** — llama.cpp requests are forwarded as-is; Rapid-MLX requests are filtered and normalized by a compatibility profile (for example, `repeat_penalty` → `repetition_penalty` and `thinking_budget_tokens` → `reasoning_max_tokens`, with llama.cpp-specific flags dropped) and usage streaming is enabled automatically when the runtime supports it
 - **Markdown rendering** — Assistant output is rendered with Markdown, syntax-highlighted code blocks, and per-block copy controls
 - **Thinking blocks** — If the upstream model sends `reasoning_content`, the UI renders it in an expandable thinking block during the active browser session
+- **Stop behavior** — Stop immediately closes local SSE forwarding and aborts the in-flight request. For Rapid-MLX backends, native cancel endpoints are used only when the active profile exposes a verified public request-ID; otherwise the abort is handled locally via disconnect.
 - **Token estimates** — The composer shows a rough `~N tok` estimate with warning colors at higher counts
 - **Smart scroll** — Auto-scroll stays on only while you are near the bottom; scrolling upward during generation disables follow mode until you jump back down
 - **Unread badge** — New assistant replies increment a scroll-to-bottom unread badge when you are reading older content
@@ -133,7 +135,7 @@ Each message exposes action buttons in its footer:
 
 The template manager is the central place for chat personas.
 
-![Persona Manager](../screenshots/guided-gen-persona-modal.png)
+![Persona Manager](../screenshots/guided-gen--neutral--persona-modal.png)
 
 ### Template List Sections
 
@@ -171,7 +173,7 @@ The Behavior panel lets you override the default role-boundary instruction for t
 
 The behavior panel provides fast access to the active persona prompt, role-boundary controls, AI gender, and explicit-mode settings for the current tab.
 
-![Behavior Settings](../screenshots/panels-behavior-settings.png)
+![Behavior Settings](../screenshots/panels--neutral--behavior-settings.png)
 
 ## Model Parameters
 
@@ -187,7 +189,16 @@ Per-tab controls for generation behavior. A dot indicator appears when the activ
 | `max_tokens` | `4096` | Reply length cap |
 | `stream_timeout` | `120s` | Abort if no content arrives within this interval |
 
-![Response Settings](../screenshots/panels-model-settings.png)
+These parameters are applied for both llama.cpp and Rapid-MLX sessions. Rapid-MLX uses a compatibility profile:
+
+- `repeat_penalty` is renamed to `repetition_penalty` before being sent.
+- The shared `thinking_budget_tokens` reasoning ceiling is renamed to Rapid-MLX's
+  `reasoning_max_tokens`; this limits hidden reasoning separately from the overall
+  `max_tokens` response ceiling.
+- llama.cpp-specific flags not recognized by Rapid-MLX are dropped (e.g., MTP sweep settings, GGUF tuning knobs).
+- The `max_tokens` cap is enforced per-backend via the shared UI but is ultimately constrained by the active model's context window.
+
+![Response Settings](../screenshots/panels--neutral--model-settings.png)
 
 ## Context Pressure Bar
 
@@ -226,7 +237,7 @@ Compaction turns older history into a memory/tombstone entry so the conversation
 
 The debug inspector shows the exact outbound request shape used for the next reply. Open it with the `{...}` button in the chat input toolbar.
 
-![Prompt Debug Inspector](../screenshots/panels-prompt-debug.png)
+![Prompt Debug Inspector](../screenshots/panels--neutral--prompt-debug.png)
 
 ### What It Shows
 
@@ -240,7 +251,7 @@ The debug inspector shows the exact outbound request shape used for the next rep
 
 ## Chat Telemetry
 
-Real-time metrics for the active chat tab, accessible from the telemetry toggle in the chat header.
+Real-time metrics for the active chat tab, accessible from the telemetry toggle in the chat header. Metrics are sourced from the connected inference backend: llama.cpp exposes detailed slot/slot-usage info; Rapid-MLX exposes status/memory telemetry when available; both backends provide per-message token counts.
 
 ### Summary Rail
 
@@ -260,8 +271,8 @@ Real-time metrics for the active chat tab, accessible from the telemetry toggle 
 
 The panel can float as a popover or be pinned inline below the toolbar.
 
-![Chat Telemetry](../screenshots/chat-chat-telemetry.png)
-![Chat Telemetry Pinned](../screenshots/chat-chat-telemetry-pinned.png)
+![Chat Telemetry](../screenshots/chat--neutral--chat-telemetry.png)
+![Chat Telemetry Pinned](../screenshots/chat--neutral--chat-telemetry-pinned.png)
 
 ### Per-Message Metrics
 
@@ -273,7 +284,7 @@ Each assistant message footer shows:
 - `N%` — estimated context-usage percentage at that point
 - Model name (if known)
 
-These values are derived from the live llama.cpp metrics and the token counts reported per message.
+These values are derived from backend-provided metrics (llama.cpp health/telemetry or Rapid-MLX status) and the token counts reported per streamed message.
 
 ## Chat Style
 
@@ -311,7 +322,7 @@ Enter-to-send is stored in shared settings. When disabled, `Enter` inserts a new
 
 The History Q&A panel lets you ask natural language questions about an active conversation without disturbing the live chat context.
 
-![History Q&A Panel](../screenshots/chat-history-qa-panel.png)
+![History Q&A Panel](../screenshots/chat-history-qa--neutral--panel.png)
 
 ### Opening the Panel
 
@@ -390,7 +401,7 @@ Guided-generation features shape the next assistant reply without forcing you to
 
 The right-side context notes panel stores structured notes on the active tab and injects them into the system prompt as grouped `### SECTION NOTES ###` blocks.
 
-![Context Notes Sidebar](../screenshots/guided-gen-context-notes-expanded.png)
+![Context Notes Sidebar](../screenshots/guided-gen--neutral--context-notes-expanded.png)
 
 #### Built-In Sections
 
@@ -422,15 +433,13 @@ The `Analyze` action calls `POST /api/context-notes/analyze`.
 
 Suggestions generate user-side next-step ideas from the current conversation context.
 
-![Suggestions Dropdown](../screenshots/guided-gen-suggestions-dropdown.png)
+![Suggestions Dropdown](../screenshots/guided-gen--neutral--suggestions-dropdown.png)
 
 The browser sends recent messages, the current system prompt, non-empty context notes, and the active quick-guide instruction (if one is currently active) as suggestion context.
 
 Custom suggestion categories are stored in shared settings so they follow the workspace across browsers.
 
-![Tag Cloud](../screenshots/guided-gen-suggestions-tag-cloud.png)
-![Search Filter](../screenshots/guided-gen-suggestions-search-filter.png)
-![Suggestions Results](../screenshots/guided-gen-suggestions-results.png)
+![Suggestions Results](../screenshots/guided-gen--neutral--suggestions-results.png)
 
 #### When They Appear
 
@@ -458,8 +467,6 @@ Custom categories appear alongside built-in ones and persist to `localStorage` (
 
 #### Manage Categories
 
-![Manage Categories](../screenshots/guided-gen-manage-categories.png)
-
 - **Built-in prompts** — Editable, reorderable, and individually disableable
 - **Custom categories** — Add your own groups and prompt lists
 - **Per-prompt edits** — Name, description, and prompt text
@@ -482,9 +489,9 @@ Quick Guide is the inline steering surface for one-off reply direction.
 | **Director** | Expands one directing note into four continuation options |
 | **Surprise** | Arms a hidden future beat that lands on a later assistant reply |
 
-![Quick Guide](../screenshots/guided-gen-quick-guide-dropdown.png)
-![Director Mode](../screenshots/guided-gen-director-options.png)
-![Director Results](../screenshots/guided-gen-director-applied.png)
+![Quick Guide](../screenshots/guided-gen--neutral--quick-guide-dropdown.png)
+![Director Mode](../screenshots/guided-gen--neutral--director-options.png)
+![Director Results](../screenshots/guided-gen--neutral--director-applied.png)
 
 #### Quick Mode Details
 
@@ -504,8 +511,6 @@ Quick Guide is the inline steering surface for one-off reply direction.
 - **Countdown** — A beat fires when `remaining_turns` reaches `0`; other armed beats decrement after assistant replies complete
 - **Per-tab queue** — Armed surprises are part of tab state
 
-![Surprise Mode Armed](../screenshots/guided-gen-surprise-armed.png)
-
 ## Explicit Mode
 
 Explicit mode is a three-level content filter layered on top of the active persona.
@@ -515,10 +520,6 @@ Explicit mode is a three-level content filter layered on top of the active perso
 | **Off** | 🔒 | Default filtering |
 | **Unlocked** | 🔓 | Level 1 persona policy |
 | **Unrestricted** | 🔥 | Level 2 persona policy |
-
-![Explicit Unlocked](../screenshots/guided-gen-explicit-unlocked.png)
-![Explicit Unrestricted](../screenshots/guided-gen-explicit-unrestricted.png)
-![Explicit Locked](../screenshots/guided-gen-explicit-locked.png)
 
 ### Controls
 
@@ -572,7 +573,8 @@ Purely device-specific presentation choices such as chat style and font scale re
 
 ## Sessions and Attachment
 
-llama-monitor manages one or more backend llama.cpp sessions and routes all chat traffic through them.
+llama-monitor manages one or more sessions (llama.cpp or Rapid-MLX) and routes chat
+traffic through the active session's persisted backend and model identity.
 
 Key session endpoints:
 
@@ -581,13 +583,13 @@ Key session endpoints:
 - `POST /api/sessions` — register a new session definition
 - `DELETE /api/sessions/:id` — remove a session (requires db-admin-token)
 - `POST /api/sessions/active` — switch active session by ID
-- `POST /api/sessions/spawn` — spawn a new llama-server from a preset or inline config (requires db-admin-token)
-- `POST /api/attach` — attach to an existing llama-server endpoint
+- `POST /api/sessions/spawn` — spawn a new local inference backend (llama.cpp or Rapid-MLX) from a preset or inline config (requires db-admin-token)
+- `POST /api/attach` — explicitly attach to an existing llama.cpp or Rapid-MLX endpoint
 - `POST /api/detach` — detach from the current attach-style active session
 - `GET /api/sessions/recent` — last 10 sessions, sorted by recent use
 - `GET /api/sessions/restore-hint` — lightweight hint for restore/attach suggestions
-- `GET /api/sessions/check-endpoint` — probe whether a llama-server URL is reachable
-- `GET /api/capabilities` — current capabilities and availability derived from active session(s)
+- `GET /api/sessions/check-endpoint` — probe whether an inference server URL is reachable
+- `GET /api/capabilities` — current capabilities and availability derived from active session(s), including backend-specific features (e.g., cancellation, tool support, reasoning controls)
 
 ChatStorage mediates all database access; browser endpoints never talk directly to SQLite. Conversations and messages are persisted via `ChatStorage` behind the tab and search endpoints.
 
@@ -595,13 +597,18 @@ ChatStorage mediates all database access; browser endpoints never talk directly 
 
 Chat-related routes are implemented in `src/web/api/chat/`:
 
-- `stream.rs` — `api_chat`, `api_chat_abort` (SSE relay to `/v1/chat/completions`)
+- `stream.rs` — `api_chat`, `api_chat_abort` (backend-aware SSE relay to `/v1/chat/completions`)
 - `guided.rs` — guided-generation handler and thinking-content stripping
 - `suggestions.rs` — suggestion generation, director cards, keyword extraction
 - `notes.rs` — context-notes analysis and persistence
 - `tabs.rs` — tab CRUD, search, archive/hide/restore helpers
 
-Session and attachment routes are implemented in `src/web/api/sessions.rs`.
+Session, attachment, and backend selection routes are implemented in `src/web/api/sessions.rs`.
+
+Backend-specific behavior:
+
+- `src/web/api/upstream.rs` — `prepare_inference_request` resolves active session, backend type, and model identity; `map_chat_body` applies backend-specific transformations.
+- `src/inference/` — per-backend adapters (`llama_cpp.rs`, `rapid_mlx/`) handle launch, readiness, metrics polling, capability detection, and request mapping.
 
 Note: Many supporting endpoints now exist (guided chat, tab management, search, suggestions, context notes, sessions, capabilities). The list below is not exhaustive and is subject to change as the API grows.
 
@@ -630,14 +637,17 @@ Note: Many supporting endpoints now exist (guided chat, tab management, search, 
 
 ### Server Control
 
-- `POST /api/kill-llama` — best-effort kill of the managed llama-server process (requires db-admin-token and `"confirm": "kill"` in the body).
+- `POST /api/kill-server` — best-effort kill of whichever inference backend llama-monitor is currently running locally (llama.cpp or Rapid-MLX). Requires db-admin-token and `"confirm": "kill"` in the body. Primary kill path is backend-agnostic (supervisor by PID); a legacy platform-specific fallback may only match llama-server.
 
 ## Data Flow
 
 ```text
-User message -> llama-monitor POST /api/chat (SSE relay) -> Upstream llama.cpp /v1/chat/completions
-                                                        -> Browser renders tokens live
-                                                        -> Chat telemetry updates from live metrics
+User message -> llama-monitor POST /api/chat
+              -> active-session resolved (llama.cpp or Rapid-MLX)
+              -> backend-specific request mapping (e.g., field filtering for Rapid-MLX) + runtime auth
+              -> upstream /v1/chat/completions SSE
+              -> backend-specific SSE normalization (e.g., reasoning fields)
+              -> browser renders content, reasoning, and usage live
 ```
 
 ## Persistence

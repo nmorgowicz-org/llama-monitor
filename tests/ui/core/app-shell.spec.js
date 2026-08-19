@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { dismissAuthShell } from '../helpers.js';
+import { dismissAuthShell, openSettings } from '../helpers.js';
 
 async function enterMonitorView(page) {
   await dismissAuthShell(page);
@@ -115,21 +115,33 @@ test.describe('modals and menus', () => {
   });
 
   test('settings opens and secondary tabs switch', async ({ page }) => {
-    // Use JS to open settings modal directly (sidebar click may be intercepted by setup view)
-    await page.evaluate(async () => {
-      const { openSettingsModal } = await import('/js/features/settings.js');
-      openSettingsModal();
-    });
+    await openSettings(page);
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
 
     // Default active pane is now Session
     await expect(page.locator('#settings-session')).toBeVisible();
 
-    // Switch to Advanced tab and confirm Runtime Configuration button exists
-    const advancedTab = page.locator('.settings-tab', { hasText: 'Advanced' });
-    await advancedTab.click();
-    await expect(page.locator('#settings-advanced')).toBeVisible();
+    // Switch to Loaders tab and confirm Runtime Configuration button exists
+    const loadersTab = page.locator('.settings-tab', { hasText: 'Loaders' });
+    await loadersTab.click();
+    await expect(page.locator('#settings-loaders')).toBeVisible();
     await expect(page.getByRole('button', { name: /open runtime configuration/i })).toBeVisible();
+  });
+
+  test('font scale applies the explicit root baseline', async ({ page }) => {
+    await openSettings(page, 'appearance');
+    const scale = page.locator('#settings-appearance-font-scale');
+    await expect(scale).toBeVisible();
+
+    for (const value of ['0.9', '1', '1.2']) {
+      await scale.evaluate((element, nextValue) => {
+        element.value = nextValue;
+        element.dispatchEvent(new Event('input', { bubbles: true }));
+      }, value);
+      const expected = `${Number(value) * 16}px`;
+      await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).fontSize)).toBe(expected);
+      await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).fontSize)).toBe(expected);
+    }
   });
 
   test('models modal opens and lists model discovery state', async ({ page }) => {
@@ -178,17 +190,25 @@ test.describe('modals and menus', () => {
   });
 
   test('preset editor installs the recommended Gemma 4 chat template', async ({ page }) => {
-    await page.route('**/api/chat-template/install-url', async route => {
+    await page.route('**/api/models/gguf-meta', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, architecture: 'gemma4' }),
+      });
+    });
+    await page.route('**/api/chat-template/install-hf', async route => {
       expect(route.request().postDataJSON()).toEqual({
-        url: 'https://raw.githubusercontent.com/jscott3201/llm-tuning/main/gemma4/chat_templates/custom_pub_chat_template_gemma4.jinja',
-        name: 'gemma4-jscott3201-agentic',
+        repo: 'google/gemma-4-31B-it',
+        file: 'chat_template.jinja',
+        name: 'gemma4-google-official',
       });
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
           ok: true,
-          path: '/tmp/chat-templates/gemma4-jscott3201-agentic.jinja',
+          path: '/tmp/chat-templates/gemma4-google-official.jinja',
           already_existed: false,
         }),
       });
@@ -201,7 +221,7 @@ test.describe('modals and menus', () => {
     await page.fill('#modal-model-path', '/models/Gemma-4-31B-it-Q4_K_M.gguf');
     await page.click('#preset-recommended-chat-template-btn');
     await expect(page.locator('#modal-chat-template-file')).toHaveValue(
-      '/tmp/chat-templates/gemma4-jscott3201-agentic.jinja',
+      '/tmp/chat-templates/gemma4-google-official.jinja',
     );
   });
 
@@ -341,6 +361,23 @@ test('configuration explains local executable, GPU, and explicit SSH flow', asyn
 });
 
 test.describe('responsive shell', () => {
+  test('attach form reveals model identity only for Rapid-MLX', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('html.modules-ready');
+
+    const backend = page.locator('#setup-endpoint-backend');
+    const model = page.locator('#setup-endpoint-model');
+    await expect(backend).toHaveValue('llama_cpp');
+    await expect(model).toBeHidden();
+
+    await backend.selectOption('rapid_mlx');
+    await expect(model).toBeVisible();
+    await expect(model).toHaveAttribute('placeholder', /auto-detect/i);
+
+    await backend.selectOption('llama_cpp');
+    await expect(model).toBeHidden();
+  });
+
   test('mobile layout keeps navigation and endpoint form usable', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/');

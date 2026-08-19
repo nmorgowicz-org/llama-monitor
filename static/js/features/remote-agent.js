@@ -1137,8 +1137,8 @@ function previewSshSetupGuide() {
         '<strong>SSH target:</strong> ' + escapeHtml(target),
         '<strong>Agent URL:</strong> ' + escapeHtml(agentUrl),
         '<strong>Auth:</strong> ' + escapeHtml(authLabel),
-        '<strong>Install path:</strong> detected by OS; usually ~/.config/llama-monitor/bin/llama-monitor or %APPDATA%\\llama-monitor\\bin\\llama-monitor.exe',
-        '<strong>Release source:</strong> latest llama-monitor GitHub release asset matching remote OS/architecture',
+        '<strong>Install path:</strong> detected by OS; usually ~/.config/local-llm-foundry/bin/local-llm-foundry or %APPDATA%\\local-llm-foundry\\bin\\local-llm-foundry.exe',
+        '<strong>Release source:</strong> latest Local LLM Foundry GitHub release asset matching remote OS/architecture',
         '<strong>Remote command:</strong> default OS-specific agent start command unless you override it below',
     ].join('<br>');
 }
@@ -1656,8 +1656,8 @@ async function remoteAgentStart() {
             return;
         }
 
-        const installPath = detectData.install_path || '~/.config/llama-monitor/bin/llama-monitor';
-        const startCommand = detectData.start_command || 'nohup ' + installPath + ' --agent --agent-host 0.0.0.0 --agent-port 7779 > ~/.config/llama-monitor/agent.log 2>&1 &';
+        const installPath = detectData.install_path || '~/.config/local-llm-foundry/bin/local-llm-foundry';
+        const startCommand = detectData.start_command || 'nohup ' + installPath + ' --agent --agent-host 0.0.0.0 --agent-port 7779 > ~/.config/local-llm-foundry/agent.log 2>&1 &';
 
         const resp = await remoteAgentFetch('/api/remote-agent/start', {
             method: 'POST',

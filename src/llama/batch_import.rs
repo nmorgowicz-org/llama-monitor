@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::Path;
 
+use crate::inference::llama_cpp::LoadMode;
 use crate::presets::ModelPreset;
 
 /// Parsed result from an imported launch script.
@@ -252,6 +253,7 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
     let mut context_size: u64 = 4096;
     let mut gpu_layers: Option<i32> = None;
     let mut no_mmap = false;
+    let mut load_mode: Option<LoadMode> = None;
     let mut ngram_spec = false;
     let mut temperature: Option<f64> = None;
     let mut top_p: Option<f64> = None;
@@ -325,8 +327,24 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
             }
             "--no-mmap" => {
                 no_mmap = true;
+                load_mode = Some(LoadMode::None);
                 i += 1;
                 continue;
+            }
+            "--load-mode" => {
+                if i + 1 < args.len() {
+                    load_mode = match args[i + 1].as_str() {
+                        "mmap" => Some(LoadMode::Mmap),
+                        "none" => Some(LoadMode::None),
+                        "mlock" => Some(LoadMode::Mlock),
+                        "mmap+mlock" => Some(LoadMode::MmapMlock),
+                        "dio" => Some(LoadMode::Dio),
+                        _ => None,
+                    };
+                    no_mmap = matches!(load_mode, Some(LoadMode::None));
+                    i += 2;
+                    continue;
+                }
             }
             "--spec-type" => {
                 if i + 1 < args.len() {
@@ -684,8 +702,11 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
     };
 
     ModelPreset {
+        backend: crate::inference::InferenceBackend::LlamaCpp,
+        rapid_mlx: None,
         id: crate::presets::next_id(),
         name,
+        schema_version: None,
         model_path,
         context_size,
         ctk: "f16".into(),
@@ -694,6 +715,13 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
         batch_size: 2048,
         ubatch_size: 2048,
         no_mmap,
+        load_mode,
+        verbosity: Some(4),
+        no_cont_batching: false,
+        swa_full: false,
+        ctx_checkpoints: Some(32),
+        checkpoint_min_step: Some(8192),
+        cache_reuse: None,
         ngram_spec,
         parallel_slots: 1,
         temperature,
@@ -701,6 +729,7 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
         top_k,
         min_p,
         repeat_penalty,
+        repeat_last_n: None,
         presence_penalty: None,
         n_cpu_moe,
         gpu_layers,
@@ -781,6 +810,8 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
         reasoning_budget: None,
         reasoning_budget_message: None,
         api_key: None,
+        api_key_configured: false,
+        clear_api_key: false,
         alias: None,
         benchmark_mode: false,
         tags: Vec::new(),

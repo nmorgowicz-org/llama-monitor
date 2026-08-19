@@ -1,4 +1,4 @@
-//! Architecture-aware VRAM estimator for llama-server configurations.
+//! Architecture-aware VRAM estimator for inference server configurations (llama.cpp and Rapid-MLX).
 //!
 //! Handles:
 //! - Standard full-attention (Llama, Mistral, Qwen, …)
@@ -11,7 +11,10 @@
 
 mod arch_heuristics;
 mod estimate;
+pub mod execution_policy;
 mod quant_table;
+mod rapid_slopes;
+mod workload_scenarios;
 
 #[cfg(test)]
 mod tests;
@@ -22,3 +25,4 @@ pub use arch_heuristics::*;
 pub use estimate::*;
 #[allow(unused_imports)]
 pub use quant_table::*;
+pub use workload_scenarios::*;

@@ -48,6 +48,13 @@ const useRelease = process.env.LLAMA_MONITOR_USE_RELEASE === '1';
 // - CRITICAL: Do NOT leave this at 7778 while a coding session is running there.
 const testPort = process.env.LLAMA_MONITOR_TEST_PORT || '7778';
 
+const testEnv = { ...process.env };
+
+// Force Rapid-MLX to report as locally available for UI tests on Linux/CI runners.
+// This allows the spawn wizard to show the Rapid-MLX engine card so tests can
+// exercise that flow without requiring a real macOS/Apple Silicon runner.
+testEnv.LLAMA_MONITOR_FAKE_RAPID_MLX_LOCAL_AVAILABLE = '1';
+
 let child;
 if (useRelease) {
     const binaryPath = join(repoRoot, 'target', 'release', process.platform === 'win32' ? 'llama-monitor.exe' : 'llama-monitor');
@@ -59,6 +66,7 @@ if (useRelease) {
     ], {
         cwd: repoRoot,
         stdio: 'inherit',
+        env: testEnv,
     });
 } else {
     const cargoArgs = [
@@ -72,6 +80,7 @@ if (useRelease) {
     child = spawn('cargo', cargoArgs, {
         cwd: repoRoot,
         stdio: 'inherit',
+        env: testEnv,
         // On Windows, spawn needs shell:false but cargo must be on PATH — which it is
         // after a standard rustup install. No shell:true needed.
     });

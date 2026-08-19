@@ -1,4 +1,28 @@
 /**
+ * Open the settings modal the way the product opens it.
+ *
+ * Importing `openSettingsModal` and calling it directly leaves the modal open while the URL
+ * is still whatever it was — a state the app itself never produces, because every real entry
+ * point (nav.js, user-menu.js, models.js) goes through `Router.navigate('/settings')`. That
+ * fabricated state is torn down by a legitimate router dispatch: `Router.onBeforeDispatch`
+ * (bootstrap.js:221) closes the settings modal for any path that is not `/settings`. So any
+ * dispatch landing after the direct call — and under a full serial suite the boot dispatch is
+ * slow enough to land late — closed the modal mid-test and the tab assertions failed against
+ * a modal that was open a moment earlier. That was the settings/TLS flakiness.
+ *
+ * Navigating instead means the URL and the modal agree, and no dispatch can close it.
+ */
+export async function openSettings(page, tab = null) {
+  await page.evaluate(async (t) => {
+    const Router = (await import('/js/features/router.js')).default;
+    Router.navigate(t ? `/settings#${t}` : '/settings');
+  }, tab);
+  await page.waitForFunction(
+    () => document.getElementById('settings-modal')?.classList.contains('open') === true,
+  );
+}
+
+/**
  * Dismiss the auth shell if it is visible (caused by security-auth.spec.js
  * enabling form auth on the shared server while other tests run concurrently).
  * Uses the auth API directly via fetch inside the page for reliability.

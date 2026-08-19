@@ -1,4 +1,12 @@
-# Llama Monitor
+# Local LLM Foundry
+
+Local LLM Foundry is the 2.0 home for local AI inference: one dashboard for
+models, live GPU/system telemetry, chat, a hardware-aware setup wizard, and
+managed llama.cpp and Rapid-MLX runtimes on macOS, Linux, and Windows.
+
+This is a compatibility-preserving rebrand of Llama Monitor. The `llama-monitor`
+executable, legacy roots, API routes, browser storage, and release aliases
+remain supported through 2.x. See the [2.0 upgrade guide](docs/reference/upgrade-2-0.md).
 
 One dashboard for local AI models on macOS, Linux, and Windows. Performance metrics, GPU and system telemetry, active sessions, chat, and a hardware-aware setup wizard.
 
@@ -7,7 +15,7 @@ One dashboard for local AI models on macOS, Linux, and Windows. Performance metr
 Run Llama Monitor and open it in your browser:
 
 ```bash
-./llama-monitor
+./local-llm-foundry
 # Open http://localhost:7778
 ```
 
@@ -22,17 +30,27 @@ Quick start:
 
 ## Features
 
+### Rapid-MLX Backend (Apple Silicon)
+
+Rapid-MLX is now a first-class inference backend for Apple Silicon. Llama Monitor manages its runtime in an isolated environment—no manual Python setup required.
+
+- Engine selection: choose llama.cpp or Rapid-MLX in the Setup wizard; the wizard recommends Rapid-MLX when using MLX-native models.
+- Managed runtime: Llama Monitor installs, updates, repairs, and rolls back the Rapid-MLX runtime automatically.
+- Live telemetry: the dashboard surfaces Rapid-MLX-specific metrics (throughput, context, model info) alongside llama.cpp, with the same UX.
+
+![Rapid-MLX dashboard](docs/screenshots/dashboard-rapid-mlx--rapidmlx-local--dark.png)
+
 ### Live Monitoring Cockpit
 
 Top nav and Server tab show Speed (throughput), context pressure, connection details, active sessions, and model/runtime details in real time. Local sessions read host telemetry directly; remote sessions gain the same depth via the remote agent.
 
-![Performance & metrics](docs/screenshots/performance-metrics.gif)
+![Performance & metrics](docs/screenshots/neutral--performance-metrics.gif)
 
 ### GPU & System Telemetry
 
 Real-time GPU utilization, temperature, memory, and power, plus CPU and system-level metrics. Designed for local-first and secure remote setups.
 
-![GPU & System Metrics](docs/screenshots/gpu-metrics.gif)
+![GPU & System Metrics](docs/screenshots/neutral--gpu-metrics.gif)
 
 ### Chat Workspace & Focus Mode
 
@@ -43,19 +61,19 @@ Chat tabs, prompt controls, telemetry overlays, and logs live next to the monito
 - Per-tab prompt and sampling controls
 - Focus mode: hide nav, sidebars, and chrome
 
-![Chat Interface](docs/screenshots/chat-chat.png)
-![Focus Mode](docs/screenshots/chat-focus-mode.png)
+![Chat Interface](docs/screenshots/chat--neutral--chat.png)
+![Focus Mode](docs/screenshots/chat--neutral--focus-mode.png)
 
 ### Chat History Q&A
 
 Ask questions about your conversation in a dedicated sliding panel. It searches message history, pulls relevant context, and streams answers without altering your live chat.
 
-![History Q&A](docs/screenshots/chat-history-qa-panel.png)
+![History Q&A](docs/screenshots/chat-history-qa--neutral--panel.png)
 
 ### Benchmarking & MTP Sweep
 Run live throughput tests and empirical sweeps for Multi-Token Prediction (MTP) draft models directly in the Tuning panel.
 
-![Benchmarking](docs/screenshots/benchmark-results.png)
+![Benchmarking](docs/screenshots/neutral--benchmark-results.png)
 
 ### Guided Generation & Prompt Tooling
 A per-tab notes sidebar, AI-generated suggestions, quick guide flows, and director/surprise tools help you steer replies without rebuilding the prompt stack.
@@ -63,13 +81,13 @@ A per-tab notes sidebar, AI-generated suggestions, quick guide flows, and direct
 - Director mode: type one directive and get four distinct continuation options.
 - Surprise mode: arm a beat that triggers at a later reply.
 
-![Director Options](docs/screenshots/guided-gen-director-options.png)
+![Director Options](docs/screenshots/guided-gen--neutral--director-options.png)
 
 ### Appearance & Theming
 
 Four accent palettes (Carbon Mint, Cyber Rose, Solar Violet, Lava Core) pair with dark and light modes for 8 total combinations. Switch palettes from **Settings → Appearance** — cards, sparklines, charts, and glows all update instantly. Choice is saved per device.
 
-![Light mode dashboard](docs/screenshots/appearance-light-dashboard.png)
+![Light mode dashboard](docs/screenshots/neutral--appearance-light-dashboard.png)
 
 ### TLS, ACME & mTLS
 
@@ -77,13 +95,13 @@ Built-in TLS with ACME (Let's Encrypt) and mTLS for remote agents. Choose No HTT
 
 See [TLS Architecture](docs/reference/tls-architecture.md) for full details.
 
-![Security & Certificates](docs/screenshots/tls-certificates-tab.png)
+![Security & Certificates](docs/screenshots/tls--neutral--certificates-tab.png)
 
 ### Start a Server
 
-An integrated setup wizard for discovering, downloading, configuring, and launching a llama-server instance. No CLI flags required.
+An integrated setup wizard for discovering, downloading, configuring, and launching a local inference server with llama.cpp or Rapid-MLX. No CLI flags required.
 
-- **Hardware profiles**: Quick / Balanced / Workstation / Advanced
+- **Wizard views**: Guided recommendations plus searchable Pro controls with shared canonical state
 - **Model sources**:
   - HuggingFace search and curated community picks
   - Third-party import (Ollama, LM Studio, Jan, GPT4All, HF cache)
@@ -91,7 +109,9 @@ An integrated setup wizard for discovering, downloading, configuring, and launch
 - **VRAM-aware tuning**: live breakdown bar with auto-size and quant-compare
 - **llama.cpp binary management**: auto-download, install, and update the llama.cpp runtime
 
-![Setup wizard flow](docs/screenshots/spawn-wizard-flow.gif)
+![Engine selection in Setup wizard](docs/screenshots/spawn-wizard-engines--neutral--dark.png)
+
+![Setup wizard flow](docs/screenshots/llamacpp-local--spawn-wizard-flow.gif)
 
 **Details**:
 [Setup wizard](docs/reference/setup-wizard.md) ·
@@ -111,15 +131,16 @@ An integrated setup wizard for discovering, downloading, configuring, and launch
 | AMD | `rocm-smi` | Auto-detected |
 | NVIDIA | `nvidia-smi` | Auto-detected |
 | Apple Silicon | `mactop` | Auto-detected |
+| Apple Silicon (MLX) | Rapid-MLX runtime | Managed by Llama Monitor |
 | Windows (CPU temp) | `sensor_bridge.exe` | Bundled |
 
 ## Installation
 
-Pre-built binaries are available on the [latest release](../../releases/latest). To build from source:
+Pre-built binaries are available on the [latest release](https://github.com/nmorgowicz-org/local-llm-foundry/releases/latest). To build from source:
 
 ```bash
-git clone https://github.com/nmorgowicz-org/llama-monitor.git
-cd llama-monitor
+git clone https://github.com/nmorgowicz-org/local-llm-foundry.git
+cd local-llm-foundry
 cargo build --release
 ```
 
@@ -142,6 +163,7 @@ Llama Monitor includes in-app updates via the dashboard (Settings or header upda
 - [Real-Time Communication](docs/reference/realtime-communication.md) — WebSocket schema, polling, network detection
 - [API Reference](docs/reference/api.md) — REST endpoints
 - [CLI Reference](docs/reference/cli-flags.md) — Supported flags
+- [Rapid-MLX Runtime](docs/reference/rapid-mlx-runtime.md) — Managed Rapid-MLX backend, install, update, and diagnostics
 - [Cross-Compilation](docs/reference/cross-compilation.md) — Build targets and toolchains
 - [Capability Flags](docs/reference/capabilities.md) — Metric capability system
 

@@ -22,6 +22,11 @@ test.describe('system prompt and persona panel', () => {
     await page.waitForSelector('html.modules-ready');
     await dismissAuthShell(page);
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await ensureChatVisible(page);
   });
 
@@ -97,6 +102,11 @@ test.describe('explicit mode toggle v2 (3-state)', () => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await page.getByRole('button', { name: /chat/i }).click();
     // Wait for chat sidebar to render (initChatTabs is async)
     await page.waitForSelector('#csp-list .csp-item.active', { timeout: 10000 });
@@ -290,6 +300,11 @@ test.describe('template manager', () => {
     await page.waitForSelector('html.modules-ready');
     await dismissAuthShell(page);
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await ensureChatVisible(page);
   });
 
@@ -337,6 +352,11 @@ test.describe('per-persona explicit policies', () => {
     await page.waitForSelector('html.modules-ready');
     await dismissAuthShell(page);
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await ensureChatVisible(page);
   });
 
@@ -371,6 +391,11 @@ test.describe('persona reset button', () => {
     await page.waitForSelector('html.modules-ready');
     await dismissAuthShell(page);
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await ensureChatVisible(page);
   });
 
@@ -402,6 +427,11 @@ test.describe('template list sections and active badge', () => {
     await page.waitForSelector('html.modules-ready');
     await dismissAuthShell(page);
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await ensureChatVisible(page);
   });
 
@@ -444,6 +474,11 @@ test.describe('gender token substitution', () => {
     await page.waitForSelector('html.modules-ready');
     await dismissAuthShell(page);
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await ensureChatVisible(page);
   });
 
@@ -485,6 +520,11 @@ test.describe('custom role boundary', () => {
     await page.waitForSelector('html.modules-ready');
     await dismissAuthShell(page);
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await ensureChatVisible(page);
   });
 

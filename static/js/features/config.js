@@ -92,7 +92,7 @@ function saveConfig() {
 function useDefaultServerBinary() {
     const input = document.getElementById('set-server-path');
     if (input) input.value = '';
-    showToast('Using llama-monitor default binary location', 'info');
+    showToast('Using Foundry default binary location', 'info');
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -125,8 +125,8 @@ export function initConfig() {
     const browseCwd = document.getElementById('config-browse-cwd');
     if (browseCwd) browseCwd.addEventListener('click', () => openDeferredFileBrowser('set-server-cwd', 'dir'));
 
-    // Bind "Open Runtime Configuration" in settings modal
-    const openConfigBtn = document.getElementById('settings-open-config-btn');
+    // Bind "Open Runtime Configuration" in settings modal (Loaders tab)
+    const openConfigBtn = document.getElementById('settings-advanced-open-config-btn');
     if (openConfigBtn) openConfigBtn.addEventListener('click', openConfigModal);
 
 }

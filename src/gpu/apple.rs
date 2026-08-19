@@ -173,7 +173,6 @@ fn detect_chip_name() -> &'static str {
 /// Not cached — the value changes when the user applies the Metal GPU limit tweak.
 /// The sysctl call takes ~10–50 µs, negligible against the metrics poll interval.
 pub fn read_iogpu_wired_limit_mb() -> u64 {
-    // Use full path — the server process PATH may not include /usr/sbin.
     std::process::Command::new("/usr/sbin/sysctl")
         .args(["-n", "iogpu.wired_limit_mb"])
         .output()
@@ -181,4 +180,150 @@ pub fn read_iogpu_wired_limit_mb() -> u64 {
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .and_then(|s| s.trim().parse::<u64>().ok())
         .unwrap_or(0)
+}
+
+/// Hard ceiling fraction for the wired limit (95% of RAM).
+/// This is the absolute maximum; users who set wired limit near this value
+/// are accepting the risk of system instability under heavy load.
+/// The recommended default is much lower (RAM minus 8GB reserve).
+const WIRED_LIMIT_HARD_CEILING_FRACTION: f64 = 0.95;
+
+/// Minimum RAM reserve (GiB) for systems ≤16GB.
+/// Smaller systems need more headroom for OS stability.
+const WIRED_LIMIT_RESERVE_SMALL_SYSTEM_GIB: u64 = 6;
+
+/// Default RAM reserve (GiB) for systems ≥24GB.
+/// Flat 8GB reserve works from 24GB up to 192GB+; users who want more GPU
+/// can override via Settings (Phase 7) or POST /api/system/wired-limit.
+const WIRED_LIMIT_RESERVE_DEFAULT_GIB: u64 = 8;
+
+/// Compute the maximum allowed wired limit in MiB for this machine.
+/// Returns None if total RAM cannot be determined.
+/// Hard ceiling: 95% of total RAM (absolute limit, never exceeds).
+pub fn wired_limit_max_mb(total_ram_bytes: u64) -> Option<u64> {
+    if total_ram_bytes == 0 {
+        return None;
+    }
+    let total_ram_mb = total_ram_bytes / (1024 * 1024);
+    let hard_ceiling_mb = (total_ram_mb as f64 * WIRED_LIMIT_HARD_CEILING_FRACTION) as u64;
+    Some(hard_ceiling_mb.max(1))
+}
+
+/// Compute the RAM-relative safe default wired limit when sysctl is unset (0).
+/// Tiered by RAM size:
+/// - ≤16 GB: total - 6 GB reserve (protects small systems from swap thrashing)
+/// - ≥24 GB: total - 8 GB reserve (matches user-verified 64 GB path: 57,344 MiB)
+///
+/// This is the configured_ceiling_bytes default used by MemoryAvailabilitySnapshot
+/// and the recommended value exposed in Settings (Phase 7).
+pub fn wired_limit_safe_default_mb(total_ram_bytes: u64) -> Option<u64> {
+    if total_ram_bytes == 0 {
+        return None;
+    }
+    let total_ram_mb = total_ram_bytes / (1024 * 1024);
+    let total_ram_gb = total_ram_mb / 1024;
+    let reserve_mb = if total_ram_gb <= 16 {
+        WIRED_LIMIT_RESERVE_SMALL_SYSTEM_GIB * 1024
+    } else {
+        WIRED_LIMIT_RESERVE_DEFAULT_GIB * 1024
+    };
+    Some((total_ram_mb as i64 - reserve_mb as i64).max(1) as u64)
+}
+
+/// Documented behavior notes (for API responses and frontend teaching):
+/// - Persistence: When set via set-metal-gpu-limit endpoint, the value is saved
+///   to /etc/sysctl.conf and persists across reboots.
+/// - MLX restart required: MLX queries `iogpu.wired_limit_mb` at Metal device
+///   initialization. An existing MLX/Rapid process does NOT pick up a new value.
+///   Restart the model runtime after changing this limit.
+pub fn wired_limit_behavior_notes() -> &'static str {
+    "The iogpu.wired_limit_mb value is saved to /etc/sysctl.conf and persists \
+     across reboots. MLX reads the value at device init; restart the runtime \
+     after changing this limit for it to take effect."
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 8 GiB RAM system (base M1/M2)
+    const RAM_8GB_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+    /// 16 GiB RAM system (common config)
+    const RAM_16GB_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+    /// 64 GiB RAM system (M5 Max class)
+    const RAM_64GB_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+    /// 128 GiB RAM system (M1 Ultra / M4 Max class)
+    const RAM_128GB_BYTES: u64 = 128 * 1024 * 1024 * 1024;
+
+    #[test]
+    fn wired_limit_max_mb_95_pct_hard_ceiling() {
+        // 64GB: hard ceiling = 95% of 65536 = 62259
+        let max = wired_limit_max_mb(RAM_64GB_BYTES).unwrap();
+        let expected = (65_536_f64 * 0.95) as u64;
+        assert_eq!(max, expected);
+    }
+
+    #[test]
+    fn wired_limit_max_mb_zero_ram() {
+        assert_eq!(wired_limit_max_mb(0), None);
+    }
+
+    #[test]
+    fn wired_limit_safe_default_mb_16gb_reserve_6gb() {
+        // ≤16GB: total - 6GB reserve = 10240 MB
+        let default_mb = wired_limit_safe_default_mb(RAM_16GB_BYTES).unwrap();
+        assert_eq!(default_mb, 10_240, "16GB system should reserve 6GB");
+    }
+
+    #[test]
+    fn wired_limit_safe_default_mb_8gb_reserve_6gb() {
+        // ≤16GB: total - 6GB reserve = 2048 MB (8GB - 6GB)
+        let default_mb = wired_limit_safe_default_mb(RAM_8GB_BYTES).unwrap();
+        assert_eq!(default_mb, 2_048, "8GB system should reserve 6GB");
+    }
+
+    #[test]
+    fn wired_limit_safe_default_mb_64gb_reserve_8gb() {
+        // ≥24GB: total - 8GB reserve = 57344 MB (matches user-verified path)
+        let default_mb = wired_limit_safe_default_mb(RAM_64GB_BYTES).unwrap();
+        assert_eq!(
+            default_mb, 57_344,
+            "64GB system should reserve 8GB (matches user-verified 57344 path)"
+        );
+    }
+
+    #[test]
+    fn wired_limit_safe_default_mb_128gb_reserve_8gb() {
+        // ≥24GB: total - 8GB reserve = 131072 - 8192 = 122880 MB
+        let default_mb = wired_limit_safe_default_mb(RAM_128GB_BYTES).unwrap();
+        assert_eq!(default_mb, 122_880, "128GB system should reserve 8GB");
+    }
+
+    #[test]
+    fn wired_limit_safe_default_mb_zero_ram() {
+        assert_eq!(wired_limit_safe_default_mb(0), None);
+    }
+
+    #[test]
+    fn m5_max_57344_path_within_bounds() {
+        let max = wired_limit_max_mb(RAM_64GB_BYTES).unwrap();
+        assert!(
+            57_344 <= max,
+            "M5 Max verified path 57344 must be within bounds (max={})",
+            max
+        );
+    }
+
+    #[test]
+    fn behavior_notes_contain_required_info() {
+        let notes = wired_limit_behavior_notes();
+        assert!(
+            notes.contains("persist") || notes.contains("sysctl.conf"),
+            "Notes must indicate persistent behavior"
+        );
+        assert!(
+            notes.contains("restart") || notes.contains("MLX reads"),
+            "Notes must indicate MLX restart requirement"
+        );
+    }
 }

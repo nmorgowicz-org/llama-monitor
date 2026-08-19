@@ -1,6 +1,50 @@
 # VRAM Estimator Reference
 
-## Memory-pool and active-parameter behavior
+The VRAM estimator (`src/llama/vram_estimator/`) is backend-aware. It produces
+estimates for both:
+
+- **llama.cpp** (CUDA/ROCm/Metal) — based on GGUF metadata or name heuristics.
+- **Rapid-MLX** (Apple Silicon, unified memory only) — based on MLX `config.json` +
+  safetensors index or name heuristics.
+
+Both backends share the same `ModelArch` struct, the same KV cache and MoE formulas,
+and the same `VramBreakdown` output shape. They differ in:
+
+- Overhead calibration:
+  - llama.cpp Metal: calibrated on Apple M5 Max.
+  - llama.cpp CUDA/ROCm: calibrated on RTX 5090.
+  - Rapid-MLX: formula-based approximation with a 25% safety margin; not yet
+    hardware-calibrated (see "Rapid-MLX overhead" section).
+- How model metadata is read:
+  - llama.cpp: GGUF tensor directory / header introspection (primary) or name heuristic (fallback).
+  - Rapid-MLX: MLX `config.json` + `model.safetensors.index.json` (primary) or name heuristic (fallback).
+- Evidence:
+  - llama.cpp: `Measured` when GGUF-backed; `Degraded` when only name-based.
+  - Rapid-MLX: always at best `Approximate` (never `Measured`) until calibrated;
+    `Degraded` when config fields are incomplete.
+
+All VRAM bars in the UI (Spawn Wizard, Preset Editor, Setup view, and the Models-modal
+HF-browse preview) are driven by the backend `/api/vram-estimate` with the appropriate
+`backend` field — there is no client-side VRAM/KV formula. Pre-download, the backend
+fetches the model's real metadata (GGUF header or MLX config) from HuggingFace so even
+the browse preview uses the model's real architecture.
+
+### Native context ceilings
+
+The estimator response carries `native_context_limit` when metadata provides one.
+GGUF uses its authoritative `*.context_length`; MLX uses
+`max_position_embeddings` (or `model_max_length` only when the canonical field
+is absent). Spawn Wizard and the preset editor use that value to distinguish a
+standard context choice from an advanced-only extension. The standard choices
+are 32K, 65K, 131K, 160K, 200K, and 262K; a choice above the metadata ceiling
+is not a normal-fit recommendation, even if the memory estimate fits.
+
+RoPE/YaRN and related extension controls are deliberately not emitted or
+estimated yet. They require model-specific launch mapping, tokenizer/template
+headroom, and extended-context calibration before they can become a supported
+configuration.
+
+## Memory-pool and active-parameter behavior (llama.cpp GGUF)
 
 GGUF tensor shapes are the source of truth for MoE active parameters:
 
@@ -52,7 +96,7 @@ All VRAM bars in the UI (Spawn Wizard, Preset Editor, Setup view, and the Models
 
 Estimation is primarily based on GGUF introspection, not name matching. Filename-based heuristics are used only when GGUF metadata is unavailable (e.g., pre-download estimates or incomplete headers).
 
-![VRAM breakdown bar in the Hardware step](../screenshots/spawn-wizard-step3-vram.png)
+![VRAM breakdown bar in the Hardware step](../screenshots/spawn-wizard--llamacpp-local--hardware-vram.png)
 
 ---
 
@@ -536,7 +580,7 @@ Zero-guard: returns 0 when:
 
 Primary: GGUF fields (`nextn_predict_layers`, `next_n_token_count`, `num_nextn_predict_layers`, `multi_token_prediction_depth`). When present, these set `mtp_depth` directly via introspection.
 
-Fallback: When any heuristic path (Qwen3.6, Qwen3.5, Gemma 3/4, or generic) encounters `"mtp"` or `"multi-token"` in the filename, it sets `mtp_depth = 1` via `from_name_and_params()`. This value is then used by `full_estimate` (for MTP overhead in the breakdown) and `max_context` (for budgeting fixed costs). EXAONE 4.5 unconditionally uses MTP (all sizes).
+The filename keyword branch in `from_name_and_params()` is a legacy pre-download VRAM-estimator fallback (degraded/best-effort). Confirmed primary-model metadata remains authoritative for Spawn Wizard recommendations and launch state. Separate draft-model/MTP-head files often have no introspectable head metadata, so filename/repository hints remain a flexible provisional discovery fallback; they must be labeled inferred and must not claim a confirmed MTP depth. The resulting estimate includes MTP overhead in its breakdown and fixed-cost context budget. EXAONE 4.5 unconditionally uses MTP (all sizes).
 
 ### `find_min_cpu_moe_to_fit_weights`
 
@@ -617,18 +661,74 @@ If both are provided, `mmproj_bytes` takes precedence. The path is resolved rela
 
 ### POST /api/vram-estimate
 
-Architecture-aware VRAM breakdown endpoint.
+Architecture-aware, backend-aware VRAM breakdown endpoint.
 
 - Requires: `api-token` (Authorization header)
-- Requires (body): **either** `model_path` (local file) **or** `hf_repo_id` + `hf_file_path` + `model_size_bytes` (pre-download HuggingFace introspection)
+- Requires (body):
+  - For llama.cpp: **either** `model_path` (local GGUF file) **or** `hf_repo_id` + `hf_file_path` + `model_size_bytes`.
+  - For Rapid-MLX: **either** `model_path` (local MLX directory or HF-repo-style alias) **or** `hf_repo_id` + optional `hf_file_path` + `model_size_bytes`.
 - Optional (body): `n_ctx`, `gpu_layers`, `parallel_slots`, `ubatch_size`, `ctk`, `ctv`, `n_cpu_moe`, `available_vram_bytes`, `available_ram_bytes`, `is_unified_memory`, `mmproj_path`, `mmproj_bytes`
-  - `gpu_layers` (int): for dense models on discrete GPU: how many layers on GPU; negative = all-GPU, zero = all-CPU.
+  - `gpu_layers` (int): for dense models on discrete GPU (llama.cpp): how many layers on GPU; negative = all-GPU, zero = all-CPU.
   - `available_ram_bytes` (u64): system RAM available; used to check CPU-offloaded weight budget.
-- Behavior:
+- Backend selection:
+  - The `backend` field (preferred) or legacy `engine` alias selects the inference backend:
+    - `"llama_cpp"` (default, omitted): GGUF-based llama.cpp path.
+    - `"rapid_mlx"` / `"mlx"`: Rapid-MLX path (Apple Silicon / unified memory only).
+- llama.cpp behavior (default):
   - **Local path**: reads GGUF metadata from `model_path` (primary); falls back to `from_name_and_params()` on parse failure.
   - **HuggingFace (no local file yet)**: `crate::hf::fetch_gguf_header_metadata()` issues an HTTP **Range** request for the first few MB of the `.gguf` (the KV header sits at the file start), parses it with `read_gguf_metadata_from_bytes()`, and uses the caller-supplied `model_size_bytes` (from the HF file listing) for weights. This gives the model's **real** architecture before downloading 16 GB. Requires HTTP 206 (partial content); on any failure (gated repo, offline, no range support) it falls back to the name heuristic so the caller still gets a rough estimate.
+- Rapid-MLX behavior:
+  - `is_unified_memory` is forced to `true` server-side (no discrete-GPU/CPU-spill path).
+  - **Local path**: `model_path` is interpreted as an MLX model directory. Its `config.json` is parsed into the normalized `ModelMemoryProfile`, including authoritative nested `text_config` geometry, full/local/linear layer groups, recurrent state, Gemma global/local heads, MoE topology, and MTP/companion evidence.
+    - `model.safetensors.index.json` for exact weight-byte accounting (`metadata.total_size` when present, otherwise the real on-disk shard file sizes).
+  - **HF-repo-style alias**: if `model_path` is not a local directory but matches `"org/repo"` (e.g. `"mlx-community/Qwen3-30B-A3B-4bit"`), it is treated as an `hf_repo_id`; the server fetches `config.json` from HuggingFace.
+  - **Explicit `hf_repo_id`**: for Rapid-MLX, `hf_repo_id` plus optional immutable `hf_repo_revision` fetches `config.json` directly. `hf_file_path` is never treated as a config filename. Referenced text configs are revision-pinned, bounded, cycle-checked, and limited to safe relative JSON paths. `model_size_bytes` is required when the tree lookup cannot determine the weight size.
+  - **Degraded**: if required config fields (`hidden_size`, `num_hidden_layers`, `num_attention_heads`) are missing or unrecognized, the architecture is built via `ModelArch::from_name_and_params()` and `evidence` is set to `"degraded"`. This never silently presents a heuristic guess as authoritative.
+  - Optional `mlx_prefix_cache_tokens` + `mlx_prefix_cache_bits` (4 or 8, default 8) reserve a **separate** stored budget for Rapid-MLX's compressed prefix cache. This is intentionally NOT a reduction of `kv_cache_bytes`: cached entries are decompressed back to the active compute dtype before reuse, so active-request KV is unaffected by how much prefix cache exists.
+  - A retained-cache recommendation is optional growth, not mandatory fit. The
+    estimator presents the base launch requirement separately from the chosen
+    cache budget and reserve. For qualified one-user Rapid coding workloads,
+    8 GiB is the baseline retained-cache choice; 16 GiB is a branch-retention
+    option. Disk checkpoints are excluded because they are snapshot writes,
+    not automatic RAM-cache restoration.
+  - Rapid-native policy fields are `kv_cache_dtype` (`bf16`, `int8`, or `int4`), `reasoning_mode`, and `turboquant_mode` (`v4`, `k8v4`, or `none`). The estimator never accepts llama.cpp's `ctk`/`ctv` vocabulary for a Rapid result. Reasoning resolves the active KV dtype to `int8`.
+   - Optional `workload_scenario` maps page-1 use-case selection to backend memory policy. Valid keys and their memory policies:
+     - `interactive_coding_agent` — coding agent workload (default, 80% priority), 128K planning context, 32K retained cache, TurboQuant eligible.
+     - `general_chat` — standard chat, 32K planning context, 8K retained cache.
+     - `roleplay_storytelling` — long-context narrative, 64K planning context, 32K retained cache.
+     - `tool_research_agent` — multi-session tool/research, 128K planning context, 48K retained cache, 2 parallel slots.
+     - `batch_eval` — batch/evaluation, 8K planning context, 0 retained cache, 4 parallel slots.
+   - The workload scenario affects: recommended KV dtype, TurboQuant eligibility, MTP eligibility, parallel slot recommendations, and retained-cache sizing.
+  - TurboQuant is retained-prefix storage only. It never reduces model weights, recurrent state, MTP, prefill, or the transient decompression peak. A local Rapid 0.10.17 receipt showed that `--kv-cache-turboquant k8v4` owns the active cache path: the runtime reports its active compute KV as `bf16` and does not apply a simultaneously requested `--kv-cache-dtype int4`. `k8v4` is an Advanced trial: it becomes effective only after exact model/revision qualification; an unknown community finetune is estimated as Standard retained storage and receives an explicit fallback reason. The Rapid argv is `--kv-cache-turboquant {v4,k8v4,none}`.
 - Output fields: `weights_bytes`, `kv_cache_bytes`, `linear_attn_state_bytes`, `mmproj_bytes`, `mtp_bytes`, `overhead_bytes`, `total_bytes`, `available_bytes`, `headroom_bytes`, `ram_bytes`, `available_ram_bytes`, `ram_headroom_bytes`, `recommendation`, `note`
-- Consumers: Spawn Wizard, Preset Editor, Setup view, **and the Models modal HF-browse preview bar** (`updateVramDisplay` in `static/js/features/models.js`) — all share this one endpoint, so they all get identical, GGUF-accurate numbers. There is no client-side VRAM/KV formula anymore.
+- Additional output fields (both backends; zero/"measured" for GGUF llama.cpp):
+  - `mlx_prefix_cache_bytes` (u64) — the separate compressed prefix-cache budget described above (non-zero only for Rapid-MLX).
+  - `evidence` (`"measured"` | `"approximate"` | `"degraded"`) — how much of the breakdown is backed by real hardware calibration vs. a formula-based approximation vs. a heuristic fallback from incomplete metadata:
+    - `"measured"`: llama.cpp with GGUF metadata and hardware-calibrated overhead (Metal or discrete). This is the strongest guarantee.
+    - `"approximate"`: Rapid-MLX with real MLX config metadata but an uncalibrated overhead formula (see next section). Every Rapid-MLX estimate is at best `"approximate"`.
+    - `"degraded"`: one or more required architecture fields were missing/unrecognized and a name/param heuristic was used instead of real model metadata (applies to both backends).
+- Consumers: Spawn Wizard, Preset Editor, Setup view, **and the Models modal HF-browse preview bar** (`updateVramDisplay` in `static/js/features/models.js`) — all share this one endpoint. The Spawn Wizard's VRAM bar tooltip appends a plain-text note when `evidence` is `"approximate"` or `"degraded"`. No independent client-side VRAM math exists — this is always backend-driven only.
+
+### GET /api/memory-availability and POST /api/memory-availability/fit
+
+These authenticated endpoints provide the live, backend-owned availability sample used alongside an estimate on unified-memory systems. They deliberately distinguish capacity from current launch readiness:
+
+- `GET /api/memory-availability` returns a fresh capacity snapshot. `total_unified_bytes` and `configured_ceiling_bytes` are informational and are never presented as currently available memory.
+- `POST /api/memory-availability/fit` accepts `required_bytes`, `launch_intent` (`additional_generation` or `replace_existing`), and an optional `replace_runtime_bytes`. The replacement credit is valid only for a measured, app-owned runtime that the launch will stop.
+- The response reports `current_safe_availability_bytes`, `after_reclaim_bytes`, `after_closing_apps_bytes`, the selected `required_bytes`, and a target-specific state: `safe_now`, `conditional_after_reclaim`, `after_closing_apps`, or `unsafe`.
+
+Reclaim and close-app figures are conditional scenarios, not free memory. Disk-cache purge does not claim to free a model heap, Metal allocation, or wired memory.
+
+### Rapid-MLX overhead — approximate, not yet hardware-calibrated
+
+Unlike llama.cpp's Metal (`metal_overhead_bytes`) and discrete-GPU (`discrete_overhead_bytes`) overhead, which are calibrated against real measured hardware footprints (see "Backend-Specific Accuracy" below), **Rapid-MLX's overhead (`mlx_overhead_bytes` in `src/llama/vram_estimator/estimate.rs`) is a documented, formula-based approximation**:
+
+- Same per-layer order of magnitude as the Metal calibration, inflated by:
+  - A fixed 25% safety margin on the base per-layer/ubatch cost.
+  - A conservative 8% KV overhead fraction (vs. Metal's measured 6.5%).
+- It is **not** derived from real Apple Silicon Rapid-MLX measurements and must not be presented as such.
+- Every estimate with `Backend::RapidMlx` sets `EstimateEvidence::Approximate` (or `Degraded` when the source config was incomplete).
+- Recalibrating this against real Rapid-MLX process-footprint measurements (same methodology as "Recalibrating the discrete overhead" and "Recalibrating the Metal overhead") is an open follow-up.
 
 ### API helpers (`build_arch_from_body`)
 
@@ -646,13 +746,16 @@ The VRAM bars consume `/api/vram-estimate` directly (single source of truth) —
 
 ## Backend-Specific Accuracy
 
-| Backend | Model size | KV cache | Discrete overhead | Total accuracy |
+| Backend | Model size | KV cache | Overhead | Total accuracy |
 |---------|-----------|----------|-----------------|----------------|
-| Metal (Apple Silicon) | ✓ exact from file | ✓ formula | ✓ M5 Max-calibrated (`metal_overhead_bytes`) | ±0.05 GiB |
-| CUDA (Windows/Linux) | ✓ exact from file | ✓ formula | ✓ calibrated when n_embd known | ±0.5 GiB |
-| CUDA, n_embd unknown | ✓ exact from file | ✓ formula | 256 MB fallback | ~2–3 GiB low |
+| llama.cpp Metal (Apple Silicon) | ✓ exact from GGUF | ✓ formula | ✓ M5 Max-calibrated (`metal_overhead_bytes`) | ±0.05 GiB |
+| llama.cpp CUDA (Windows/Linux) | ✓ exact from GGUF | ✓ formula | ✓ calibrated when n_embd known | ±0.5 GiB |
+| llama.cpp CUDA, n_embd unknown | ✓ exact from GGUF | ✓ formula | 256 MB fallback | ~2–3 GiB low |
+| Rapid-MLX (Apple Silicon) | ✓ from safetensors / HF | ✓ formula | Approximate (25% safety margin) | Not yet calibrated |
 
 Discrete overhead (CUDA/ROCm) is calibrated on RTX 5090 32 GB using measurement-grounded formulas. When `n_embd` is unknown (no GGUF or missing `embedding_length`), it falls back to a 256 MB flat reserve and underestimates overhead.
+
+Rapid-MLX overhead is formula-based (see "Rapid-MLX overhead" above) and deliberately conservative.
 
 **Mac M5 Max calibration** (Q5_K_S, 262k ctx, q8_0 KV):
 
@@ -709,7 +812,7 @@ KV BPE is used only for KV cache estimation (`kv_cache_bytes`). The `ctk` / `ctv
 
 ---
 
-## GGUF Metadata Integration
+## GGUF Metadata Integration (llama.cpp)
 
 When a GGUF file is present, `gguf_meta.rs` reads the model's real KV header and `GgufMetadata::to_model_metadata()` builds the metadata struct. `ModelMetadata::to_arch()` (in `spawn_wizard.rs`) then converts it into `ModelArch`.
 
@@ -760,6 +863,67 @@ The GGUF arch string `"qwen35"` is mapped via `gguf_arch_to_heuristic_name()` (l
 
 ---
 
+## MLX Metadata Integration (Rapid-MLX)
+
+For Rapid-MLX models, metadata comes from `config.json` + `model.safetensors.index.json`
+instead of a GGUF header. See `src/inference/rapid_mlx/mlx_meta.rs`.
+
+- **config.json** (primary): an HF-transformers-style architecture config:
+  - Required for "exact" evidence: `hidden_size`, `num_hidden_layers`, `num_attention_heads`.
+  - MoE: `num_experts`, `num_experts_per_tok` (and alternate field names via `#[serde(alias)]`).
+  - Sliding-window: `sliding_window`, `sliding_window_pattern`.
+  - Rapid-MLX `quantization` block: `bits`, `group_size`.
+  - Draft/MTP: `draft_model` or `speculative_config` sub-configs.
+  - Vision: presence of `vision_config` flags the model as needing an mmproj-equivalent budget.
+- **model.safetensors.index.json**:
+  - Used for exact weight-byte accounting:
+    - `metadata.total_size` when present (HF-exported indexes).
+    - Otherwise, on-disk shard file sizes are summed.
+  - Shard names are validated: no absolute paths, no `..` traversal, `.safetensors` only.
+- **Evidence and mapping**:
+  - `ModelMemoryProfile` is the authoritative MLX geometry input. It preserves field evidence and uses nested `text_config` rather than wrapper fields when present.
+  - Incomplete/unreadable config falls back to a name heuristic only with `evidence = "degraded"`; it is never presented as exact metadata.
+  - The profile maps into shared `ModelArch` geometry (layers, heads, KV heads, head dimensions, full/local/linear groups, MoE, recurrent state, and companions) without importing llama.cpp runtime vocabulary.
+  - Exact per-layer byte size is computed from real on-disk/HF-listed size:
+    `bytes_per_layer = model_size_bytes / n_layers`.
+- **HuggingFace pre-download**:
+  - For Rapid-MLX, the VRAM estimator fetches `config.json` at the selected revision without range-fetching and preserves that revision in the profile evidence.
+  - Weight size is resolved from the HF tree API (`crate::hf::resolve_mlx_repo_size_bytes`).
+  - If `config.json` fetch fails or is missing required fields, the model is still estimable
+    via the name heuristic with `evidence = "degraded"`.
+
+---
+
+## MLX context-fit cards
+
+Rapid-MLX's wizard hardware step does not offer KV-quantization-based context-fit
+cards the way llama.cpp does. That axis is inert for Rapid-MLX: the runtime's
+reasoning profile pins active KV to int8 on every launch regardless of the requested
+dtype, and TurboQuant/PFlash are withheld pending qualification — see
+[rapid-mlx-runtime.md](rapid-mlx-runtime.md#reasoning-profile-and-kv-cache-dtype) for
+why. A KV-quant card set would therefore be presenting three views of one fixed value.
+
+With KV dtype, TurboQuant, and PFlash all fixed, the levers that actually move
+Rapid-MLX unified-memory occupancy are context length (the dominant term at fixed int8
+KV), concurrency (`max_num_seqs` × `max_concurrent_requests`, which multiply active
+KV), the retained prompt-cache budget (`retained_cache_mib` + `hybrid_cache_entries`),
+and `gpu_memory_utilization` as the ceiling the others are measured against. The wizard
+instead offers three *workload-shaped* cards that vary concurrency and retained-cache
+budget at the user's chosen context, each requesting `/api/vram-estimate` with the same
+`buildEstimateBody()` plus a different MLX policy spread:
+
+| Card | `max_num_seqs` | Retained cache | Framing |
+|---|---|---|---|
+| **Single interactive user** *(default/recommended)* | 1 | measured coding-agent recommendation (8 GiB / 16 entries) | One conversation at a time, warm prompts reused. |
+| **Long single context** | 1 | 0 | Maximum room for one very long conversation; nothing retained between prompts. |
+| **Shared / multi-client** | 4 | 8 GiB | Several clients at once; each admitted request reserves its own active KV. |
+
+Alongside the cards, the fixed facts are rendered once, not per-card, since they do
+not vary by card: `KV: int8 (pinned by reasoning profile)`,
+`TurboQuant: off (awaiting receipt)`, `PFlash: off`.
+
+---
+
 ## Known Limitations and Calibration Notes
 
 | Issue | Scope | Status |
@@ -773,6 +937,7 @@ The GGUF arch string `"qwen35"` is mapped via `gguf_arch_to_heuristic_name()` (l
 | `expert_fraction` default 0.65 is a rough average | All MoE models | Overridden per-family; calibrate when architecture is public |
 | `discrete_overhead_base_bytes` uses 256 MB fallback when n_embd unknown | Any model without GGUF `embedding_length` | Conservative; may over-reserve vs actual CUDA usage |
 | Name heuristics are heuristic-only fallback | All pre-download / no-GGUF estimates | Do not rely on them when a GGUF file is present — GGUF is authoritative |
+| Rapid-MLX overhead is approximate | All Rapid-MLX estimates | 25% safety margin + 8% KV fraction; recalibration via process footprint is an open task |
 
 ---
 
@@ -826,6 +991,120 @@ Findings: Metal overhead = a per-layer base (4.3 MiB/layer dense, 8.8 MiB/layer 
 
 ---
 
+## Recalibrating the MLX overhead (Apple Silicon, Rapid-MLX)
+
+The Rapid-MLX overhead constants (`mlx_overhead_base_bytes`, `MLX_KV_OVERHEAD_FRACTION`) in
+`estimate.rs` are currently formula-based, not measurement-grounded. The current formula:
+
+- Uses Metal's measured per-layer base (4.3/8.8 MiB) × 1.25 (25% safety margin).
+- Uses 8% of KV bytes for context-scaling buffers vs. Metal's 6.5%.
+
+To recalibrate against real Rapid-MLX process-footprint measurements:
+
+- Use the same M5 Max physical-footprint methodology as "Recalibrating the Metal overhead":
+  - Start the Rapid-MLX server with a known model and context.
+  - Read `footprint <pid>` / `vmmap --summary <pid>` → "Physical footprint".
+  - With mmap-style file-backed weights (where applicable), the footprint minus KV
+    approximates the overhead component.
+- Compare against the current `mlx_overhead_bytes` values.
+- If measurements consistently show a lower fraction, reduce the 25% margin and 8% KV
+  fraction accordingly; once calibrated, switch `EstimateEvidence` from `Approximate`
+  to `Measured` for Rapid-MLX (and update this file).
+
+Until that work is done, Rapid-MLX overhead must continue to be reported as `Approximate`.
+
+### Current active-KV qualification
+
+For Rapid-MLX v0.11.0, active KV is modeled as **BF16** even when
+`--kv-cache-dtype int4` or `int8` was requested. This records the observed
+behavior in upstream issue #1197 rather than claiming memory savings the
+runtime did not realize. The request is still returned beside the effective
+value. Revisit this only after the upstream fix is released and a fresh,
+pinned receipt verifies the effective active-KV representation.
+
+### Estimator-to-runtime calibration receipt
+
+To recalibrate `mlx_overhead_bytes` against real Rapid-MLX evidence rather than a formula, a
+separate **calibration receipt** binds one canonical `/api/vram-estimate` prediction to one
+fresh-server-per-cell `model_runtime_benchmark_receipt` cell (see
+`docs/reference/model-runtime-benchmarking.md`) and records the residual between them. This is
+a distinct artifact from both: it never re-implements estimation or benchmarking, it only pairs
+their outputs.
+
+Create it after capturing the estimator request and response bodies, without
+their HTTP headers:
+
+```bash
+node scripts/write-estimator-calibration-receipt.mjs \
+  --runtime-receipt tests/fixtures/calibration/rapid-mlx-receipts/<suite>/<cell>.json \
+  --cell <cell-id> --attempt cold \
+  --estimator-request /private/tmp/estimator-request.json \
+  --estimator-response /private/tmp/estimator-response.json \
+  --dataset-role tuning \
+  --out tests/fixtures/calibration/rapid-mlx-receipts/<suite>/<cell>.calibration.json
+```
+
+```json
+{
+  "schema_version": 1,
+  "kind": "estimator_calibration_receipt",
+  "captured_at": "2026-07-24T12:00:00.000Z",
+  "estimator": {
+    "endpoint": "/api/vram-estimate",
+    "request": { "model_path": "...", "backend": "rapid_mlx", "n_ctx": 8000, "kv_cache_dtype": "int8" },
+    "response": { "total_bytes": 0, "evidence": "approximate", "recommendation": "fit" }
+  },
+  "runtime_receipt": {
+    "path": "tests/fixtures/calibration/rapid-mlx-receipts/.../01-01-context-8000-int8.json",
+    "cell_id": "context-8000-int8",
+    "attempt_phase": "cold",
+    "fresh_server_per_cell": true,
+    "sha256": "receipt file digest, for tamper-evidence"
+  },
+  "model": {
+    "hf_repo_id": "nightmedia/Qwen3.5-9B-DS9-USS-Defiant-1M-q8-hi-mlx",
+    "revision": "...",
+    "config_sha256": "..."
+  },
+  "measurement": {
+    "metric_name": "rapid_mlx_metal_peak_memory_bytes",
+    "actual_peak_bytes": 0
+  },
+  "residual": {
+    "predicted_total_bytes": 0,
+    "actual_peak_bytes": 0,
+    "residual_bytes": 0,
+    "residual_pct": 0.0,
+    "predicted_gib": 0.0,
+    "actual_gib": 0.0
+  },
+  "dataset_role": "tuning"
+}
+```
+
+Field notes:
+
+- `estimator.request` / `estimator.response` are the exact JSON body sent to and returned from
+  `/api/vram-estimate`. **The `Authorization` header and API token are never persisted** —
+  the calibration writer strips them before serialization; a receipt containing a token must be
+  treated as a bug, not a formatting choice.
+- `runtime_receipt.fresh_server_per_cell` must be `true`, and `measurement.metric_name` must be
+  a peak (not lifetime-high-water-mark) metric — otherwise the residual is diagnostic context
+  only, not calibration evidence (same rule as the benchmarking doc's "Required comparison
+  discipline").
+- `residual.residual_bytes = actual_peak_bytes − predicted_total_bytes`; positive means the
+  estimator under-predicted (unsafe direction), negative means it over-predicted (safe
+  direction).
+- `dataset_role` is `"tuning"` for rows used to fit `mlx_overhead_base_bytes` /
+  `MLX_KV_OVERHEAD_FRACTION`, and `"holdout"` for rows reserved to validate the fit. At least
+  one context/dtype row must be `"holdout"` before a calibration can be called qualified — a fit
+  validated only on its own training rows is not evidence of generalization.
+- Only after holdout rows confirm the tuned formula does `EstimateEvidence` change from
+  `Approximate` to `Measured` for Rapid-MLX, per the "Recalibrating the MLX overhead" section
+  above.
+
+---
+
 ## Adding a New Model Family
 
 When a new architecture is released:
@@ -846,11 +1125,12 @@ When a new architecture is released:
 
 | File | Purpose |
 |------|---------|
-| `src/llama/vram_estimator/estimate.rs` | Estimation logic (`full_estimate`, `max_context`, `kv_cache_bytes`, overhead functions) |
+| `src/llama/vram_estimator/estimate.rs` | Estimation logic (`full_estimate`, `max_context`, `kv_cache_bytes`, overhead functions; both backends) |
 | `src/llama/vram_estimator/arch_heuristics.rs` | `ModelArch` struct + per-family heuristics + `gguf_arch_to_heuristic_name()` |
 | `src/llama/vram_estimator/quant_table.rs` | BPW and KV BPE table |
 | `src/llama/vram_estimator/tests.rs` | Unit tests including calibration assertions |
 | `src/llama/spawn_wizard.rs` | `ModelMetadata::to_arch()` (GGUF → ModelArch); auto_size orchestration wrapper |
-| `src/llama/gguf_meta.rs` | GGUF metadata reader; `GgufMetadata::to_model_metadata()` (feeds ground-truth arch values) |
-| `src/web/api/vram.rs` | `/api/vram/*` route handlers; `mmproj_path` → `mmproj_bytes` stat; `build_arch_from_body()` |
+| `src/llama/gguf_meta.rs` | GGUF metadata reader (llama.cpp); `GgufMetadata::to_model_metadata()` |
+| `src/inference/rapid_mlx/mlx_meta.rs` | MLX metadata reader (Rapid-MLX); `MlxMetadata::to_arch()`; safetensors index; evidence |
+| `src/web/api/vram.rs` | `/api/vram/*` route handlers; dual-backend routing; `build_arch_from_body()` |
 | `docs/reference/setup-wizard.md` | Wizard UI and API reference; links here for estimation details |

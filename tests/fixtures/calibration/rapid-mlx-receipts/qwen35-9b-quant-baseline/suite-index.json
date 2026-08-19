@@ -1,0 +1,108 @@
+{
+  "model": "nightmedia/Qwen3.5-9B-DS9-USS-Defiant-1M-q8-hi-mlx",
+  "suite": "quant-baseline",
+  "receipts": [
+    {
+      "label": "00-quant-512-none-off-32000-int8",
+      "receipt": "00-00-quant-512-none-off-32000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "01-quant-512-none-off-65536-int8",
+      "receipt": "01-01-quant-512-none-off-65536-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "02-quant-512-none-off-131072-int8",
+      "receipt": "02-02-quant-512-none-off-131072-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "03-quant-512-none-off-160000-int8",
+      "receipt": "03-03-quant-512-none-off-160000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "04-quant-512-none-off-200000-int8",
+      "receipt": "04-04-quant-512-none-off-200000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "05-quant-512-none-auto-32000-int8",
+      "receipt": "05-05-quant-512-none-auto-32000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "06-quant-512-none-auto-65536-int8",
+      "receipt": "06-06-quant-512-none-auto-65536-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "07-quant-512-none-auto-131072-int8",
+      "receipt": "07-07-quant-512-none-auto-131072-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "08-quant-512-none-auto-160000-int8",
+      "receipt": "08-08-quant-512-none-auto-160000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "09-quant-512-none-auto-200000-int8",
+      "receipt": "09-09-quant-512-none-auto-200000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "10-quant-512-k8v4-off-32000-int8",
+      "receipt": "10-10-quant-512-k8v4-off-32000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "11-quant-512-k8v4-off-65536-int8",
+      "receipt": "11-11-quant-512-k8v4-off-65536-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "12-quant-512-k8v4-off-131072-int8",
+      "receipt": "12-12-quant-512-k8v4-off-131072-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "13-quant-512-k8v4-off-160000-int8",
+      "receipt": "13-13-quant-512-k8v4-off-160000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "14-quant-512-k8v4-off-200000-int8",
+      "receipt": "14-14-quant-512-k8v4-off-200000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "15-quant-512-k8v4-auto-32000-int8",
+      "receipt": "15-15-quant-512-k8v4-auto-32000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "16-quant-512-k8v4-auto-65536-int8",
+      "receipt": "16-16-quant-512-k8v4-auto-65536-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "17-quant-512-k8v4-auto-131072-int8",
+      "receipt": "17-17-quant-512-k8v4-auto-131072-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "18-quant-512-k8v4-auto-160000-int8",
+      "receipt": "18-18-quant-512-k8v4-auto-160000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "19-quant-512-k8v4-auto-200000-int8",
+      "receipt": "19-19-quant-512-k8v4-auto-200000-int8.json",
+      "manifest": null
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

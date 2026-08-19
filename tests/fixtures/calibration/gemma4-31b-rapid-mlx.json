@@ -1,0 +1,112 @@
+{
+  "description": "Calibration fixture for Gemma4-31B dense sliding-window attention on Rapid-MLX.",
+  "model": {
+    "name": "Gemma4-31B",
+    "hf_repo_id": "mlx-community/gemma-4-31b-it-4bit",
+    "type": "dense_sliding_window",
+    "params_billions": 31,
+    "layers": 50,
+    "global_attn_layers": 20,
+    "local_attn_window": 1024,
+    "global_head_dim": 512,
+    "head_dim": 256,
+    "quant": "q4_k_m",
+    "estimated_size_bytes": 16_480_000_000
+  },
+  "backend": "rapid_mlx",
+  "workload_scenario": "coding_agent",
+  "test_cases": [
+    {
+      "id": "gemma4-31b-rapid-int4-16k",
+      "kv_cache_dtype": "int4",
+      "turboquant_mode": "none",
+      "context_tokens": 16384,
+      "retained_cache_tokens": 8192,
+      "parallel_slots": 1,
+      "reasoning_mode": false,
+      "expected_breakdown": {
+        "weights_bytes": 16_480_000_000,
+        "active_kv_bytes": 1_800_000_000,
+        "retained_kv_bytes": 900_000_000,
+        "linear_attn_state_bytes": 0,
+        "mtp_bytes": 0,
+        "overhead_bytes": 500_000_000,
+        "total_bytes": 19_680_000_000
+      },
+      "measurement_command": "cd ~/.rapid-mlx && RAPID_MLX_METRICS=1 python -m vllm_mlx.serve --model mlx-community/gemma-4-31b-it-4bit --kv-cache-dtype int4 --max-model-len 16384 --host 127.0.0.1 --port 8000 2>&1 | tee run.log; lsof -n -P -p $(pgrep -f gemma-4-31b) | grep -i memory",
+      "hardware": "Apple M5 Max, 128 GB unified memory, macOS 26.0",
+      "error_bounds": {
+        "weights_bytes": "+/- 0%",
+        "active_kv_bytes": "+/- 18%",
+        "retained_kv_bytes": "+/- 22%",
+        "total_bytes": "+/- 15%",
+        "notes": "Sliding-window: global layers (20) store full context with global_head_dim=512; local layers (30) use 1024-token window with head_dim=256. Higher per-layer overhead due to per-layer-input embeddings."
+      }
+    },
+    {
+      "id": "gemma4-31b-rapid-int8-16k",
+      "kv_cache_dtype": "int8",
+      "turboquant_mode": "none",
+      "context_tokens": 16384,
+      "retained_cache_tokens": 8192,
+      "parallel_slots": 1,
+      "reasoning_mode": false,
+      "expected_breakdown": {
+        "weights_bytes": 16_480_000_000,
+        "active_kv_bytes": 3_600_000_000,
+        "retained_kv_bytes": 1_800_000_000,
+        "linear_attn_state_bytes": 0,
+        "mtp_bytes": 0,
+        "overhead_bytes": 750_000_000,
+        "total_bytes": 22_480_000_000
+      },
+      "measurement_command": "cd ~/.rapid-mlx && RAPID_MLX_METRICS=1 python -m vllm_mlx.serve --model mlx-community/gemma-4-31b-it-4bit --kv-cache-dtype int8 --max-model-len 16384 --host 127.0.0.1 --port 8000 2>&1 | tee run.log; lsof -n -P -p $(pgrep -f gemma-4-31b) | grep -i memory",
+      "hardware": "Apple M5 Max, 128 GB unified memory, macOS 26.0",
+      "error_bounds": {
+        "weights_bytes": "+/- 0%",
+        "active_kv_bytes": "+/- 18%",
+        "retained_kv_bytes": "+/- 22%",
+        "total_bytes": "+/- 15%",
+        "notes": "int8 KV doubles cache size. Global layers use wider heads (512) so KV growth is asymmetric vs local layers."
+      }
+    },
+    {
+      "id": "gemma4-31b-rapid-int4-128k",
+      "kv_cache_dtype": "int4",
+      "turboquant_mode": "none",
+      "context_tokens": 131072,
+      "retained_cache_tokens": 32768,
+      "parallel_slots": 1,
+      "reasoning_mode": false,
+      "expected_breakdown": {
+        "weights_bytes": 16_480_000_000,
+        "active_kv_bytes": 12_000_000_000,
+        "retained_kv_bytes": 3_000_000_000,
+        "linear_attn_state_bytes": 0,
+        "mtp_bytes": 0,
+        "overhead_bytes": 1_800_000_000,
+        "total_bytes": 33_280_000_000
+      },
+      "measurement_command": "cd ~/.rapid-mlx && RAPID_MLX_METRICS=1 python -m vllm_mlx.serve --model mlx-community/gemma-4-31b-it-4bit --kv-cache-dtype int4 --max-model-len 131072 --host 127.0.0.1 --port 8000 2>&1 | tee run.log; lsof -n -P -p $(pgrep -f gemma-4-31b) | grep -i memory",
+      "hardware": "Apple M5 Max, 128 GB unified memory, macOS 26.0",
+      "error_bounds": {
+        "weights_bytes": "+/- 0%",
+        "active_kv_bytes": "+/- 15%",
+        "retained_kv_bytes": "+/- 18%",
+        "total_bytes": "+/- 12%",
+        "notes": "At 128K, global layers dominate KV (full context). Local layers bounded by 1024-token window. This is the key calibration point for Gemma4 scaling. CRITICAL: never set local_attn_window on DeltaNet — Gemma4 uses sliding-window, not hybrid attention."
+      }
+    }
+  ],
+  "cross_surface_equality_check": {
+    "description": "For each test_case, wizard/preset/setup-view/models surfaces must show identical MemoryBreakdown when called with matching parameters.",
+    "verification": "Run /api/vram-estimate with identical body for each scenario; diff active_kv_bytes, retained_kv_bytes, total_bytes across all surfaces."
+  },
+  "phase_5a_hard_gate_notes": {
+    "no_llama_kv_vocabulary": "Rapid-MLX estimates use bf16/int8/int4 only. No q8_0/q4_0/ctk/ctv strings.",
+    "requested_vs_effective": "execution_policy.requested_policy.kv_cache_dtype may differ from effective_kv_dtype (reasoning_mode overrides).",
+    "active_retained_distinct": "active_kv_bytes and retained_kv_bytes are separate components, never merged.",
+    "turboquant_on_retained_only": "TurboQuant savings apply ONLY to retained_kv_bytes when qualified.",
+    "unknown_fineturns_not_qualified": "Finetunes of Gemma4 without explicit qualification → TurboQuant Disabled."
+  }
+}
