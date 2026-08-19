@@ -55,7 +55,7 @@ capture, offline/no-external-request check, and `0.9`/`1.0`/`1.2` font-scale
 matrix pass on the same commit.
 
 Evidence and pair classifications belong in
-`docs/plans/evidence/20260811-local-llm-foundry/phase-13/windows-macos-visual-parity-ledger.md`.
+`docs/archive/rebrand/evidence/20260811-local-llm-foundry/phase-13/windows-macos-visual-parity-ledger.md`.
 
 ## Why this doc exists
 
