@@ -131,7 +131,7 @@ An integrated setup wizard for discovering, downloading, configuring, and launch
 | AMD | `rocm-smi` | Auto-detected |
 | NVIDIA | `nvidia-smi` | Auto-detected |
 | Apple Silicon | `mactop` | Auto-detected |
-| Apple Silicon (MLX) | Rapid-MLX runtime | Managed by Llama Monitor |
+| Apple Silicon (MLX) | Foundry-managed MLX runtimes (Rapid-MLX; MTPLX planned) | Apple Silicon/MLX capability probe; runtime availability shown separately |
 | Windows (CPU temp) | `sensor_bridge.exe` | Bundled |
 
 ## Installation
