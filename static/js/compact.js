@@ -1,5 +1,9 @@
 /* eslint-disable no-unsanitized/property */
 /* Reason: all content is server metrics; no user input flows into this page. */
+import { applyProductIdentity, LEGACY_STORAGE_KEYS } from './core/identity.js';
+
+applyProductIdentity();
+
 // ── Theme + palette ──────────────────────────────────────────────────────────
 // The popover is served from the same origin as the main app, so it shares
 // localStorage. Mirror the main UI's theme/palette onto <html> so the tray uses
@@ -10,7 +14,7 @@ function normalizePaletteId(palette) {
 
 function readSavedPreferences() {
     try {
-        return JSON.parse(localStorage.getItem('llama-monitor-preferences') || '{}') || {};
+        return JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEYS.preferences) || '{}') || {};
     } catch (_) {
         return {};
     }
@@ -36,7 +40,7 @@ applyAppearancePreferences();
 // Re-apply if the user changes theme/palette in the main window while the
 // popover is open, or if the OS appearance changes under "auto".
 window.addEventListener('storage', (e) => {
-    if (e.key === 'llama-monitor-preferences') applyAppearancePreferences();
+    if (e.key === LEGACY_STORAGE_KEYS.preferences) applyAppearancePreferences();
 });
 window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', applyAppearancePreferences);
 
@@ -46,6 +50,20 @@ document.getElementById('compact-close').addEventListener('click', () => {
         return;
     }
     window.close();
+});
+
+// Borderless Windows popovers do not have a native title bar. Let the
+// branded header drag the window while keeping the close control clickable.
+const compactHeader = document.querySelector('.header');
+compactHeader?.addEventListener('pointerdown', (event) => {
+    if (event.target.closest('#compact-close')) return;
+    event.preventDefault();
+    if (window.ipc?.postMessage) {
+        // Native drag owns the pointer sequence on Windows. Do not also send
+        // synthetic move deltas: that races the OS drag loop and can leave a
+        // second drag effectively attached to later mouse movement.
+        window.ipc.postMessage(JSON.stringify({ action: 'drag' }));
+    }
 });
 
 const PORT = window.__COMPACT_PORT__;

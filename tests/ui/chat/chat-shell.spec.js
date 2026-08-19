@@ -16,6 +16,11 @@ test.describe('chat UI shell', () => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await page.getByRole('button', { name: /chat/i }).click();
     await expect(page.locator('#page-chat')).toBeVisible();
   });
@@ -61,6 +66,11 @@ test.describe('chat tabs', () => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await page.getByRole('button', { name: /chat/i }).click();
     await expect(page.locator('#page-chat')).toBeVisible();
   });
@@ -111,17 +121,18 @@ test('Ctrl+Shift+ArrowRight cycles to next tab', async ({ page }) => {
   });
 
   test('message search opens flyout and paginates results', async ({ page }) => {
-    await page.evaluate(async () => {
+    const searchToken = await page.evaluate(async () => {
       const { chat } = await import('/js/core/app-state.js');
       const { newChatTab, persistChatTabs } = await import('/js/features/chat-state.js');
       const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
+      const token = `ledger${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
 
       chat.tabs = [];
       for (let i = 0; i < 12; i += 1) {
         const tab = newChatTab(`Search Seed ${i + 1}`);
         tab.messages = Array.from({ length: 3 }, (_, idx) => ({
           role: idx % 2 === 0 ? 'user' : 'assistant',
-          content: `ledger trail ${i}-${idx} in the rain`,
+          content: `${token} trail ${i}-${idx} in the rain`,
           timestamp_ms: Date.now() - ((i * 3) + idx) * 1000,
         }));
         tab.updated_at = Date.now();
@@ -174,11 +185,12 @@ test('Ctrl+Shift+ArrowRight cycles to next tab', async ({ page }) => {
         });
       }
       await persistChatTabs();
+      return token;
     });
 
     await page.locator('#csp-message-search-btn').click();
     await expect(page.locator('.csp-search-panel')).toBeVisible();
-    await page.locator('#csp-search-input').fill('ledger');
+    await page.locator('#csp-search-input').fill(searchToken);
     await expect(page.locator('.csp-search-result')).toHaveCount(20);
     await expect(page.locator('.csp-search-count')).toContainText('36 matches');
     await page.locator('.csp-search-load-more').click();
@@ -191,6 +203,11 @@ test.describe('pin and favorite tabs', () => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await page.getByRole('button', { name: /chat/i }).click();
     await expect(page.locator('#page-chat')).toBeVisible();
 
@@ -322,6 +339,11 @@ test.describe('chat tab normalization', () => {
     await page.waitForSelector('html.modules-ready');
     await dismissAuthShell(page);
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await page.getByRole('button', { name: /chat/i }).click();
   });
 
@@ -364,6 +386,11 @@ test.describe('chat history pagination', () => {
     await page.waitForSelector('html.modules-ready');
     await dismissAuthShell(page);
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await page.getByRole('button', { name: /chat/i }).click();
     await expect(page.locator('#page-chat.active')).toBeVisible({ timeout: 5000 });
     // Wait for bootstrap's initChatTabs to finish before the test seeds state
@@ -458,6 +485,11 @@ test.describe('chat message export', () => {
     await page.waitForSelector('html.modules-ready');
     await dismissAuthShell(page);
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await page.getByRole('button', { name: /chat/i }).click();
   });
 
@@ -502,6 +534,11 @@ test.describe('message edit and regenerate', () => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await page.getByRole('button', { name: /chat/i }).click();
     // Ensure chat view is visible (active class is not always reliable)
     await expect(page.locator('#page-chat')).toBeVisible({ timeout: 5000 });

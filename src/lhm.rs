@@ -7,7 +7,9 @@ use serde::Deserialize;
 #[cfg(target_os = "windows")]
 pub const SENSOR_BRIDGE_LOCAL_PORT: u16 = 7780;
 #[cfg(target_os = "windows")]
-const SENSOR_BRIDGE_TASK_NAME: &str = "LlamaMonitorSensorBridge";
+const SENSOR_BRIDGE_TASK_NAME: &str = crate::identity::CANONICAL_SENSOR_TASK_NAME;
+#[cfg(target_os = "windows")]
+const LEGACY_SENSOR_BRIDGE_TASK_NAME: &str = crate::identity::LEGACY_SENSOR_TASK_NAME;
 
 /// Sensor reading from sensor_bridge output
 #[cfg(target_os = "windows")]
@@ -56,12 +58,16 @@ pub fn is_lhm_available() -> bool {
 /// Check whether the sensor_bridge scheduled task exists in the task scheduler.
 #[cfg(target_os = "windows")]
 pub fn is_local_sensor_bridge_service_installed() -> bool {
-    let mut cmd = std::process::Command::new("schtasks");
-    crate::platform::no_window(&mut cmd);
-    cmd.args(["/Query", "/TN", SENSOR_BRIDGE_TASK_NAME])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    [SENSOR_BRIDGE_TASK_NAME, LEGACY_SENSOR_BRIDGE_TASK_NAME]
+        .iter()
+        .any(|task| {
+            let mut cmd = std::process::Command::new("schtasks");
+            crate::platform::no_window(&mut cmd);
+            cmd.args(["/Query", "/TN", task])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        })
 }
 
 /// Probe 127.0.0.1:7780 with a short timeout to check if sensor_bridge server is running.
@@ -184,7 +190,7 @@ pub fn is_lhm_running() -> bool {
 #[cfg(target_os = "windows")]
 pub fn install_local_sensor_bridge() -> Result<(), String> {
     let bridge_path = get_sensor_bridge_path()
-        .ok_or_else(|| "sensor_bridge.exe not found next to llama-monitor.exe".to_string())?;
+        .ok_or_else(|| "sensor_bridge.exe not found next to Local LLM Foundry".to_string())?;
 
     // Single-quote-escape the path for PowerShell string literal
     let bridge_path_str = bridge_path.to_string_lossy().replace('\'', "''");
@@ -206,6 +212,7 @@ $action = New-ScheduledTaskAction -Execute $bridge -Argument '--server'
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
 try {{ Unregister-ScheduledTask -TaskName '{SENSOR_BRIDGE_TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue }} catch {{}}
+try {{ Unregister-ScheduledTask -TaskName '{LEGACY_SENSOR_BRIDGE_TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue }} catch {{}}
 Register-ScheduledTask -TaskName '{SENSOR_BRIDGE_TASK_NAME}' -Action $action -Trigger $trigger -RunLevel Highest -User 'SYSTEM' -Settings $settings -Force | Out-Null
 Start-ScheduledTask -TaskName '{SENSOR_BRIDGE_TASK_NAME}'
 "#
@@ -231,7 +238,7 @@ Start-ScheduledTask -TaskName '{SENSOR_BRIDGE_TASK_NAME}'
         let uninstall_path = dir.join("uninstall_sensor_bridge.ps1");
         let _ = std::fs::write(
             &uninstall_path,
-            "# Llama Monitor Sensor Bridge Uninstall\r\n\
+            "# Local LLM Foundry Sensor Bridge Uninstall\r\n\
 # Right-click this file and choose \"Run with PowerShell\" to remove the service.\r\n\
 if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] \"Administrator\")) {\r\n\
     Start-Process powershell.exe -Verb RunAs -ArgumentList \"-NoProfile -ExecutionPolicy Bypass -File `\"$PSCommandPath`\"\"\r\n\
@@ -239,6 +246,8 @@ if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 }\r\n\
 Stop-ScheduledTask -TaskName 'LlamaMonitorSensorBridge' -ErrorAction SilentlyContinue\r\n\
 Unregister-ScheduledTask -TaskName 'LlamaMonitorSensorBridge' -Confirm:$false -ErrorAction SilentlyContinue\r\n\
+Stop-ScheduledTask -TaskName 'LocalLLMFoundrySensorBridge' -ErrorAction SilentlyContinue\r\n\
+Unregister-ScheduledTask -TaskName 'LocalLLMFoundrySensorBridge' -Confirm:$false -ErrorAction SilentlyContinue\r\n\
 Write-Host 'Sensor Bridge service removed.'\r\n\
 Read-Host 'Press Enter to close'\r\n",
         );
@@ -254,6 +263,8 @@ pub fn uninstall_local_sensor_bridge() -> Result<(), String> {
         r#"$ErrorActionPreference = 'SilentlyContinue'
 Stop-ScheduledTask -TaskName '{SENSOR_BRIDGE_TASK_NAME}' -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskName '{SENSOR_BRIDGE_TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue
+Stop-ScheduledTask -TaskName '{LEGACY_SENSOR_BRIDGE_TASK_NAME}' -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName '{LEGACY_SENSOR_BRIDGE_TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue
 "#
     );
 

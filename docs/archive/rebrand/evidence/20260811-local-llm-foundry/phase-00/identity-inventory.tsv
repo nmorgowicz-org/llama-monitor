@@ -1,0 +1,7 @@
+class	match examples	current locations	policy	owner phase
+public-brand	llama-monitor product name, binary, package, repository URLs	Cargo.toml; src/cli.rs; static/index.html; README.md; .github; release scripts	rebrand current surfaces; preserve legacy readers through 2.x	1,7,8,10,11,14
+compatibility-identifier	llama_monitor Rust crate; HKDF info llama-monitor-encryption-key; browser keys; old cookie; old env/path names	src/lib.rs; src/config.rs; static/js/features/**; auth; migration code	freeze unless a public compatibility bridge is explicitly added; never alter encryption identifier casually	2,4,7,8,15
+historical-record	archived plans, historical receipts, old release notes, benchmark evidence	docs/archive/**; docs/plans/**; CHANGELOG.md	label historical; do not rewrite source history as current identity	0,10
+technology	llama.cpp, llama-server, GGUF, MLX, Rapid-MLX, LHM	backend/runtime/model/docs references	retain because these are technologies, not the old product brand	7,8,10
+infrastructure	arc-llama-monitor runner labels, updater parser asset names, task/process names	.github/workflows/**; src/agent.rs; updater/runtime code	dual-read/write during bridge; exact-name validation; retire only at planned 2.1 artifact cutover or 3.0 runtime decision	9,11,15
+user-data-path	legacy config root, model root, certs, tokens, DB, logs, journals, partials	AppConfig and direct consumers listed in path-inventory.md	copy-first, explicit, journaled, resumable; never auto-delete; external model roots never silently moved	2,3,4,5,6

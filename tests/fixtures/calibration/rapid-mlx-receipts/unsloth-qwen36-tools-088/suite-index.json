@@ -1,0 +1,13 @@
+{
+  "model": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
+  "suite": "tools",
+  "receipts": [
+    {
+      "label": "00-tools-sequential-8k",
+      "receipt": "00-00-tools-sequential-8k.json",
+      "manifest": null
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

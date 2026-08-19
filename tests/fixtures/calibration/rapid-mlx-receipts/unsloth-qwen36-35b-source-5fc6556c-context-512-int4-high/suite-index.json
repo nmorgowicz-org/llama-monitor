@@ -1,0 +1,18 @@
+{
+  "model": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
+  "suite": "context",
+  "receipts": [
+    {
+      "label": "00-context-160000-int4",
+      "receipt": "00-00-context-160000-int4.json",
+      "manifest": null
+    },
+    {
+      "label": "01-context-200000-int4",
+      "receipt": "01-01-context-200000-int4.json",
+      "manifest": null
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

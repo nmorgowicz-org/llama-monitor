@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "environment_sha256": "28bbdad1212e7c180cbb31c463638f24b1bd351e128bb4a834722d610dd8f810",
+  "file_count": 1176,
+  "packages": {
+    "certifi": "2026.6.17",
+    "charset-normalizer": "3.4.9",
+    "gguf": "0.19.0",
+    "idna": "3.18",
+    "numpy": "2.5.1",
+    "pyyaml": "6.0.3",
+    "requests": "2.34.2",
+    "safetensors": "0.8.0",
+    "tqdm": "4.68.4",
+    "urllib3": "2.7.0"
+  }
+}

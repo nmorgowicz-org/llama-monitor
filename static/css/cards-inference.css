@@ -2663,3 +2663,238 @@
 [data-theme="light"] .metric-footnote {
   color: var(--color-text-secondary);
 }
+.rapid-telemetry-grid {
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.rapid-telemetry-card {
+    min-height: 150px;
+}
+
+.rapid-metric-list {
+    display: grid;
+    gap: 12px;
+    margin-top: 18px;
+}
+
+.rapid-telemetry-card h3.widget-metric-label {
+    margin: 0;
+    font: inherit;
+}
+
+.rapid-metric {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    color: var(--color-text-secondary);
+}
+
+.rapid-metric strong {
+    color: var(--color-text-primary);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.rapid-progress {
+    display: grid;
+    gap: 10px;
+}
+
+.rapid-progress-label {
+    display: flex;
+    justify-content: space-between;
+    color: var(--color-text-secondary);
+}
+
+.rapid-progress-label strong {
+    color: var(--color-text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.rapid-progress-track {
+    height: 8px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--border-subtle);
+}
+
+.rapid-progress-fill {
+    height: 100%;
+    border-radius: inherit;
+    background: var(--color-accent);
+    transition: width 180ms ease;
+}
+
+.rapid-speed-row {
+    display: grid;
+    gap: 8px;
+}
+
+.rapid-speed-row .speed-header {
+    flex-wrap: wrap;
+    row-gap: 4px;
+}
+
+.rapid-speed-row .speed-label {
+    min-width: 0;
+}
+
+.rapid-speed-row .speed-value-wrap {
+    flex: 1;
+    justify-content: flex-end;
+    min-width: fit-content;
+}
+
+.rapid-speed-row .speed-value {
+    min-width: 0;
+    overflow: visible;
+    text-overflow: clip;
+}
+
+.rapid-sparkline-row,
+.rapid-sparkline-pair {
+    display: grid;
+    gap: 6px;
+    padding-top: 4px;
+}
+
+.rapid-sparkline-pair {
+    padding-top: 8px;
+}
+
+.rapid-sparkline-row > span {
+    color: var(--color-text-secondary);
+    font-size: 0.82em;
+}
+
+.rapid-sparkline-chart {
+    width: 100%;
+}
+
+.rapid-sparkline-chart .metric-sparkline {
+    width: 100%;
+    height: 32px;
+}
+
+.rapid-telemetry-card.is-stale {
+    opacity: 0.72;
+}
+
+.rapid-ring-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-top: 4px;
+}
+
+.rapid-ring-viz {
+    flex: 0 0 auto;
+    width: 48px;
+    height: 48px;
+}
+
+.rapid-ring-row.is-no-data .rapid-ring-viz {
+    border-radius: 50%;
+    border: 2px dashed var(--color-border, rgba(255, 255, 255, 0.14));
+    opacity: 0.6;
+}
+
+.rapid-ring-text {
+    display: grid;
+    gap: 2px;
+}
+
+.rapid-ring-text > span {
+    color: var(--color-text-secondary);
+    font-size: 0.82em;
+}
+
+.rapid-ring-row.is-no-data .rapid-ring-text strong {
+    color: var(--color-text-secondary);
+    font-weight: 500;
+}
+
+.rapid-rail-row {
+    padding-top: 4px;
+}
+
+.rapid-rail {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.rapid-rail-badge {
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.76em;
+    text-transform: capitalize;
+    background: var(--border-subtle);
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+}
+
+.rapid-rail-badge--running,
+.rapid-rail-badge--generating,
+.rapid-rail-badge--active {
+    background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+    color: var(--color-accent);
+}
+
+.rapid-membar-row {
+    display: grid;
+    gap: 6px;
+    padding-top: 4px;
+}
+
+.rapid-membar-label {
+    display: flex;
+    justify-content: space-between;
+    color: var(--color-text-secondary);
+    font-size: 0.82em;
+}
+
+.rapid-membar-label strong {
+    color: var(--color-text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.rapid-membar-track {
+    position: relative;
+    height: 8px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--border-subtle);
+}
+
+.rapid-membar-fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    transition: width 180ms ease, left 180ms ease;
+}
+
+.rapid-membar-fill--active {
+    background: linear-gradient(90deg, var(--color-accent-light), var(--color-accent));
+    box-shadow: 0 0 10px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+
+.rapid-membar-fill--cache {
+    background: color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+
+.rapid-telemetry-loading {
+    grid-column: 1 / -1;
+    padding: 18px 20px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 14px;
+    color: var(--color-text-secondary);
+    background: var(--surface-card-base);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .rapid-telemetry-card,
+    .rapid-progress-fill { transition: none; }
+}

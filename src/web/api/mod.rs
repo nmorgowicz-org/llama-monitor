@@ -2,17 +2,20 @@ use std::sync::Arc;
 
 use warp::Filter;
 
+mod app_home_migration;
 mod auth;
 mod benchmark;
 mod browse;
+mod calibration;
 mod chat;
-mod system_tools;
+pub(crate) mod system_tools;
 #[cfg(test)]
 pub(crate) use chat::legacy_chat_types;
 mod common;
 mod config;
 mod db;
 mod debug;
+mod doctor;
 mod hf;
 mod lhm;
 mod llama_binary;
@@ -20,6 +23,7 @@ mod metrics;
 mod models;
 #[path = "presets.rs"]
 mod preset_routes;
+mod rapid_mlx_runtime;
 mod remote_agent;
 mod self_update;
 mod sensor_bridge;
@@ -29,14 +33,14 @@ mod spawn_wizard;
 mod templates;
 mod tls;
 mod tokens;
-mod upstream;
+pub(crate) mod upstream;
 mod vram;
 
 pub(crate) use common::ApiError;
 pub use common::check_api_token;
 pub(crate) use common::{ApiCtx, ApiReply, ApiRoute, box_reply, record_activity};
 pub(crate) use common::{
-    bearer_matches_api_token, bearer_matches_db_admin_token, extract_bearer,
+    bearer_matches_api_token, bearer_matches_db_admin_token, check_db_admin_token, extract_bearer,
     unauthorized_api_token, unauthorized_db_admin_token, with_app_config,
 };
 pub use tokens::public_tokens_routes;
@@ -60,6 +64,7 @@ pub fn api_routes(
     };
 
     let preset_routes = preset_routes::routes(ctx.clone());
+    let app_home_migration_routes = app_home_migration::routes(ctx.clone());
     let template_routes = templates::routes(ctx.clone());
     let browse_routes = browse::routes(ctx.clone());
     let chat_storage = state.chat_storage.clone();
@@ -68,7 +73,9 @@ pub fn api_routes(
     let sessions_routes = sessions::routes(ctx.clone());
     let lhm_routes = lhm::routes(ctx.clone());
     let remote_agent_routes = remote_agent::routes(ctx.clone());
+    let rapid_mlx_runtime_routes = rapid_mlx_runtime::routes(ctx.clone());
     let sensor_bridge_routes = sensor_bridge::routes(ctx.clone());
+    let doctor_routes = doctor::routes(ctx.clone());
 
     let metrics_routes = metrics::routes(ctx.clone());
     let tls_routes = tls::routes(ctx.clone());
@@ -79,6 +86,7 @@ pub fn api_routes(
     let spawn_wizard_routes = spawn_wizard::routes(ctx.clone());
     let vram_routes = vram::routes(ctx.clone());
     let benchmark_routes = benchmark::routes(ctx.clone());
+    let calibration_routes = calibration::routes(ctx.clone());
     let hf_routes = hf::routes(ctx.clone());
     let system_tools_routes = system_tools::routes(ctx.clone());
 
@@ -88,18 +96,22 @@ pub fn api_routes(
         .or(browse_with_chat)
         .or(db_routes)
         .or(preset_routes)
+        .or(app_home_migration_routes)
         .or(template_routes)
         .or(models_routes)
         .or(config_routes)
         .or(lhm_routes)
         .or(remote_agent_routes)
+        .or(rapid_mlx_runtime_routes)
         .or(sensor_bridge_routes)
+        .or(doctor_routes)
         .or(metrics_routes)
         .or(tls_routes)
         .or(llama_binary_routes)
         .or(spawn_wizard_routes)
         .or(vram_routes)
         .or(benchmark_routes)
+        .or(calibration_routes)
         .or(hf_routes)
         .or(system_tools_routes)
         .or(sleep::routes(ctx.clone()))
@@ -362,7 +374,7 @@ mod tests {
             .get("set-cookie")
             .and_then(|value| value.to_str().ok())
             .expect("set-cookie header");
-        assert!(set_cookie.contains("llama_monitor_session="));
+        assert!(set_cookie.contains("local_llm_foundry_session="));
 
         let status_resp = warp::test::request()
             .method("GET")
@@ -950,6 +962,38 @@ mod tests {
             "/api/hf/quantizers",
             Some("[]")
         ),
+        (
+            route_hf_community_sources_get,
+            "GET",
+            "/api/hf/community-sources",
+            None
+        ),
+        // These two need bodies that actually deserialize: warp rejects a malformed body with
+        // 400 before the handler runs, which would make the 401 assertion below untestable.
+        (
+            route_hf_community_sources_put,
+            "PUT",
+            "/api/hf/community-sources",
+            Some(r#"{"entries":[]}"#)
+        ),
+        (
+            route_hf_community_sources_entry_post,
+            "POST",
+            "/api/hf/community-sources/entry",
+            Some(r#"{"username":"x","displayName":"x","description":"x","role":"curator"}"#)
+        ),
+        (
+            route_hf_community_sources_entry_delete,
+            "DELETE",
+            "/api/hf/community-sources/entry?username=x&role=curator",
+            None
+        ),
+        (
+            route_hf_community_sources_reset,
+            "POST",
+            "/api/hf/community-sources/reset",
+            None
+        ),
         (route_hf_download_dir, "GET", "/api/hf/download-dir", None),
         (route_hf_token_get, "GET", "/api/hf/token", None),
         (route_hf_token_put, "PUT", "/api/hf/token", Some("{}")),
@@ -974,5 +1018,264 @@ mod tests {
             "/api/llama-binary/update",
             Some("{}")
         ),
+        (
+            route_rapid_mlx_runtime_status,
+            "GET",
+            "/api/rapid-mlx/runtime/status",
+            None
+        ),
+        (
+            route_rapid_mlx_runtime_releases,
+            "GET",
+            "/api/rapid-mlx/runtime/releases",
+            None
+        ),
+        (
+            route_rapid_mlx_recommend,
+            "POST",
+            "/api/rapid-mlx/recommend",
+            Some("{}")
+        ),
+        (
+            route_rapid_mlx_runtime_install,
+            "POST",
+            "/api/rapid-mlx/runtime/install",
+            Some("{}")
+        ),
+        (
+            route_rapid_mlx_runtime_upgrade,
+            "POST",
+            "/api/rapid-mlx/runtime/upgrade",
+            Some("{}")
+        ),
+        (
+            route_rapid_mlx_runtime_repair,
+            "POST",
+            "/api/rapid-mlx/runtime/repair",
+            Some("{}")
+        ),
+        (
+            route_rapid_mlx_runtime_rollback,
+            "POST",
+            "/api/rapid-mlx/runtime/rollback",
+            Some("{}")
+        ),
+        (
+            route_rapid_mlx_runtime_job,
+            "GET",
+            "/api/rapid-mlx/runtime/jobs/missing",
+            None
+        ),
+        (
+            route_rapid_mlx_command_preview,
+            "POST",
+            "/api/rapid-mlx/command-preview",
+            Some("{}")
+        ),
+        (
+            route_calibration_preflight,
+            "POST",
+            "/api/calibrations/preflight",
+            Some("{}")
+        ),
+        (
+            route_calibration_start,
+            "POST",
+            "/api/calibrations",
+            Some("{}")
+        ),
+        (
+            route_calibration_match,
+            "POST",
+            "/api/calibrations/match",
+            Some("{}")
+        ),
+        (route_calibration_list, "GET", "/api/calibrations", None),
+        (
+            route_calibration_resume,
+            "POST",
+            "/api/calibrations/missing/resume",
+            Some("{}")
+        ),
+        (
+            route_calibration_get,
+            "GET",
+            "/api/calibrations/missing",
+            None
+        ),
+        (
+            route_calibration_receipt,
+            "GET",
+            "/api/calibrations/missing/receipt",
+            None
+        ),
+        (
+            route_calibration_apply,
+            "POST",
+            "/api/calibrations/missing/apply",
+            Some("{}")
+        ),
+        (
+            route_calibration_rollback,
+            "POST",
+            "/api/calibrations/missing/rollback",
+            Some("{}")
+        ),
+        (
+            route_calibration_cancel,
+            "POST",
+            "/api/calibrations/missing/cancel",
+            None
+        ),
+        (
+            route_calibration_forget,
+            "POST",
+            "/api/calibrations/missing/forget",
+            Some("{}")
+        ),
     ];
+
+    #[tokio::test]
+    async fn rapid_mlx_runtime_mutations_require_db_admin_token() {
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/rapid-mlx/runtime/repair")
+            .header("Content-Type", "application/json")
+            .header("Authorization", "Bearer test-token")
+            .body(r#"{"confirm":"REPAIR_RAPID_MLX_RUNTIME"}"#)
+            .reply(&make_all_routes())
+            .await;
+        assert_eq!(response.status(), 401);
+        assert!(String::from_utf8_lossy(response.body()).contains("db-admin-token required"));
+    }
+
+    #[tokio::test]
+    async fn rapid_mlx_runtime_rejects_inexact_confirmation() {
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/rapid-mlx/runtime/rollback")
+            .header("Content-Type", "application/json")
+            .header("Authorization", "Bearer db-admin-token")
+            .body(r#"{"confirm":"rollback"}"#)
+            .reply(&make_all_routes())
+            .await;
+        assert_eq!(response.status(), 400);
+        assert!(String::from_utf8_lossy(response.body()).contains("ROLLBACK_RAPID_MLX_RUNTIME"));
+    }
+
+    #[tokio::test]
+    async fn rapid_mlx_runtime_rejects_malformed_and_unknown_json() {
+        for body in [
+            r#"{"confirm": "REPAIR_RAPID_MLX_RUNTIME""#,
+            r#"{"confirm":"REPAIR_RAPID_MLX_RUNTIME","extra":true}"#,
+        ] {
+            let routes = make_all_routes().recover(super::super::handle_rejection);
+            let response = warp::test::request()
+                .method("POST")
+                .path("/api/rapid-mlx/runtime/repair")
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer db-admin-token")
+                .body(body)
+                .reply(&routes)
+                .await;
+            assert_eq!(
+                response.status(),
+                400,
+                "unexpected response: {}",
+                String::from_utf8_lossy(response.body())
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn rapid_mlx_runtime_job_reads_accept_api_token() {
+        let response = warp::test::request()
+            .method("GET")
+            .path("/api/rapid-mlx/runtime/jobs/missing")
+            .header("Authorization", "Bearer test-token")
+            .reply(&make_all_routes())
+            .await;
+        assert_eq!(response.status(), 404);
+        assert!(String::from_utf8_lossy(response.body()).contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn app_home_migration_status_requires_api_token() {
+        let response = warp::test::request()
+            .method("GET")
+            .path("/api/app-home-migration/status")
+            .reply(&make_all_routes())
+            .await;
+        assert_eq!(response.status(), 401);
+    }
+
+    #[tokio::test]
+    async fn app_home_migration_status_accepts_api_token() {
+        let response = warp::test::request()
+            .method("GET")
+            .path("/api/app-home-migration/status")
+            .header("Authorization", "Bearer test-token")
+            .reply(&make_all_routes())
+            .await;
+        assert_eq!(response.status(), 200);
+        assert!(String::from_utf8_lossy(response.body()).contains("migration_required"));
+    }
+
+    #[tokio::test]
+    async fn app_home_migration_preview_requires_api_token() {
+        let response = warp::test::request()
+            .method("GET")
+            .path("/api/app-home-migration/preview")
+            .reply(&make_all_routes())
+            .await;
+        assert_eq!(response.status(), 401);
+    }
+
+    #[tokio::test]
+    async fn app_home_migration_queue_requires_db_admin_token() {
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/app-home-migration/queue")
+            .header("Content-Type", "application/json")
+            .header("Authorization", "Bearer test-token")
+            .body(r#"{"plan_id":"test","confirmation":"MIGRATE TO LOCAL LLM FOUNDRY"}"#)
+            .reply(&make_all_routes())
+            .await;
+        assert_eq!(response.status(), 401);
+    }
+
+    #[tokio::test]
+    async fn model_root_relocation_status_requires_api_token() {
+        let response = warp::test::request()
+            .method("GET")
+            .path("/api/models/root-relocation/status")
+            .reply(&make_all_routes())
+            .await;
+        assert_eq!(response.status(), 401);
+    }
+
+    #[tokio::test]
+    async fn model_root_relocation_preview_requires_api_token() {
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/models/root-relocation/preview")
+            .header("Content-Type", "application/json")
+            .body(r#"{"choice":"keep_legacy"}"#)
+            .reply(&make_all_routes())
+            .await;
+        assert_eq!(response.status(), 401);
+    }
+
+    #[tokio::test]
+    async fn model_root_relocation_execute_requires_db_admin_token() {
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/models/root-relocation/execute")
+            .header("Content-Type", "application/json")
+            .header("Authorization", "Bearer test-token")
+            .body(r#"{"choice":"keep_legacy","plan_id":"0000000000000000000000000000000000000000000000000000000000000000","confirmation":"KEEP_LEGACY_MODEL_ROOT"}"#)
+            .reply(&make_all_routes())
+            .await;
+        assert_eq!(response.status(), 401);
+    }
 }

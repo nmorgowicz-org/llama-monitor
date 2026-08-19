@@ -1,4 +1,9 @@
-# Remote Agent
+# Local LLM Foundry Remote Agent
+
+Foundry 2.0 keeps the `llama-monitor` agent command, legacy token paths, and
+existing protocol fields compatible through 2.x. New installs use the canonical
+root and executable; detection preserves an existing custom or legacy install
+path until the user explicitly migrates it.
 
 The remote agent adds host-level telemetry to remote llama.cpp endpoints. Without it, Llama Monitor can still attach to a remote server and read performance metrics, but GPU, CPU, RAM, and host-health data remain unavailable.
 
@@ -14,7 +19,7 @@ When a remote agent is installed and reachable, the dashboard can show:
 
 This is what upgrades a remote attach session from **Basic** to **Full telemetry**.
 
-![GPU & System telemetry from a remote agent](../screenshots/gpu-metrics.gif)
+![GPU & System telemetry from a remote agent](../screenshots/neutral--gpu-metrics.gif)
 
 ## Agent states and indicators
 
@@ -159,6 +164,17 @@ Endpoints:
   - Returns live GPU metrics by cluster.
 - **GET /metrics**
   - Combined endpoint returning both system and GPU metrics in a single payload.
+
+### Idle polling behavior
+
+The installed agent keeps its GPU and system metric workers idle until an
+authenticated master request is received. Authenticated `/info`, `/agent/info`,
+and `/metrics*` requests refresh the activity lease; `/health` remains available
+for reachability checks but does not wake metric collection. After 180 seconds
+without an authenticated request, workers return to idle and check for activity
+at bounded five-second intervals. This applies consistently on macOS, Linux, and
+Windows; it is especially important for Windows service installs, which may run
+without a connected master monitor.
 
 All authenticated endpoints require:
 - Header: `Authorization: Bearer <token>` where `<token>` is the agent token.

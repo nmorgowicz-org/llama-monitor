@@ -1,6 +1,12 @@
-# Windows Support
+# Local LLM Foundry Windows Support
 
-This is the canonical reference for how llama-monitor behaves on Windows. It supersedes scattered comments in prior plans (now deleted). For sensor-bridge implementation detail see `docs/reference/windows-sensor-bridge-implementation.md`.
+The 2.0 bridge publishes canonical and legacy archive aliases for the same
+target build. Native scheduled-task, tray/WebView2, and mixed-version checks
+remain final Windows-machine qualification markers.
+
+This is the canonical reference for how Local LLM Foundry behaves on Windows.
+It supersedes scattered comments in prior plans. For sensor-bridge
+implementation detail see `windows-sensor-bridge-implementation.md`.
 
 ---
 
@@ -64,11 +70,19 @@ Processes routed through these helpers:
 
 | Platform | Config directory |
 |----------|-----------------|
-| Windows  | `%APPDATA%\llama-monitor` (via `dirs::config_dir()`) |
-| macOS    | `~/.config/llama-monitor` |
-| Linux    | `~/.config/llama-monitor` |
+| Windows  | `%APPDATA%\local-llm-foundry` (legacy `%APPDATA%\llama-monitor` remains active until explicit migration) |
+| macOS    | `~/.config/local-llm-foundry` (legacy root remains active until explicit migration) |
+| Linux    | `~/.config/local-llm-foundry` (legacy root remains active until explicit migration) |
 
-On first startup after upgrading from a build that used the old path (`%USERPROFILE%\.config\llama-monitor`), `migrate_legacy_config_dir` in `main.rs` attempts a one-shot migration: it tries a directory rename, falls back to a recursive copy if rename fails (cross-volume), and leaves the legacy directory in place as a backup. The migration is best-effort and never blocks startup. The `%APPDATA%` path matches the location used by the remote-agent installer (`src/agent.rs`) and SSH-push paths, so local and remote modes are consistent.
+The application never performs a best-effort path move. It classifies canonical,
+legacy, empty, and conflicting roots first; old-only installs continue from the
+legacy root. An authenticated preview and explicit confirmation queue a
+copy-first maintenance migration. The next controlled restart verifies a
+journaled receipt before selecting the canonical root. Rollback and legacy-root
+cleanup are separate authenticated, receipt-scoped operations. The Windows
+target-aware compile check runs on macOS; native `%APPDATA%`, scheduled-task,
+tray, and installer behavior is qualified on Windows during the final release
+matrix.
 
 ---
 

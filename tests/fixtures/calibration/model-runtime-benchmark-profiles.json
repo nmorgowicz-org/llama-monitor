@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "purpose": "Profile definitions for materializing one pinned model/runtime configuration manifest per server launch.",
+  "profiles": {
+    "cold_context_baseline": {
+      "purpose": "Measure native, non-reused context cost and decode behavior without cache or PFlash confounders.",
+      "server_policy": {
+        "concurrency": 1,
+        "prefix_cache": "disabled",
+        "pflash": "off",
+        "turboquant": "none"
+      },
+      "required_context_tokens": [8000, 32000, 65536, 131072],
+      "required_kv_dtypes": ["int8", "int4"],
+      "measured_output_tokens": [128, 1024],
+      "fidelity": ["retrieval at 10%, 50%, and 90% positions"]
+    },
+    "primary_opencode_agent": {
+      "purpose": "Represent one primary coding agent with real tool definitions, changing observations, cache reuse, and long outputs.",
+      "server_policy": {
+        "concurrency": 1,
+        "prefix_cache": "enabled with an explicit measured budget",
+        "pflash": "off, auto, and always as separate evidence rows",
+        "turboquant": "none and k8v4 as separate retained-cache rows"
+      },
+      "required_context_tokens": [8000, 32000, 65536],
+      "required_kv_dtypes": ["int8 conservative control", "int4 candidate"],
+      "requested_output_ceiling_tokens": 32768,
+      "measured_output_tokens": [128, 1024, 4096, 8192],
+      "boundary_output_tokens": [16384, 32768],
+      "reasoning_budget_ceiling_tokens": 16384,
+      "measured_reasoning_tokens": [2048, 8192],
+      "fidelity": [
+        "single tool call",
+        "sequential multi-turn tool calls",
+        "parallel calls where supported",
+        "null and empty arguments",
+        "large tool observations",
+        "tool error and retry",
+        "stable-prefix cache reuse",
+        "code-detail retrieval"
+      ]
+    },
+    "long_context_research": {
+      "purpose": "Establish a PFlash and memory envelope for research/reference workloads without equating compressed context to native recall.",
+      "server_policy": {
+        "concurrency": 1,
+        "prefix_cache": "disabled control, then bounded reuse",
+        "pflash": "off below fit boundary; auto and always above it",
+        "turboquant": "none unless retained-prefix policy is under test"
+      },
+      "required_context_tokens": [65536, 131072, 160000, 200000],
+      "measured_output_tokens": [128, 1024, 8192],
+      "fidelity": ["retrieval needles at 10%, 50%, 90%", "code-detail question", "explicit PFlash retained/compressed accounting"]
+    }
+  }
+}

@@ -20,10 +20,27 @@ let _mtpSweepTimer   = null;
 export function setTuneConfig(config) {
   _tuneConfig = config ? { ...config } : null;
   _updateMtpSweepVisibility();
+  _updateIdleDescription();
+}
+
+function _isRapidMlx(cfg) {
+  return cfg?.backend === 'rapid_mlx';
+}
+
+function _updateIdleDescription() {
+  const desc = document.querySelector('.tune-idle-desc');
+  if (!desc) return;
+  if (_isRapidMlx(_tuneConfig)) {
+    desc.textContent = 'Runs rapid-mlx bench against your server and measures generation speed (t/s), prompt speed, and time-to-first-token.';
+  } else {
+    desc.textContent = 'Sends a test prompt and measures generation speed (t/s), prompt speed, and time-to-first-token. Then suggests one-click config improvements (flash attention, KV cache quantization, batch size, etc.).';
+  }
 }
 
 function _isMtpActive(cfg) {
   if (!cfg) return false;
+  // MTP sweep is llama.cpp-only — Rapid-MLX has no equivalent.
+  if (_isRapidMlx(cfg)) return false;
   const s = cfg.spec || cfg;
   return !!(
     s.spec_type ||
@@ -138,6 +155,13 @@ async function runBenchmark() {
   _hide('tune-idle');
   _hide('tune-results');
   _show('tune-running');
+
+  const hint = document.querySelector('.tune-running-hint');
+  if (hint) {
+    hint.textContent = _isRapidMlx(_tuneConfig)
+      ? 'Running rapid-mlx bench against your server…'
+      : 'Sending a test prompt and measuring throughput…';
+  }
 
   // Disable both run buttons while benchmarking
   const runBtn   = document.getElementById('tune-run-btn');

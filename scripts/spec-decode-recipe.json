@@ -1,0 +1,56 @@
+{
+  "$comment": [
+    "Pinned inputs for the speculative-decoding requalification lane, so that",
+    "`node scripts/rapid-mlx-requalify-spec-decode.mjs` needs no arguments.",
+    "",
+    "Why this file exists: the lane's arguments are not guessable months later, and",
+    "the wrong ones do not fail loudly -- a run with no tool parser installs no tool",
+    "grammar and the `constrained` gate would pass on a request that constrained",
+    "nothing. Pinning them means a future run reproduces the recorded one instead of",
+    "re-deriving it from docs.",
+    "",
+    "Any field can still be overridden on the command line; flags win over the recipe.",
+    "Paths may start with ~. Full provenance for each artifact: section 12.3 of",
+    "docs/reference/rapid-mlx-mtp-evidence.md."
+  ],
+
+  "model": "~/.config/local-llm-foundry/models/mlx/native/nightmedia-27b-mxfp8-mlx",
+  "modelNote": [
+    "The trunk to serve. 27 GB of real files, not a symlink farm. Moved here from",
+    "/Users/nick/mlx-models on 2026-07-30 so that model management stays inside the app:",
+    "`models/mlx/native` is already an inventory root (InventoryFormat::Mlx,",
+    "InventorySource::Local), so a model placed here is discoverable without any import step."
+  ],
+
+  "speculativeModel": "~/.config/local-llm-foundry/models/rapid-mlx/mtp-sidecars/qwen3.6-27b-nightmedia-f451-tess-8bit",
+  "speculativeModelNote": [
+    "The subject head: what we are asking about. Must be the snapshot path, never a",
+    "realpath -- HF blobs have no extension and mx.load dispatches on it, so a",
+    "realpath sidecar makes rapid-mlx refuse to boot."
+  ],
+
+  "speculativeControlModel": "mlx-community/Qwen3.6-27B-MTP-4bit",
+  "speculativeControlModelNote": [
+    "The positive control: a known-good standalone head from the HF cache. Without it",
+    "a blocked run cannot be told apart from a broken sidecar, which is why the lane",
+    "refuses to run without one."
+  ],
+
+  "toolCallParser": "qwen3",
+  "reasoningParser": "qwen3",
+  "parserNote": [
+    "Passed explicitly because `rapid-mlx info` reports '(none)' for local model",
+    "directories. Leave these set: the `constrained` gate is meaningless without a",
+    "tool grammar, and it would pass rather than fail."
+  ],
+
+  "port": 8110,
+
+  "$hfHubCacheNote": [
+    "Repo-id models (the positive control) resolve from the app's own HF cache at",
+    "~/.config/local-llm-foundry/models/cache/huggingface/hub, which is where the resolver",
+    "points rapid-mlx via HF_HUB_CACHE when the app launches it. The lane exports the same",
+    "value so it measures a model the app can actually serve. Override with --hf-hub-cache",
+    "or an hfHubCache field; an HF_HUB_CACHE already in the environment wins over both."
+  ]
+}

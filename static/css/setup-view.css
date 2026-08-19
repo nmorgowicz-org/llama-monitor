@@ -1158,6 +1158,17 @@
   filter: drop-shadow(0 0 20px var(--acc-30));
 }
 
+.setup-logo img {
+  display: block;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+
+.setup-logo svg {
+  display: none !important;
+}
+
 @keyframes logo-breathe {
   0%, 100% { transform: scale(1); filter: drop-shadow(0 0 20px var(--acc-30)); }
   50% { transform: scale(1.05); filter: drop-shadow(0 0 32px var(--acc-50)); }
@@ -1698,6 +1709,7 @@ body.setup-active .sidebar-nav {
     gap: var(--gap-sm);
   }
 
+  .setup-logo img,
   .setup-logo svg {
     width: 64px;
     height: 64px;
@@ -1853,6 +1865,32 @@ body.setup-active .sidebar-nav {
 
 .setup-endpoint-connect:hover {
     background: var(--bg-button-hover, rgba(255, 255, 255, 0.08));
+}
+
+.setup-endpoint-dismiss {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+    border-radius: 50%;
+    background: transparent;
+    color: var(--fg-muted, var(--color-text-muted));
+    font-size: 18px;
+    line-height: 20px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.setup-endpoint-dismiss:hover {
+    color: var(--color-error, #fb7185);
+    border-color: currentColor;
+    background: rgba(251, 113, 133, 0.1);
+}
+
+.setup-endpoint-dismiss:disabled {
+    opacity: 0.5;
+    cursor: wait;
 }
 
 /* Manual attach section */
@@ -2192,6 +2230,11 @@ body.setup-active .sidebar-nav {
   filter: drop-shadow(0 0 18px var(--acc-40));
   flex-shrink: 0;
   animation: logo-breathe 4s ease-in-out infinite;
+}
+
+.setup-logo img {
+  width: 32px;
+  height: 32px;
 }
 
 .setup-brand-text {
@@ -3075,6 +3118,18 @@ body.setup-active .sidebar-nav {
 
 .setup-mem-bar-purge:active {
   transform: translateY(1px);
+}
+
+.setup-mem-bar-purge:disabled {
+  cursor: progress;
+  opacity: 0.72;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-mem-bar-purge {
+    transition: none;
+  }
 }
 
 [data-theme="light"] .setup-mem-bar-track {
@@ -3965,9 +4020,15 @@ body.setup-active .sidebar-nav {
 }
 
 .launch-filter-group {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--gap-xs);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--gap-xs);
+}
+
+.launch-filter-sort {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--gap-xs);
 }
 
 .launch-filter-label {

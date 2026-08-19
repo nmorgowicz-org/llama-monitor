@@ -10,29 +10,30 @@
 /// Certificates are automatically renewed on startup if they expire within 30 days.
 use std::path::{Path, PathBuf};
 
+use crate::paths::AppPaths;
+
 /// Returns the path to the certs directory, creating it if necessary.
 ///
-/// Uses `~/.config/llama-monitor/certs` on all platforms (XDG-style) so that
-/// cert files live alongside the rest of the config. On macOS, `dirs::config_dir()`
-/// would return `~/Library/Application Support/` instead; we use the home-dir
-/// approach directly to keep the layout consistent.
+/// Uses the selected application root's `certs` directory on all platforms
+/// (XDG-style on Unix/macOS) so cert files live alongside the rest of config.
 ///
 /// If certs already exist at the old macOS path they are migrated once on first
 /// access so existing installations are not broken by the path change.
 pub fn certs_dir() -> PathBuf {
-    let xdg_dir = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".config")
-        .join("llama-monitor")
-        .join("certs");
+    certs_dir_for(&AppPaths::default_active_root())
+}
+
+/// Resolve certificates beneath an already-selected application root.
+/// Creation remains explicit for certificate generation; resolution itself is
+/// centralized and does not reinterpret custom roots.
+pub fn certs_dir_for(app_root: &Path) -> PathBuf {
+    let xdg_dir = certs_path_for(app_root);
 
     // One-time migration: if certs exist at the macOS Library path but not at
     // the XDG path, move them so they are found from now on.
     #[cfg(target_os = "macos")]
-    if !xdg_dir.join("ca.pem").exists()
-        && let Some(lib_dir) = dirs::config_dir()
-    {
-        let old = lib_dir.join("llama-monitor").join("certs");
+    if !xdg_dir.join("ca.pem").exists() {
+        let old = AppPaths::legacy_macos_support_root().join("certs");
         if old.join("ca.pem").exists() {
             let _ = std::fs::create_dir_all(&xdg_dir);
             for entry in std::fs::read_dir(&old).into_iter().flatten().flatten() {
@@ -47,6 +48,12 @@ pub fn certs_dir() -> PathBuf {
 
     let _ = std::fs::create_dir_all(&xdg_dir);
     xdg_dir
+}
+
+/// Resolve the certificate directory without creating it or migrating legacy
+/// contents. Read-only status endpoints use this accessor.
+pub fn certs_path_for(app_root: &Path) -> PathBuf {
+    app_root.join("certs")
 }
 
 /// Returns the path to the agent's multi-CA directory, creating it if necessary.
@@ -310,14 +317,20 @@ pub fn ensure_ca() -> Cert {
     // Sentinel written alongside every new-format CA.
     let sentinel = dir.join(".ca-v2");
 
-    if sentinel.exists()
-        && let Some(ca) = Cert::load(&ca_path, &ca_key_path)
+    if let Some(ca) = Cert::load(&ca_path, &ca_key_path)
         && !ca.needs_renewal()
     {
+        // Existing trust anchors are part of the public compatibility contract.
+        // The sentinel only records that this process has observed the CA; it
+        // must never be required for reusing an otherwise valid legacy CA.
+        if !sentinel.exists() {
+            let _ = std::fs::write(&sentinel, b"2");
+        }
         return ca;
     }
 
-    // No sentinel → old CA or first run. Rotate everything.
+    // No usable CA (first run or expiry) → generate a replacement. A valid old
+    // CA above is deliberately retained even when it predates the sentinel.
     let _ = std::fs::remove_file(&ca_path);
     let _ = std::fs::remove_file(&ca_key_path);
     let _ = std::fs::remove_file(dir.join("agent-client.pem"));

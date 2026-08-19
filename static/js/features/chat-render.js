@@ -606,7 +606,11 @@ export function renderChatMessages(optionsOrSkip = false) {
         return;
     }
 
-    if (tab.messages.filter(m => m.role !== 'system').length === 0) {
+    // Tabs loaded from the server temporarily use `messages: null` until their
+    // message payload arrives. Render that state as an empty chat rather than
+    // racing the async loader with an exception.
+    const tabMessages = Array.isArray(tab.messages) ? tab.messages : [];
+    if (tabMessages.filter(m => m.role !== 'system').length === 0) {
         const prompts = [
             { icon: '💡', text: 'Explain a complex topic simply', label: 'Learn something' },
             { icon: '✍️', text: 'Help me write an email about...', label: 'Write something' },
@@ -641,7 +645,7 @@ export function renderChatMessages(optionsOrSkip = false) {
         return;
     }
 
-    const allMessages = tab.messages.filter(m => m.role !== 'system' || m.compaction_marker);
+    const allMessages = tabMessages.filter(m => m.role !== 'system' || m.compaction_marker);
     const limit = tab.visible_message_limit || 15;
     const isPaginated = allMessages.length > limit;
     const visibleMessages = isPaginated ? allMessages.slice(-limit) : allMessages;
@@ -666,8 +670,8 @@ export function renderChatMessages(optionsOrSkip = false) {
 
     let idx = 0;
     for (const msg of visibleMessages) {
-        const el = buildMessageElement(msg, idx, tab.messages);
-        const realIdx = tab.messages.indexOf(msg);
+        const el = buildMessageElement(msg, idx, tabMessages);
+        const realIdx = tabMessages.indexOf(msg);
         if (realIdx >= 0) el.dataset.msgIdx = realIdx;
         el.dataset.msgId = msg.db_id ?? '';
         container.appendChild(el);
@@ -678,7 +682,8 @@ export function renderChatMessages(optionsOrSkip = false) {
 }
 
 function loadMoreMessages(tab, currentLimit) {
-    const allMessages = tab.messages.filter(m => m.role !== 'system' || m.compaction_marker);
+    const messages = Array.isArray(tab.messages) ? tab.messages : [];
+    const allMessages = messages.filter(m => m.role !== 'system' || m.compaction_marker);
     tab.visible_message_limit = Math.min(currentLimit * 2, allMessages.length);
 
     const scrollEl = chatMessagesEl;

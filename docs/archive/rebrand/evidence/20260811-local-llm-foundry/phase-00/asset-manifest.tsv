@@ -1,0 +1,4 @@
+asset	sha256	policy
+docs/brand/concepts/README.md	354b90fb8d819de398fbf6e7cf03e82ca7db98ea855c19f2573bcd7aeb9387a2	concept index; retain
+docs/brand/concepts/02-token-ingot.png	3dc46de2fcb621dd471d41cc51bc928e7a14e14ecc6d9ef6148816a9e8fc191a	selected concept reference; not production master
+docs/brand/concepts/token-ingot-validation-sheet.png	4589b1106e3c2b40afd33b0dbec3c9c79ffc2af807ee88f5795a9102224f81a5	accepted visual proof; production SVG still required

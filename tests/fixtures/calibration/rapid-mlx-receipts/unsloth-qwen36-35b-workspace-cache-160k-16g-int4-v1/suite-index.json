@@ -1,0 +1,13 @@
+{
+  "model": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
+  "suite": "cache",
+  "receipts": [
+    {
+      "label": "00-cache-160000-ram-16384-int4",
+      "receipt": "00-00-cache-160000-ram-16384-int4.json",
+      "manifest": null
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

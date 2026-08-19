@@ -1523,7 +1523,7 @@
 
 #preset-modal .modal {
   position: relative;
-  width: min(820px, 95vw);
+  width: min(1200px, 95vw);
   max-height: min(92vh, 940px);
   display: flex;
   flex-direction: column;
@@ -1825,7 +1825,7 @@
 
 [data-theme="light"] #preset-modal {
   background:
-    radial-gradient(ellipse at center, rgba(15, 23, 42, 0.18) 0%, rgba(15, 23, 42, 0.36) 100%);
+    radial-gradient(ellipse at center, rgba(15, 23, 42, 0.08) 0%, rgba(15, 23, 42, 0.18) 100%);
 }
 
 [data-theme="light"] #preset-modal .modal-header h2 {
@@ -1844,15 +1844,12 @@
 }
 
 [data-theme="light"] #preset-modal .modal {
-  background:
-    radial-gradient(circle at 15% 15%, var(--acc-05), transparent 28%),
-    radial-gradient(circle at 85% 85%, var(--acc-05), transparent 26%),
-    linear-gradient(160deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
-  border-color: rgba(17, 24, 39, 0.1);
+  background: #ffffff;
+  border-color: rgba(17, 24, 39, 0.12);
   box-shadow:
-    0 12px 48px rgba(15, 23, 42, 0.12),
-    0 2px 12px rgba(15, 23, 42, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    0 12px 48px rgba(15, 23, 42, 0.14),
+    0 2px 12px rgba(15, 23, 42, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 1);
 }
 
 [data-theme="light"] #preset-modal .modal::after {
@@ -2056,6 +2053,18 @@
   white-space: nowrap;
 }
 
+.preset-editor-format {
+  align-self: center;
+  margin-left: 10px;
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
+  border-radius: 999px;
+  color: var(--color-accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
 .preset-editor-close {
   display: flex;
   align-items: center;
@@ -2088,13 +2097,27 @@
 
 /* ── VRAM strip — sits between header and tab layout, full-width ── */
 .preset-vram-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  box-sizing: border-box;
   flex-shrink: 0;
   padding: 8px 20px;
   background: rgba(0, 0, 0, 0.1);
   border-bottom: 1px solid rgba(255, 255, 255, 0.055);
 }
 
+/* Keep the strip's footprint stable while an estimate is unavailable. A model
+   path can trigger an async estimate while the user is clicking a control;
+   hiding it with display:none would move the entire editor under the pointer. */
+.preset-vram-strip.is-empty {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .preset-vram-strip .preset-vram-display {
+    flex: 1;
     background: none;
     border: none;
     border-radius: 0;
@@ -2275,6 +2298,210 @@
   display: block;
 }
 
+/* Rapid-MLX-only reasoning defaults; irrelevant to llama.cpp presets. */
+#pe-row-rapid-reasoning {
+  display: none;
+}
+#preset-modal.preset-editor--rapid-mlx #pe-row-rapid-reasoning {
+  display: grid;
+}
+
+/* Phase 6 Part B: Rapid-MLX-only prefix cache toggle; irrelevant to llama.cpp presets. */
+#pe-row-rapid-prefix-cache {
+  display: none;
+}
+#preset-modal.preset-editor--rapid-mlx #pe-row-rapid-prefix-cache {
+  display: block;
+}
+
+/* Phase 7 Part A: Rapid-MLX advanced controls; irrelevant to llama.cpp presets. */
+#pe-row-rapid-advanced {
+  display: none;
+}
+#preset-modal.preset-editor--rapid-mlx #pe-row-rapid-advanced {
+  display: grid;
+}
+#pe-row-rapid-workload {
+  display: none;
+}
+#preset-modal.preset-editor--rapid-mlx #pe-row-rapid-workload {
+  display: grid;
+}
+
+/* Rapid-MLX currently exposes only the launch fields the adapter can persist.
+   Keep llama.cpp-only controls out of sight so edits can never be silently lost.
+
+   NOTE: these are deny-by-default allowlists, so a Rapid-MLX control added to index.html
+   is invisible until its row AND its field are exempted here. That trap already cost five
+   controls -- tool_call_parser, reasoning_parser, hybrid_mode, prefill_step_size and
+   cache_memory_mib were read by the save path but rendered nowhere, so every save wrote
+   their defaults over whatever the user had chosen in the wizard. When adding a control,
+   add it to both chains below; core/rapid-preset-visibility.spec.js derives its list from
+   the save path in presets.js and will fail if you forget.
+
+   The generation section is reachable for Rapid-MLX because the save path reads its six
+   sampling inputs into default_temperature/top_p/top_k/min_p/repetition_penalty/presence_penalty,
+   which are real `--default-*` flags. It was hidden, so those six were read-but-unreachable --
+   the same defect the advanced allowlist above was written to prevent, missed because
+   rapid-preset-visibility.spec.js only derived ids matching `modal-rapid-*`. The rest of the
+   section (thinking/preserve-thinking/reasoning/reasoning-budget/tool-call-format) is llama.cpp
+   vocabulary; Rapid has its own `modal-rapid-enable-thinking` in advanced.
+
+   The webui-* and legacy speculative-policy exemptions were removed with their controls. The
+   typed Rapid MTP row below is a separate vLLM-style --speculative-config contract. */
+#preset-modal.preset-editor--rapid-mlx .preset-nav-item:not([data-section="model"]):not([data-section="generation"]):not([data-section="context"]):not([data-section="advanced"]),
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-field:not(:has(#modal-name)):not(:has(#modal-model-path)):not(:has(#modal-chat-template-file)),
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-row,
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-toggles,
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .preset-memory-warning,
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="context"] > .pe-section-body > :not(.mlx-native-group),
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] > .pe-section-body > :not(.pe-row:has(#modal-port)):not(.mlx-native-group),
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] .pe-field:not(:has(#modal-port)):not(:has(#modal-rapid-enable-thinking)):not(:has(#modal-rapid-reasoning-effort)):not(:has(#modal-rapid-prefix-cache-enabled)):not(:has(#modal-rapid-kv-cache-dtype)):not(:has(#modal-rapid-turboquant-mode)):not(:has(#modal-rapid-reasoning-mode)):not(:has(#modal-rapid-sampling-mode)):not(:has(#modal-rapid-frequency-penalty)):not(:has(#modal-rapid-tool-call-parser)):not(:has(#modal-rapid-reasoning-parser)):not(:has(#modal-rapid-hybrid-mode)):not(:has(#modal-rapid-prefill-step-size)):not(:has(#modal-rapid-speculative-enabled)):not(:has(#modal-rapid-speculative-source)):not(:has(#modal-rapid-speculative-model)):not(:has(#modal-rapid-speculative-tokens)):not(:has(#modal-rapid-speculative-disable-auto-k)):not(:has(#modal-rapid-auto-tool-choice)):not(:has(#modal-rapid-cache-memory-mib)):not(:has(#modal-rapid-hybrid-cache-entries)):not(:has(#modal-rapid-prefill-batch-size)):not(:has(#modal-rapid-completion-batch-size)):not(:has(#modal-rapid-gpu-memory-utilization)):not(:has(#modal-rapid-max-num-seqs)):not(:has(#modal-rapid-max-concurrent-requests)):not(:has(#modal-rapid-pflash-policy)):not(:has(#modal-rapid-speculative-trust-consent)):not(:has(#modal-max-tokens)),
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="generation"] > .pe-section-body > .pe-field:not(:has(#modal-temperature)):not(:has(#modal-top-p)):not(:has(#modal-top-k)):not(:has(#modal-min-p)):not(:has(#modal-repeat-penalty)):not(:has(#modal-presence-penalty)):not(:has(#modal-max-tokens)),
+#preset-modal.preset-editor--rapid-mlx [data-mlx-group="output"] .pe-field:not(:has(#modal-max-tokens)),
+#preset-modal.preset-editor--rapid-mlx #preset-browse-model-btn {
+  display: none !important;
+}
+
+#preset-modal.preset-editor--rapid-mlx .preset-vram-strip {
+  padding: 12px 20px;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(45, 212, 191, 0.11), transparent 42%),
+    rgba(7, 18, 22, 0.78);
+  border-bottom-color: rgba(45, 212, 191, 0.2);
+  box-shadow: inset 0 -1px 0 rgba(45, 212, 191, 0.05);
+}
+
+#preset-modal.preset-editor--rapid-mlx .preset-editor-shell {
+  width: min(1040px, 96vw);
+}
+
+#preset-modal.preset-editor--rapid-mlx .preset-editor-nav {
+  width: 210px;
+}
+
+.mlx-native-group {
+  display: grid;
+  gap: 14px;
+  margin: 0 0 18px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 20%, rgba(255, 255, 255, 0.07));
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(20, 33, 39, 0.82), rgba(12, 20, 27, 0.62));
+}
+
+.mlx-native-group-header {
+  position: relative;
+  display: grid;
+  gap: 3px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+details.mlx-native-group > .mlx-native-group-header {
+  cursor: pointer;
+  list-style: none;
+  padding-right: 86px;
+}
+
+details.mlx-native-group > .mlx-native-group-header::-webkit-details-marker {
+  display: none;
+}
+
+.mlx-native-group-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 3px 8px;
+  border: 1px solid rgba(167, 139, 250, 0.3);
+  border-radius: 999px;
+  background: rgba(124, 58, 237, 0.1);
+  color: #c4b5fd;
+  font-size: 0.63rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+details.mlx-native-group:not([open]) > .mlx-native-group-header {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.mlx-native-group-title {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 0.88rem;
+  font-weight: 720;
+  letter-spacing: 0.01em;
+}
+
+.mlx-native-group-description {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+#preset-modal.preset-editor--rapid-mlx .mlx-native-row {
+  display: grid;
+}
+
+[data-theme="light"] #preset-modal.preset-editor--rapid-mlx .preset-vram-strip {
+  background:
+    radial-gradient(circle at 20% 0%, rgba(13, 148, 136, 0.1), transparent 42%),
+    rgba(244, 250, 250, 0.96);
+  border-bottom-color: rgba(13, 148, 136, 0.18);
+}
+
+[data-theme="light"] #preset-modal .preset-vram-strip {
+  background: #ffffff;
+  border-bottom-color: rgba(17, 24, 39, 0.12);
+}
+
+[data-theme="light"] #preset-modal .preset-vram-strip .preset-vram-display {
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .evidence-trigger {
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .mlx-native-group {
+  background: linear-gradient(145deg, rgba(247, 252, 252, 0.98), rgba(239, 247, 248, 0.9));
+  border-color: rgba(13, 148, 136, 0.16);
+}
+
+@media (max-width: 768px) {
+  #preset-modal.preset-editor--rapid-mlx .preset-editor-shell {
+    width: 100vw;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+
+  #preset-modal.preset-editor--rapid-mlx .preset-editor-layout {
+    flex-direction: column;
+  }
+
+  #preset-modal.preset-editor--rapid-mlx .preset-editor-nav {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+    padding: 8px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  #preset-modal.preset-editor--rapid-mlx .preset-nav-item {
+    width: 100%;
+  }
+
+  #preset-modal.preset-editor--rapid-mlx .mlx-native-group {
+    padding: 14px;
+  }
+}
+
 @keyframes pe-section-enter {
   0%   { opacity: 0; transform: translateX(8px); }
   100% { opacity: 1; transform: translateX(0); }
@@ -2403,6 +2630,11 @@
 
 .pe-input-row .pe-input {
   flex: 1;
+}
+
+/* Chat template row wraps its buttons onto multiple lines */
+.pe-input-row:has(#modal-chat-template-file) {
+  flex-wrap: wrap;
 }
 
 /* ── Multi-column rows ── */
@@ -2581,15 +2813,12 @@
 
 /* ── Light theme overrides ── */
 [data-theme="light"] #preset-modal .preset-editor-shell {
-  background:
-    radial-gradient(circle at 15% 15%, var(--acc-05), transparent 28%),
-    radial-gradient(circle at 85% 85%, var(--acc-04), transparent 26%),
-    linear-gradient(160deg, #ffffff, #f9fafb);
-  border-color: rgba(17, 24, 39, 0.1);
+  background: #ffffff;
+  border-color: rgba(17, 24, 39, 0.12);
   box-shadow:
-    0 12px 48px rgba(15, 23, 42, 0.12),
-    0 2px 12px rgba(15, 23, 42, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    0 12px 48px rgba(15, 23, 42, 0.14),
+    0 2px 12px rgba(15, 23, 42, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 1);
 }
 
 [data-theme="light"] .preset-editor-header {
@@ -2661,7 +2890,7 @@
 }
 
 [data-theme="light"] .pe-field-hint {
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .pe-toggle-track {
@@ -2713,4 +2942,264 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ── Create fix modal panel theming ── */
+
+/* Dark theme: subtle radial accents over deep base */
+:root:not([data-theme="light"]) {
+  --pe-panel-bg:
+    radial-gradient(circle at 18% 16%, rgba(56, 72, 88, 0.5), transparent 28%),
+    radial-gradient(circle at 84% 18%, rgba(48, 60, 72, 0.45), transparent 24%),
+    linear-gradient(160deg, rgba(38, 46, 56, 0.98), rgba(28, 34, 42, 1.0));
+  --pe-panel-border: rgba(255, 255, 255, 0.12);
+}
+
+/* Light theme: clean white/slate base with subtle warmth */
+[data-theme="light"] {
+  --pe-panel-bg:
+    radial-gradient(circle at 18% 16%, rgba(228, 234, 242, 0.8), transparent 30%),
+    radial-gradient(circle at 84% 18%, rgba(220, 230, 240, 0.6), transparent 25%),
+    linear-gradient(160deg, rgba(245, 247, 250, 0.98), rgba(235, 240, 245, 1.0));
+  --pe-panel-border: rgba(0, 0, 0, 0.12);
+}
+
+/* Chat Template Lifecycle Modal */
+#chat-template-lifecycle-modal { display: none; }
+#chat-template-lifecycle-modal.open { display: flex; }
+.chat-template-lifecycle-panel {
+    background: var(--pe-panel-bg, linear-gradient(160deg, rgba(14,18,24,0.98), rgba(18,24,32,1.0)));
+    border: 1px solid var(--pe-panel-border, rgba(255,255,255,0.15));
+    border-radius: 10px;
+    width: 600px;
+    max-width: 90vw;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 16px 64px rgba(0,0,0,0.4), 0 2px 16px rgba(0,0,0,0.25);
+    color: var(--color-text, #e8eaee);
+}
+.chat-template-lifecycle-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--pe-panel-border, rgba(255,255,255,0.1));
+}
+.chat-template-lifecycle-heading {
+    font-size: 14px;
+    margin: 0 0 2px 0;
+    font-weight: 600;
+}
+.chat-template-lifecycle-subtitle {
+    font-size: 10px;
+    color: var(--color-text-muted, #7a8190);
+    margin: 0;
+}
+.chat-template-lifecycle-close {
+    background: none;
+    border: none;
+    font-size: 20px;
+    color: var(--color-text-muted, #7a8190);
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+}
+.chat-template-lifecycle-close:hover {
+    color: var(--color-text, #e8eaee);
+}
+.chat-template-lifecycle-body {
+    padding: 12px 16px 16px;
+}
+.chat-template-lifecycle-section {
+    margin-bottom: 12px;
+}
+.chat-template-lifecycle-section:last-child {
+    margin-bottom: 0;
+}
+.chat-template-lifecycle-section-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-text-secondary, #c5cad3);
+    margin: 0 0 6px 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.chat-template-lifecycle-section-content {
+    font-size: 10px;
+    color: var(--color-text-muted, #7a8190);
+    line-height: 1.5;
+}
+.chat-template-lifecycle-section-subtitle {
+    font-size: 9px;
+    color: var(--color-text-muted, #7a8190);
+    margin: 0 0 6px 0;
+}
+.chat-template-lifecycle-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.chat-template-lifecycle-history-item,
+.chat-template-lifecycle-discussion-item {
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.chat-template-lifecycle-history-item:last-child,
+.chat-template-lifecycle-discussion-item:last-child {
+    border-bottom: none;
+}
+.chat-template-lifecycle-history-item a,
+.chat-template-lifecycle-discussion-item a {
+    color: var(--color-accent, #3b82f6);
+    text-decoration: none;
+}
+.chat-template-lifecycle-history-item a:hover,
+.chat-template-lifecycle-discussion-item a:hover {
+    text-decoration: underline;
+}
+.ct-discussion-open-btn {
+    background: none;
+    border: none;
+    color: var(--color-accent, #3b82f6);
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+    padding: 2px 4px;
+    margin-left: 4px;
+    border-radius: 3px;
+}
+.ct-discussion-open-btn:hover {
+    background: rgba(59, 130, 246, 0.15);
+}
+
+/* Discussion preview slide-in panel — mirrors the Spawn Wizard's model-card
+   preview so viewing a Community Fix reuses a familiar interaction instead
+   of opening a new browser tab. Self-contained CSS since the JS module that
+   builds it (chat-template-panel.js) is shared by surfaces (Preset Editor)
+   that don't have the wizard's own card-panel DOM. */
+.ct-discussion-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    /* Must sit above #chat-template-lifecycle-modal (inline z-index: 20000) —
+       this panel is most often opened from inside that modal, and a lower
+       z-index here left the modal's own full-viewport backdrop capturing all
+       scroll/click events over the (still visible, but non-interactive) panel. */
+    z-index: 20050;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 160ms ease;
+}
+.ct-discussion-backdrop.open {
+    opacity: 1;
+    pointer-events: auto;
+}
+.ct-discussion-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 420px;
+    max-width: 92vw;
+    background: var(--pe-panel-bg, linear-gradient(160deg, rgba(14,18,24,0.98), rgba(18,24,32,1.0)));
+    border-left: 1px solid var(--pe-panel-border, rgba(255,255,255,0.15));
+    box-shadow: -16px 0 48px rgba(0,0,0,0.4);
+    z-index: 20051;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 200ms ease;
+    color: var(--color-text, #e8eaee);
+}
+.ct-discussion-panel.open {
+    transform: translateX(0);
+}
+.ct-discussion-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--pe-panel-border, rgba(255,255,255,0.1));
+}
+.ct-discussion-panel-title {
+    font-size: 13px;
+    font-weight: 600;
+    padding-right: 12px;
+}
+.ct-discussion-panel-close {
+    background: none;
+    border: none;
+    font-size: 20px;
+    color: var(--color-text-muted, #7a8190);
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+}
+.ct-discussion-panel-close:hover {
+    color: var(--color-text, #e8eaee);
+}
+.ct-discussion-panel-link {
+    display: block;
+    font-size: 10px;
+    color: var(--color-accent, #3b82f6);
+    text-decoration: none;
+    padding: 8px 16px 0;
+}
+.ct-discussion-panel-link:hover {
+    text-decoration: underline;
+}
+.ct-discussion-panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 16px 16px;
+    font-size: 11px;
+    line-height: 1.6;
+}
+[data-theme="light"] .ct-discussion-panel {
+    background: linear-gradient(160deg, rgba(245,247,250,0.98), rgba(235,240,245,1.0));
+    border-color: rgba(0,0,0,0.12);
+    color: #1a1d21;
+}
+.chat-template-lifecycle-version-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 2px 0;
+}
+.chat-template-lifecycle-version-label {
+    color: var(--color-text-muted, #7a8190);
+}
+.chat-template-lifecycle-version-value {
+    color: var(--color-text, #e8eaee);
+    text-align: right;
+    max-width: 60%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Dark theme only: --color-text-muted (#7a8190) meets 3:1 against the flat
+   panel base, but the panel bg is a layered radial-gradient with lighter
+   highlight regions — measured ~2.2:1 there. Bump muted text in this panel
+   specifically rather than touching the global token. The prior #a8aeb8 bump
+   was still too close to the bg at this panel's small (9-10px) font sizes to
+   read as crisp — bumped further toward --color-text. */
+:root:not([data-theme="light"]) .chat-template-lifecycle-section-content,
+:root:not([data-theme="light"]) .chat-template-lifecycle-section-subtitle,
+:root:not([data-theme="light"]) .chat-template-lifecycle-subtitle,
+:root:not([data-theme="light"]) .chat-template-lifecycle-version-label {
+    color: #d3d7de;
+}
+
+[data-theme="light"] .chat-template-lifecycle-panel {
+    background: linear-gradient(160deg, rgba(245,247,250,0.98), rgba(235,240,245,1.0));
+    border-color: rgba(0,0,0,0.12);
+    color: #1a1d21;
+}
+[data-theme="light"] .chat-template-lifecycle-section-title {
+    color: #374151;
+}
+[data-theme="light"] .chat-template-lifecycle-history-item,
+[data-theme="light"] .chat-template-lifecycle-discussion-item {
+    border-bottom-color: rgba(0,0,0,0.08);
 }

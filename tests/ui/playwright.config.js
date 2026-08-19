@@ -1,5 +1,17 @@
 // playwright.config.js
 //
+// Test tags (the full CI suite still runs all non-skipped tests; focused npm scripts select them):
+//   @in-memory-test     — runs JS logic against fake state in page.evaluate(); no backend
+//   @fake-data-bypass   — uses mocked API responses or injected DOM data
+//   @runtime-required   — needs a live model instance; gated behind env flag
+//
+//   npm run test:in-memory
+//   npm run test:fake-data
+//   npm run test:runtime
+//
+// LLAMA_MONITOR_HAS_RUNTIME=1 enables tests that require a real model endpoint.
+// These tests are NEVER mandatory for CI.
+//
 // IMPORTANT (NEVER KILL PORT 7778):
 //
 // When running tests while a live llama-monitor (or AI coding session)
@@ -21,8 +33,18 @@ const config = {
   testDir: '.',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
+  // Local runs must be AT LEAST AS STRICT as CI, never looser and never differently
+  // shaped. This used to read `workers: process.env.CI ? 1 : undefined`, which meant CI ran
+  // serially while a local run went parallel across files. A local run could then invent
+  // concurrency the suite is configured never to have, and manufacture failures in specs
+  // that are fine — which cost real time chasing "races" that did not exist.
+  //
+  // So: one worker everywhere. Retries stay at 0 locally, which is stricter than CI's 2,
+  // so a local pass implies a CI pass. Set PLAYWRIGHT_PARALLEL=1 to opt into parallelism
+  // deliberately; results from such a run do not predict CI and should not be reported as
+  // if they do.
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: process.env.PLAYWRIGHT_PARALLEL ? undefined : 1,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: process.env.LLAMA_MONITOR_UI_URL ||

@@ -2,16 +2,19 @@
   "type": "module",
   "scripts": {
     "lint": "eslint static/js/",
-    "validate-js": "node scripts/validate-js.mjs"
+    "validate-js": "node scripts/validate-js.mjs",
+    "validate-wizard-groups": "node scripts/validate-wizard-groups.mjs",
+    "validate-rebrand": "node scripts/validate-rebrand-contract.mjs",
+    "validate-release-contract": "node scripts/validate-release-contract.mjs --self-test"
   },
-"devDependencies": {
-    "eslint": "10.8.0",
+  "devDependencies": {
+    "eslint": "10.8.1",
     "eslint-plugin-no-unsanitized": "4.1.5",
     "globals": "17.9.0",
-    "puppeteer": "25.4.0"
+    "puppeteer": "25.5.0"
   },
   "dependencies": {
-    "dompurify": "^3.4.11",
+    "dompurify": "^3.4.13",
     "highlight.js": "^11.9.0",
     "marked": "^18.0.0"
   }

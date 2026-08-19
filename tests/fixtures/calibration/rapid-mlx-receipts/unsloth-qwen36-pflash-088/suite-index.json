@@ -1,0 +1,20 @@
+{
+  "model": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
+  "suite": "pflash",
+  "receipts": [
+    {
+      "label": "00-pflash-65536-int4",
+      "receipt": "00-00-pflash-65536-int4.json",
+      "manifest": null,
+      "resumed": true
+    },
+    {
+      "label": "01-pflash-131072-int4",
+      "receipt": "01-01-pflash-131072-int4.json",
+      "manifest": null,
+      "resumed": true
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

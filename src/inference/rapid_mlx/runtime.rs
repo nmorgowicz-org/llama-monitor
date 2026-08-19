@@ -1,0 +1,111 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeSource {
+    Managed,
+    Homebrew,
+    Pip,
+    Pipx,
+    Custom,
+    PathUnknown,
+}
+
+/// On-device update-validation probe result tiers.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProbeResult {
+    /// All checks passed; environment is healthy.
+    Pass,
+    /// Rapid-MLX itself is broken; managed install is rollback-eligible.
+    CriticalFail {
+        /// Concrete, actionable message about what failed.
+        message: String,
+    },
+    /// Baseline passes but specific optional capability(s) failed.
+    PerFeatureFail {
+        /// Actionable per-feature diagnoses; never a global banner.
+        feature_failures: Vec<FeatureProbeFailure>,
+    },
+}
+
+/// Actionable diagnosis for a single optional capability.
+///
+/// Two audiences read this. `message` is what anyone running the app should see: what
+/// is off, and what it costs them. `maintainer_detail` is the repo-side follow-up —
+/// harness invocations, source constants, evidence docs — which is actionable only if
+/// you have a checkout, and is noise (or worse, a dead end) to everyone else.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FeatureProbeFailure {
+    pub feature: String,
+    pub message: String,
+    /// Follow-up that requires a repo checkout. Omitted for failures a user can act on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maintainer_detail: Option<String>,
+}
+
+impl Default for ProbeResult {
+    fn default() -> Self {
+        Self::CriticalFail {
+            message: "Not probed".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeMetadata {
+    pub executable_path: std::path::PathBuf,
+    pub source: RuntimeSource,
+    pub version: String,
+    /// Capability snapshot for this runtime (auto-generated; may be None if not yet probed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capability_snapshot: Option<crate::inference::rapid_mlx::capabilities::CapabilitySnapshot>,
+    /// Resolved dependency receipt for managed installs. Records the exact packages
+    /// that were installed with this runtime environment. Never hand-curated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_receipt: Option<ResolvedDependencyReceipt>,
+    /// Last on-device probe result (user-driven, post-install/upgrade).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_probe_result: Option<ProbeResult>,
+    /// Phase 6 Part B: prefix cache configuration active for this runtime.
+    #[serde(default)]
+    pub prefix_cache_enabled: bool,
+    /// Configured MLX prefix cache size in bytes (retained_cache_mib × 1024 × 1024).
+    /// Populated from estimator breakdown, not user-configured directly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mlx_prefix_cache_bytes: Option<u64>,
+}
+
+/// Resolved receipt of dependency installation for a managed environment.
+/// Preserves the exact packages installed from Rapid's upstream contract + supported extras.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ResolvedDependencyReceipt {
+    pub rapid_mlx_version: String,
+    /// Exact resolved versions of all installed packages.
+    pub packages: Vec<ResolvedPackage>,
+    /// When this receipt was generated.
+    pub installed_at: u64,
+    /// Whether this environment is known-good and eligible for rollback.
+    pub rollback_eligible: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ResolvedPackage {
+    pub name: String,
+    pub version: String,
+}
+
+impl Default for RuntimeMetadata {
+    fn default() -> Self {
+        Self {
+            executable_path: std::path::PathBuf::new(),
+            source: RuntimeSource::PathUnknown,
+            version: String::new(),
+            capability_snapshot: None,
+            resolved_receipt: None,
+            last_probe_result: None,
+            prefix_cache_enabled: false,
+            mlx_prefix_cache_bytes: None,
+        }
+    }
+}

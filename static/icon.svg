@@ -1,4 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <rect width="128" height="128" rx="24" fill="#2e3440"/>
-  <text x="64" y="90" font-size="80" text-anchor="middle" fill="#88c0d1" font-family="system-ui">🦙</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Local LLM Foundry</title>
+  <desc id="desc">Token Ingot mark for Local LLM Foundry.</desc>
+  <rect width="256" height="256" rx="48" fill="#111827"/>
+  <path fill="#1f232a" d="M39 143 95 109l26 15 7 6 7-6 26-15 56 34v58l-89 45-89-45z"/>
+  <path fill="#0f766e" d="m54 137 67-37q7-4 14 0l67 37q6 4 0 10l-67 37q-7 4-14 0l-67-37q-6-6 0-10z"/>
+  <path fill="#14b8a6" d="m54 95 67-37q7-4 14 0l67 37q6 4 0 10l-67 37q-7 4-14 0L54 105q-6-6 0-10z"/>
+  <path fill="#2dd4bf" d="m54 53 67-37q7-4 14 0l67 37q6 4 0 10l-67 37q-7 4-14 0L54 63q-6-6 0-10z"/>
+  <path fill="#fff" d="m104 146 24-14 24 14v26l-24 15-24-15z"/>
+  <path fill="#f97316" d="m111 151 17-10 17 10v17l-17 10-17-10z"/>
 </svg>

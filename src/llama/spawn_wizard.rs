@@ -8,6 +8,7 @@
 //! - Third-party model import helpers.
 //! - Model introspection via llama.cpp.
 
+use crate::inference::InferenceBackend;
 use crate::llama::batch_import;
 use crate::llama::vram_estimator;
 use std::fs;
@@ -218,6 +219,78 @@ pub fn classify_benchmark_result(
     }
 }
 
+/// Classify a Rapid-MLX benchmark without emitting llama.cpp tuning patches.
+///
+/// Rapid-MLX owns a different configuration surface. Until it has a
+/// capability-backed classifier, benchmark output remains informational so the
+/// shared Tune UI cannot apply llama.cpp fields such as `flash_attn`,
+/// `batch_size`, or `n_cpu_moe` to a Rapid preset.
+pub fn classify_rapid_mlx_benchmark_result(
+    prompt_tps: f64,
+    gen_tps: f64,
+    ttft_ms: f64,
+) -> BenchmarkResult {
+    let verdict = if gen_tps >= 15.0 && ttft_ms <= 1500.0 {
+        "good"
+    } else if gen_tps >= 4.0 && ttft_ms <= 3000.0 {
+        "moderate"
+    } else {
+        "poor"
+    };
+
+    let mut hints = Vec::new();
+    if gen_tps < 4.0 {
+        hints.push("Rapid-MLX generation is below the local baseline; review the backend-specific runtime settings and model fit.".to_string());
+    }
+    if ttft_ms > 1500.0 {
+        hints.push("Rapid-MLX reported a high time to first token; compare against a repeat measurement before changing settings.".to_string());
+    }
+    if prompt_tps < 300.0 {
+        hints.push("Rapid-MLX prefill throughput is below the local baseline; treat this result as informational until repeated.".to_string());
+    }
+
+    BenchmarkResult {
+        prompt_tokens_per_second: prompt_tps,
+        gen_tokens_per_second: gen_tps,
+        time_to_first_token_ms: ttft_ms,
+        verdict: verdict.to_string(),
+        hints,
+        suggestions: Vec::new(),
+    }
+}
+
+/// Dispatch benchmark advice through the backend-owned classifier.
+///
+/// Rapid-MLX and llama.cpp have different configuration contracts. Keeping
+/// this boundary in one function prevents a caller from accidentally routing
+/// Rapid-MLX measurements through the llama.cpp classifier and exposing
+/// actionable llama.cpp fields such as `flash_attn`, `batch_size`, or
+/// `n_cpu_moe`.
+#[allow(clippy::too_many_arguments)]
+pub fn classify_backend_benchmark_result(
+    backend: InferenceBackend,
+    prompt_tps: f64,
+    gen_tps: f64,
+    ttft_ms: f64,
+    model_size_bytes: Option<u64>,
+    available_vram_bytes: Option<u64>,
+    n_moe_layers: u64,
+) -> BenchmarkResult {
+    match backend {
+        InferenceBackend::RapidMlx => {
+            classify_rapid_mlx_benchmark_result(prompt_tps, gen_tps, ttft_ms)
+        }
+        _ => classify_benchmark_result(
+            prompt_tps,
+            gen_tps,
+            ttft_ms,
+            model_size_bytes,
+            available_vram_bytes,
+            n_moe_layers,
+        ),
+    }
+}
+
 /// Predictive, config-time advisory hints surfaced in the Spawn Wizard and Preset
 /// Editor — *before* a benchmark is run. Each returned suggestion reuses the same
 /// `{label, description, param, value, patch}` contract as benchmark suggestions so
@@ -242,6 +315,32 @@ pub fn predict_perf_hints(
     is_unified_memory: bool,
     spec_type: Option<&str>,
     has_mtp_model: bool,
+) -> Vec<BenchmarkSuggestion> {
+    predict_perf_hints_with_mtp_evidence(
+        arch,
+        context_size,
+        ctk,
+        ctv,
+        is_unified_memory,
+        spec_type,
+        has_mtp_model,
+        false,
+    )
+}
+
+/// Advisory hints can use a draft/head filename or repository hint when
+/// introspection cannot expose MTP metadata. Keep that evidence explicitly
+/// provisional so it never masquerades as a confirmed MTP depth.
+#[allow(clippy::too_many_arguments)]
+pub fn predict_perf_hints_with_mtp_evidence(
+    arch: &vram_estimator::ModelArch,
+    context_size: u64,
+    ctk: &str,
+    ctv: &str,
+    is_unified_memory: bool,
+    spec_type: Option<&str>,
+    has_mtp_model: bool,
+    mtp_inferred: bool,
 ) -> Vec<BenchmarkSuggestion> {
     let mut out: Vec<BenchmarkSuggestion> = Vec::new();
 
@@ -333,10 +432,15 @@ pub fn predict_perf_hints(
     if has_mtp_model && !mtp_already_enabled {
         out.push(BenchmarkSuggestion {
             label: "Enable MTP speculative decoding".to_string(),
-            description:
+            description: if mtp_inferred {
+                "A draft/MTP candidate was inferred from an artifact hint; verify compatibility before enabling. Multi-Token Prediction may give ~1.4–2× faster \
+generation with no change in output quality."
+                    .to_string()
+            } else {
                 "An MTP draft model is available. Multi-Token Prediction gives ~1.4–2× faster \
-                  generation with no change in output quality."
-                    .to_string(),
+generation with no change in output quality."
+                    .to_string()
+            },
             param: "spec_type".to_string(),
             value: serde_json::json!("draft-mtp,ngram-mod"),
             patch: Some(
@@ -1254,11 +1358,7 @@ fn extract_int_after(prefix: &str, line: &str) -> Option<u32> {
 }
 
 fn model_cache_dir() -> Result<PathBuf, String> {
-    let home = dirs::home_dir().ok_or_else(|| "Home directory not found".to_string())?;
-    let dir = home
-        .join(".config")
-        .join("llama-monitor")
-        .join("model-cache");
+    let dir = crate::paths::AppPaths::default_active_root().join("model-cache");
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("Failed to create model-cache dir: {}", e))?;
     Ok(dir)
@@ -1318,6 +1418,33 @@ mod tests {
     }
 
     #[test]
+    fn rapid_benchmark_is_informational_only() {
+        let result = classify_rapid_mlx_benchmark_result(120.0, 2.5, 2_000.0);
+        assert_eq!(result.verdict, "poor");
+        assert!(!result.hints.is_empty());
+        assert!(result.suggestions.is_empty());
+    }
+
+    #[test]
+    fn backend_dispatch_keeps_rapid_advice_non_actionable() {
+        let result = classify_backend_benchmark_result(
+            InferenceBackend::RapidMlx,
+            120.0,
+            2.5,
+            2_000.0,
+            Some(32 * 1024 * 1024 * 1024),
+            Some(16 * 1024 * 1024 * 1024),
+            32,
+        );
+        assert!(
+            result
+                .suggestions
+                .iter()
+                .all(|suggestion| { suggestion.param.is_empty() && suggestion.patch.is_none() })
+        );
+    }
+
+    #[test]
     fn test_find_gguf_in_dirs_basic() {
         let temp = tempfile::tempdir().expect("tempdir");
         let root = temp.path();
@@ -1333,12 +1460,12 @@ mod tests {
         assert!(
             ggufs
                 .iter()
-                .any(|p| p.file_name().map_or(false, |n| n == "model.gguf"))
+                .any(|p| p.file_name().is_some_and(|n| n == "model.gguf"))
         );
         assert!(
             ggufs
                 .iter()
-                .any(|p| p.file_name().map_or(false, |n| n == "model2.gguf"))
+                .any(|p| p.file_name().is_some_and(|n| n == "model2.gguf"))
         );
     }
 
@@ -1353,7 +1480,7 @@ mod tests {
 
         let ggufs = find_gguf_in_dirs(&[root.to_path_buf()], false);
         assert_eq!(ggufs.len(), 1);
-        assert!(ggufs[0].file_name().map_or(false, |n| n == "model.gguf"));
+        assert!(ggufs[0].file_name().is_some_and(|n| n == "model.gguf"));
     }
 
     #[test]
@@ -1453,5 +1580,17 @@ mod tests {
             crate::llama::vram_estimator::ModelArch::from_name_and_params("Qwen3.6-27B", 27.0);
         let hints = predict_perf_hints(&arch, 16_384, "q8_0", "q8_0", true, None, false);
         assert!(hints.iter().any(|h| h.param == "ctk"));
+    }
+
+    #[test]
+    fn perf_hints_label_inferred_mtp_as_provisional() {
+        let arch =
+            crate::llama::vram_estimator::ModelArch::from_name_and_params("Qwen3.6-27B", 27.0);
+        let hints = predict_perf_hints_with_mtp_evidence(
+            &arch, 16_384, "q8_0", "q8_0", true, None, true, true,
+        );
+        let mtp = hints.iter().find(|hint| hint.param == "spec_type").unwrap();
+        assert!(mtp.description.contains("inferred"));
+        assert!(mtp.description.contains("verify compatibility"));
     }
 }

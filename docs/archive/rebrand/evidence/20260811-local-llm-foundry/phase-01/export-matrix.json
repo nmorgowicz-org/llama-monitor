@@ -1,0 +1,373 @@
+{
+  "schema_version": 1,
+  "production_master": "assets/brand/token-ingot.svg",
+  "svg_safety": [
+    {
+      "file": "assets/brand/token-ingot.svg",
+      "sha256": "917c2a4d061c451279a7a6899d9fae56b21487e58c7fa85868c7bfdcc552c877",
+      "xml_like": true,
+      "forbidden_tokens": []
+    },
+    {
+      "file": "assets/brand/token-ingot-dark.svg",
+      "sha256": "11c507aaf5dff75a75e94cd76b6c3bb2e872d410f13240d54968e7e10657ef71",
+      "xml_like": true,
+      "forbidden_tokens": []
+    },
+    {
+      "file": "assets/brand/token-ingot-light.svg",
+      "sha256": "ed4e82cadd9d697f69900acacf56eae3b6bbdaa1dfe17f1413062f9e691accac",
+      "xml_like": true,
+      "forbidden_tokens": []
+    },
+    {
+      "file": "assets/brand/token-ingot-mono.svg",
+      "sha256": "09a418c26f750248cfbbff3759000be94131537c195c854f6b3905b4bb70bea7",
+      "xml_like": true,
+      "forbidden_tokens": []
+    },
+    {
+      "file": "assets/brand/token-ingot-one-color-black.svg",
+      "sha256": "40a995f221032dc8eb391344cb00a37a99c56388793819fa0f39bb7e91aa57bc",
+      "xml_like": true,
+      "forbidden_tokens": []
+    },
+    {
+      "file": "assets/brand/token-ingot-one-color-white.svg",
+      "sha256": "6ef0dde2112cbab1a12ffa5ce33404021c623d294665c12b11f18024b2026a23",
+      "xml_like": true,
+      "forbidden_tokens": []
+    },
+    {
+      "file": "assets/brand/token-ingot-macos-template.svg",
+      "sha256": "40a995f221032dc8eb391344cb00a37a99c56388793819fa0f39bb7e91aa57bc",
+      "xml_like": true,
+      "forbidden_tokens": []
+    },
+    {
+      "file": "static/icon.svg",
+      "sha256": "662f5e9d8c3e54e05b0e2becd4408fa52cebfc46d3fd968cd901da387ad68b40",
+      "xml_like": true,
+      "forbidden_tokens": []
+    }
+  ],
+  "web_pwa": [
+    {
+      "file": "static/brand/token-ingot-1024.png",
+      "sha256": "83316361bccbc0cf550af8f8f5ecedd318a9fe4dfc2b0f3f2f7b5cceb849cb7e"
+    },
+    {
+      "file": "static/brand/token-ingot-128.png",
+      "sha256": "a00f0528285c6156832ad5c3e3bcada656a221a86dce8694b8fb3984f6529175"
+    },
+    {
+      "file": "static/brand/token-ingot-16.png",
+      "sha256": "56fa98b9cc60bc76780aab052908ecca28544dedfcdc4a466637f7b04c78a495"
+    },
+    {
+      "file": "static/brand/token-ingot-180.png",
+      "sha256": "a495bd95711e3ec66e833d55f2734c03f3e0c67a148226107f36da847a389c14"
+    },
+    {
+      "file": "static/brand/token-ingot-192.png",
+      "sha256": "2a02068786ce6237249b7835cbf841aed2d8e2093317dbbcd2f10a8855bffd85"
+    },
+    {
+      "file": "static/brand/token-ingot-20.png",
+      "sha256": "b789b3564c963d5729814050e1159b3bb0fdb0d46f9d6cd193c56a7c2f3670f9"
+    },
+    {
+      "file": "static/brand/token-ingot-22.png",
+      "sha256": "78cb1d26fed5f9e3b09d2bf2186e1f60e9e7b5ccbfbb3364c9eee47806126750"
+    },
+    {
+      "file": "static/brand/token-ingot-24.png",
+      "sha256": "5bf63cc898ccdbe4e54994467ddb99b76b206e48d45b75d64453ef750f995dbb"
+    },
+    {
+      "file": "static/brand/token-ingot-256.png",
+      "sha256": "cdd17c2356746e9e9f690539f215b2cd5de9d7777f6a46750e452fb0dadf355c"
+    },
+    {
+      "file": "static/brand/token-ingot-32.png",
+      "sha256": "0420a4cdddb2b13fb76e5260d83de30a585ef9ee089471f8d1e75da3bab3b1f7"
+    },
+    {
+      "file": "static/brand/token-ingot-512.png",
+      "sha256": "9868f6c02d101011a9bcde5d690c826d550d8a6739a74a3ce267369cb0416749"
+    },
+    {
+      "file": "static/brand/token-ingot-64.png",
+      "sha256": "cdf975cd154b2604f67581e47d215ba0d103a26014cba091d1f381fc1b956ce0"
+    },
+    {
+      "file": "static/brand/token-ingot-maskable-192.png",
+      "sha256": "629b682cdda4267287f83b7093d35e0787682e920a08ea884df679c06ce23d1c"
+    },
+    {
+      "file": "static/brand/token-ingot-maskable-512.png",
+      "sha256": "3dac70af4dc828d0ae2e2e18061d0275109b409fa6065f82072b049c8d22acb4"
+    },
+    {
+      "file": "static/brand/token-ingot.ico",
+      "sha256": "13cc8c32428b2a639c65941fc54a6db8c8266f019c64fa41132d65300caed579"
+    }
+  ],
+  "exports": [
+    {
+      "file": "assets/brand/exports/linux/hicolor/128x128/apps/local-llm-foundry.png",
+      "sha256": "a00f0528285c6156832ad5c3e3bcada656a221a86dce8694b8fb3984f6529175",
+      "bytes": 4559
+    },
+    {
+      "file": "assets/brand/exports/linux/hicolor/16x16/apps/local-llm-foundry.png",
+      "sha256": "56fa98b9cc60bc76780aab052908ecca28544dedfcdc4a466637f7b04c78a495",
+      "bytes": 580
+    },
+    {
+      "file": "assets/brand/exports/linux/hicolor/256x256/apps/local-llm-foundry.png",
+      "sha256": "cdd17c2356746e9e9f690539f215b2cd5de9d7777f6a46750e452fb0dadf355c",
+      "bytes": 9335
+    },
+    {
+      "file": "assets/brand/exports/linux/hicolor/32x32/apps/local-llm-foundry.png",
+      "sha256": "0420a4cdddb2b13fb76e5260d83de30a585ef9ee089471f8d1e75da3bab3b1f7",
+      "bytes": 1154
+    },
+    {
+      "file": "assets/brand/exports/linux/hicolor/512x512/apps/local-llm-foundry.png",
+      "sha256": "9868f6c02d101011a9bcde5d690c826d550d8a6739a74a3ce267369cb0416749",
+      "bytes": 20557
+    },
+    {
+      "file": "assets/brand/exports/linux/hicolor/64x64/apps/local-llm-foundry.png",
+      "sha256": "cdf975cd154b2604f67581e47d215ba0d103a26014cba091d1f381fc1b956ce0",
+      "bytes": 2275
+    },
+    {
+      "file": "assets/brand/exports/social/token-ingot-1200x630.png",
+      "sha256": "d1399068b6000a29c9448bc9ee3f40475ed50432a17ee46ed48a947b3b890ec7",
+      "bytes": 16904
+    },
+    {
+      "file": "assets/brand/exports/token-ingot.icns",
+      "sha256": "e9c7f45bd81a7e721df3a9d67b7d0181a4fc6bfa5b481ba4b2dba82dff31a472",
+      "bytes": 154966
+    },
+    {
+      "file": "assets/brand/exports/token-ingot.ico",
+      "sha256": "13cc8c32428b2a639c65941fc54a6db8c8266f019c64fa41132d65300caed579",
+      "bytes": 31202
+    },
+    {
+      "file": "assets/brand/exports/tray/linux/token-ingot-1024.png",
+      "sha256": "83316361bccbc0cf550af8f8f5ecedd318a9fe4dfc2b0f3f2f7b5cceb849cb7e",
+      "bytes": 44099
+    },
+    {
+      "file": "assets/brand/exports/tray/linux/token-ingot-128.png",
+      "sha256": "a00f0528285c6156832ad5c3e3bcada656a221a86dce8694b8fb3984f6529175",
+      "bytes": 4559
+    },
+    {
+      "file": "assets/brand/exports/tray/linux/token-ingot-16.png",
+      "sha256": "56fa98b9cc60bc76780aab052908ecca28544dedfcdc4a466637f7b04c78a495",
+      "bytes": 580
+    },
+    {
+      "file": "assets/brand/exports/tray/linux/token-ingot-180.png",
+      "sha256": "a495bd95711e3ec66e833d55f2734c03f3e0c67a148226107f36da847a389c14",
+      "bytes": 6983
+    },
+    {
+      "file": "assets/brand/exports/tray/linux/token-ingot-192.png",
+      "sha256": "2a02068786ce6237249b7835cbf841aed2d8e2093317dbbcd2f10a8855bffd85",
+      "bytes": 6999
+    },
+    {
+      "file": "assets/brand/exports/tray/linux/token-ingot-20.png",
+      "sha256": "b789b3564c963d5729814050e1159b3bb0fdb0d46f9d6cd193c56a7c2f3670f9",
+      "bytes": 721
+    },
+    {
+      "file": "assets/brand/exports/tray/linux/token-ingot-22.png",
+      "sha256": "78cb1d26fed5f9e3b09d2bf2186e1f60e9e7b5ccbfbb3364c9eee47806126750",
+      "bytes": 785
+    },
+    {
+      "file": "assets/brand/exports/tray/linux/token-ingot-24.png",
+      "sha256": "5bf63cc898ccdbe4e54994467ddb99b76b206e48d45b75d64453ef750f995dbb",
+      "bytes": 847
+    },
+    {
+      "file": "assets/brand/exports/tray/linux/token-ingot-256.png",
+      "sha256": "cdd17c2356746e9e9f690539f215b2cd5de9d7777f6a46750e452fb0dadf355c",
+      "bytes": 9335
+    },
+    {
+      "file": "assets/brand/exports/tray/linux/token-ingot-32.png",
+      "sha256": "0420a4cdddb2b13fb76e5260d83de30a585ef9ee089471f8d1e75da3bab3b1f7",
+      "bytes": 1154
+    },
+    {
+      "file": "assets/brand/exports/tray/linux/token-ingot-512.png",
+      "sha256": "9868f6c02d101011a9bcde5d690c826d550d8a6739a74a3ce267369cb0416749",
+      "bytes": 20557
+    },
+    {
+      "file": "assets/brand/exports/tray/linux/token-ingot-64.png",
+      "sha256": "cdf975cd154b2604f67581e47d215ba0d103a26014cba091d1f381fc1b956ce0",
+      "bytes": 2275
+    },
+    {
+      "file": "assets/brand/exports/tray/macos/token-ingot-1024.png",
+      "sha256": "83316361bccbc0cf550af8f8f5ecedd318a9fe4dfc2b0f3f2f7b5cceb849cb7e",
+      "bytes": 44099
+    },
+    {
+      "file": "assets/brand/exports/tray/macos/token-ingot-128.png",
+      "sha256": "a00f0528285c6156832ad5c3e3bcada656a221a86dce8694b8fb3984f6529175",
+      "bytes": 4559
+    },
+    {
+      "file": "assets/brand/exports/tray/macos/token-ingot-16.png",
+      "sha256": "56fa98b9cc60bc76780aab052908ecca28544dedfcdc4a466637f7b04c78a495",
+      "bytes": 580
+    },
+    {
+      "file": "assets/brand/exports/tray/macos/token-ingot-180.png",
+      "sha256": "a495bd95711e3ec66e833d55f2734c03f3e0c67a148226107f36da847a389c14",
+      "bytes": 6983
+    },
+    {
+      "file": "assets/brand/exports/tray/macos/token-ingot-192.png",
+      "sha256": "2a02068786ce6237249b7835cbf841aed2d8e2093317dbbcd2f10a8855bffd85",
+      "bytes": 6999
+    },
+    {
+      "file": "assets/brand/exports/tray/macos/token-ingot-20.png",
+      "sha256": "b789b3564c963d5729814050e1159b3bb0fdb0d46f9d6cd193c56a7c2f3670f9",
+      "bytes": 721
+    },
+    {
+      "file": "assets/brand/exports/tray/macos/token-ingot-22.png",
+      "sha256": "78cb1d26fed5f9e3b09d2bf2186e1f60e9e7b5ccbfbb3364c9eee47806126750",
+      "bytes": 785
+    },
+    {
+      "file": "assets/brand/exports/tray/macos/token-ingot-24.png",
+      "sha256": "5bf63cc898ccdbe4e54994467ddb99b76b206e48d45b75d64453ef750f995dbb",
+      "bytes": 847
+    },
+    {
+      "file": "assets/brand/exports/tray/macos/token-ingot-256.png",
+      "sha256": "cdd17c2356746e9e9f690539f215b2cd5de9d7777f6a46750e452fb0dadf355c",
+      "bytes": 9335
+    },
+    {
+      "file": "assets/brand/exports/tray/macos/token-ingot-32.png",
+      "sha256": "0420a4cdddb2b13fb76e5260d83de30a585ef9ee089471f8d1e75da3bab3b1f7",
+      "bytes": 1154
+    },
+    {
+      "file": "assets/brand/exports/tray/macos/token-ingot-512.png",
+      "sha256": "9868f6c02d101011a9bcde5d690c826d550d8a6739a74a3ce267369cb0416749",
+      "bytes": 20557
+    },
+    {
+      "file": "assets/brand/exports/tray/macos/token-ingot-64.png",
+      "sha256": "cdf975cd154b2604f67581e47d215ba0d103a26014cba091d1f381fc1b956ce0",
+      "bytes": 2275
+    },
+    {
+      "file": "assets/brand/exports/tray/windows/token-ingot-1024.png",
+      "sha256": "83316361bccbc0cf550af8f8f5ecedd318a9fe4dfc2b0f3f2f7b5cceb849cb7e",
+      "bytes": 44099
+    },
+    {
+      "file": "assets/brand/exports/tray/windows/token-ingot-128.png",
+      "sha256": "a00f0528285c6156832ad5c3e3bcada656a221a86dce8694b8fb3984f6529175",
+      "bytes": 4559
+    },
+    {
+      "file": "assets/brand/exports/tray/windows/token-ingot-16.png",
+      "sha256": "56fa98b9cc60bc76780aab052908ecca28544dedfcdc4a466637f7b04c78a495",
+      "bytes": 580
+    },
+    {
+      "file": "assets/brand/exports/tray/windows/token-ingot-180.png",
+      "sha256": "a495bd95711e3ec66e833d55f2734c03f3e0c67a148226107f36da847a389c14",
+      "bytes": 6983
+    },
+    {
+      "file": "assets/brand/exports/tray/windows/token-ingot-192.png",
+      "sha256": "2a02068786ce6237249b7835cbf841aed2d8e2093317dbbcd2f10a8855bffd85",
+      "bytes": 6999
+    },
+    {
+      "file": "assets/brand/exports/tray/windows/token-ingot-20.png",
+      "sha256": "b789b3564c963d5729814050e1159b3bb0fdb0d46f9d6cd193c56a7c2f3670f9",
+      "bytes": 721
+    },
+    {
+      "file": "assets/brand/exports/tray/windows/token-ingot-22.png",
+      "sha256": "78cb1d26fed5f9e3b09d2bf2186e1f60e9e7b5ccbfbb3364c9eee47806126750",
+      "bytes": 785
+    },
+    {
+      "file": "assets/brand/exports/tray/windows/token-ingot-24.png",
+      "sha256": "5bf63cc898ccdbe4e54994467ddb99b76b206e48d45b75d64453ef750f995dbb",
+      "bytes": 847
+    },
+    {
+      "file": "assets/brand/exports/tray/windows/token-ingot-256.png",
+      "sha256": "cdd17c2356746e9e9f690539f215b2cd5de9d7777f6a46750e452fb0dadf355c",
+      "bytes": 9335
+    },
+    {
+      "file": "assets/brand/exports/tray/windows/token-ingot-32.png",
+      "sha256": "0420a4cdddb2b13fb76e5260d83de30a585ef9ee089471f8d1e75da3bab3b1f7",
+      "bytes": 1154
+    },
+    {
+      "file": "assets/brand/exports/tray/windows/token-ingot-512.png",
+      "sha256": "9868f6c02d101011a9bcde5d690c826d550d8a6739a74a3ce267369cb0416749",
+      "bytes": 20557
+    },
+    {
+      "file": "assets/brand/exports/tray/windows/token-ingot-64.png",
+      "sha256": "cdf975cd154b2604f67581e47d215ba0d103a26014cba091d1f381fc1b956ce0",
+      "bytes": 2275
+    }
+  ],
+  "required_sizes": {
+    "tray_and_package_px": [
+      16,
+      20,
+      22,
+      24,
+      32,
+      64,
+      128,
+      256,
+      512,
+      1024
+    ],
+    "apple_touch_px": 180,
+    "regular_pwa_px": [
+      192,
+      512
+    ],
+    "maskable_pwa_px": [
+      192,
+      512
+    ],
+    "social_px": [
+      1200,
+      630
+    ],
+    "windows": "token-ingot.ico",
+    "macos": "token-ingot.icns",
+    "linux": "hicolor/*/apps/local-llm-foundry.png"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "model": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
+  "suite": "cache-entries",
+  "trial_protocol": {
+    "trials": 1,
+    "ordering": "single-pass",
+    "settle_seconds": 0
+  },
+  "speculative_lane": null,
+  "qualification_eligible": true,
+  "positive_control": null,
+  "greedy_parity": null,
+  "sampling_lane": {
+    "mode": "recommended",
+    "recommendation_known": true,
+    "model_type": "qwen3_5_moe",
+    "reasoning": "on",
+    "source": "vendor profile",
+    "vendor_family": "qwen3.5/3.6",
+    "variant": "default",
+    "citation": "Qwen/Unsloth published settings for Qwen3.5 and Qwen3.6 (identical across both), reasoning enabled",
+    "temperature": 1,
+    "top_p": 0.95,
+    "top_k": 20,
+    "min_p": 0,
+    "presence_penalty": 0,
+    "repetition_penalty": 1,
+    "reasoning_control": {
+      "control": "enable_thinking",
+      "evidence": "chat template references enable_thinking"
+    },
+    "reasoning_effective": "on"
+  },
+  "performance_claim_eligible": true,
+  "receipts": [
+    {
+      "label": "00-cache-entries-b-32000-e4",
+      "receipt": "00-00-cache-entries-b-32000-e4.json",
+      "server_log": "00-00-cache-entries-b-32000-e4.server.log",
+      "harness_log": "00-00-cache-entries-b-32000-e4.harness.log",
+      "manifest": null,
+      "clamp_verdict": "not_probed",
+      "observed_lane": "not_applicable"
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

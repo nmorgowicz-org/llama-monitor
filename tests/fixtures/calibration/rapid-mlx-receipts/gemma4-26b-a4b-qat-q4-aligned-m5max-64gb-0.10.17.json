@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "kind": "rapid_mlx_runtime_receipt",
+  "evidence_level": "provisional",
+  "runtime": {
+    "backend": "rapid-mlx",
+    "version": "0.10.17",
+    "host": "127.0.0.1",
+    "max_num_seqs": 1,
+    "max_concurrent_requests": 1,
+    "gpu_memory_utilization": 0.75
+  },
+  "hardware": {
+    "cpu": "Apple M5 Max",
+    "unified_memory_bytes": 68719476736,
+    "measurement_limitations": [
+      "This is a bounded cold/single-request receipt, not a D28 calibrated context envelope.",
+      "Metal allocator active/peak values are backend metrics, not whole-process physical footprint."
+    ]
+  },
+  "model": {
+    "hf_repo_id": "mlx-community/gemma-4-26B-A4B-it-qat-q4_0-mlx-aligned",
+    "revision": "745a97a754ed4b7713163c7d0e9c11da41809e0c",
+    "config_sha256": "d563ee897015b7826949f5b9c545494ba6098ef210efdbbf0c65e03f4fa5c776",
+    "family": "Gemma4-26B-A4B QAT",
+    "published_artifact_bytes": 15819056091
+  },
+  "procedure": {
+    "arguments": [
+      "--host 127.0.0.1",
+      "--port 17880",
+      "--max-num-seqs 1",
+      "--max-concurrent-requests 1",
+      "--disable-prefix-cache",
+      "--pflash off",
+      "--kv-cache-dtype int4",
+      "--kv-cache-turboquant none",
+      "--max-tokens 32",
+      "--gpu-memory-utilization 0.75"
+    ],
+    "request": {
+      "endpoint": "/v1/chat/completions",
+      "temperature": 0,
+      "max_tokens": 16
+    }
+  },
+  "observations": [
+    {
+      "id": "text-standard-int4",
+      "request_succeeded": true,
+      "effective_runtime_metrics": {
+        "rapid_mlx_kv_cache_dtype": "int4",
+        "rapid_mlx_turboquant_mode": "disabled",
+        "metal_active_memory_bytes": 15790000000,
+        "metal_peak_memory_bytes_before_request": 15790000000
+      },
+      "interpretation": "This revision is a valid Rapid text-generation target under the explicit Standard/int4 policy."
+    },
+    {
+      "id": "automatic-vlm-routing",
+      "request_succeeded": false,
+      "request_shape": "OpenAI chat-completions image_url with a minimal in-memory PNG",
+      "runtime_error": "Model does not support image inputs.",
+      "interpretation": "Rapid 0.10.17 auto-routes this revision as text-only despite vision_config metadata."
+    },
+    {
+      "id": "forced-vlm-routing",
+      "arguments_added": ["--mllm"],
+      "server_started": false,
+      "runtime_error": "MLLM load failed: 211 vision tensors missing; checkpoint declares vision_config but safetensors do not carry a complete vision tower.",
+      "interpretation": "Do not expose this revision as a runnable Rapid VLM. Model metadata alone is insufficient; launch-time weight ownership/capability proof is required."
+    }
+  ],
+  "related_nonbaseline_artifact": {
+    "hf_repo_id": "mlx-community/gemma-4-26B-A4B-it-qat-OptiQ-4bit",
+    "published_artifact_bytes": 21887493136,
+    "notes": [
+      "Mixed precision (achieved 6.01 bits per weight), not uniform Q4.",
+      "Includes optiq/optiq_vision.safetensors, but requires the mlx-optiq/MLX-LM path and was not used as a Rapid baseline."
+    ]
+  },
+  "next_measurements_required": [
+    "Use a Rapid release/model artifact combination that proves a complete VLM tower before declaring Gemma vision support.",
+    "Repeat text and VLM measurements at 8k, 32k, and 131k with controlled prompt construction.",
+    "Measure prefix reuse, retained bytes, TTFT, transient peak, and estimator residuals."
+  ]
+}

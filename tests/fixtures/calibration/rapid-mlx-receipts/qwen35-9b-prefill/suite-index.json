@@ -1,0 +1,58 @@
+{
+  "model": "nightmedia/Qwen3.5-9B-DS9-USS-Defiant-1M-q8-hi-mlx",
+  "suite": "prefill",
+  "receipts": [
+    {
+      "label": "00-prefill-2048-32000-int8",
+      "receipt": "00-00-prefill-2048-32000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "01-prefill-2048-65536-int8",
+      "receipt": "01-01-prefill-2048-65536-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "02-prefill-2048-131072-int8",
+      "receipt": "02-02-prefill-2048-131072-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "03-prefill-2048-160000-int8",
+      "receipt": "03-03-prefill-2048-160000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "04-prefill-2048-200000-int8",
+      "receipt": "04-04-prefill-2048-200000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "05-prefill-4096-32000-int8",
+      "receipt": "05-05-prefill-4096-32000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "06-prefill-4096-65536-int8",
+      "receipt": "06-06-prefill-4096-65536-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "07-prefill-4096-131072-int8",
+      "receipt": "07-07-prefill-4096-131072-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "08-prefill-4096-160000-int8",
+      "receipt": "08-08-prefill-4096-160000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "09-prefill-4096-200000-int8",
+      "receipt": "09-09-prefill-4096-200000-int8.json",
+      "manifest": null
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

@@ -1,6 +1,17 @@
-# Llama Monitor Documentation
+# Local LLM Foundry Documentation
 
-Documentation index for Llama Monitor — a local LLM inference and GPU monitoring tool.
+Documentation index for Local LLM Foundry — local LLM inference, GPU
+monitoring, chat, and managed runtime tooling. Historical evidence keeps its
+original Llama Monitor names intentionally.
+
+## Upgrade and brand
+
+- [Upgrade from 1.x to 2.0](reference/upgrade-2-0.md)
+- [Brand usage](reference/branding.md)
+
+The reference guides below describe Foundry's local LLM inference and GPU
+monitoring surfaces. Technical backend names and historical compatibility paths
+are called out where they are part of the contract.
 
 ## Reference Guides
 
@@ -9,6 +20,8 @@ Documentation index for Llama Monitor — a local LLM inference and GPU monitori
 | [chat.md](reference/chat.md) | Chat features, guided generation, explicit mode, persona system |
 | [dashboard.md](reference/dashboard.md) | Dashboard layout, settings, server tab, GPU metrics |
 | [api.md](reference/api.md) | REST API endpoints, WebSocket schema |
+| [model-library.md](reference/model-library.md) | Structured GGUF, MLX, safetensors, cache, and migration behavior |
+| [rapid-mlx-runtime.md](reference/rapid-mlx-runtime.md) | Managed Rapid-MLX install, upgrade, repair, rollback, and isolation contracts |
 | [remote-agent.md](reference/remote-agent.md) | Remote agent connection, multi-server setup |
 | [inference-tuning.md](reference/inference-tuning.md) | Model/quant/KV/flag tuning for Apple Silicon & discrete GPUs (dense vs MoE, `--n-cpu-moe`) |
 | [capabilities.md](reference/capabilities.md) | System capabilities, hardware support |

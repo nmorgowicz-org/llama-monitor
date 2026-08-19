@@ -3,10 +3,28 @@
 
 //! Re-exported static asset constants for embedding at compile time.
 
+pub static TOKEN_INGOT_1024_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-1024.png");
+pub static TOKEN_INGOT_128_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-128.png");
+pub static TOKEN_INGOT_16_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-16.png");
+pub static TOKEN_INGOT_180_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-180.png");
+pub static TOKEN_INGOT_192_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-192.png");
+pub static TOKEN_INGOT_20_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-20.png");
+pub static TOKEN_INGOT_22_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-22.png");
+pub static TOKEN_INGOT_24_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-24.png");
+pub static TOKEN_INGOT_256_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-256.png");
+pub static TOKEN_INGOT_32_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-32.png");
+pub static TOKEN_INGOT_512_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-512.png");
+pub static TOKEN_INGOT_64_PNG: &[u8] = include_bytes!("../../static/brand/token-ingot-64.png");
+pub static TOKEN_INGOT_MASKABLE_192_PNG: &[u8] =
+    include_bytes!("../../static/brand/token-ingot-maskable-192.png");
+pub static TOKEN_INGOT_MASKABLE_512_PNG: &[u8] =
+    include_bytes!("../../static/brand/token-ingot-maskable-512.png");
+pub static TOKEN_INGOT_ICO: &[u8] = include_bytes!("../../static/brand/token-ingot.ico");
 pub const COMPACT_HTML: &str = include_str!("../../static/compact.html");
 pub const CSS_AGENT_MODAL: &str = include_str!("../../static/css/agent-modal.css");
 pub const CSS_AUTH: &str = include_str!("../../static/css/auth.css");
 pub const CSS_BASE: &str = include_str!("../../static/css/base.css");
+pub const CSS_CALIBRATION: &str = include_str!("../../static/css/calibration.css");
 pub const CSS_CARDS_HARDWARE: &str = include_str!("../../static/css/cards-hardware.css");
 pub const CSS_CARDS_INFERENCE: &str = include_str!("../../static/css/cards-inference.css");
 pub const CSS_CHAT_GUIDED_GENERATION: &str =
@@ -15,14 +33,36 @@ pub const CSS_CHAT_HISTORY_QA: &str = include_str!("../../static/css/chat-histor
 pub const CSS_CHAT: &str = include_str!("../../static/css/chat.css");
 pub const CSS_COMMAND_PALETTE: &str = include_str!("../../static/css/command-palette.css");
 pub const CSS_COMPONENTS: &str = include_str!("../../static/css/components.css");
+pub const CSS_EVIDENCE_DRAWER: &str = include_str!("../../static/css/evidence-drawer.css");
 pub const CSS_LAYOUT: &str = include_str!("../../static/css/layout.css");
 pub const CSS_LOGS: &str = include_str!("../../static/css/logs.css");
 pub const CSS_MODAL_PREMIUM: &str = include_str!("../../static/css/modal-premium.css");
+pub const CSS_MODAL_SIZING: &str = include_str!("../../static/css/modal-sizing.css");
 pub const CSS_SETTINGS_MODAL: &str = include_str!("../../static/css/settings-modal.css");
 pub const CSS_SETUP_VIEW: &str = include_str!("../../static/css/setup-view.css");
-pub const CSS_SPAWN_WIZARD: &str = include_str!("../../static/css/spawn-wizard.css");
+pub const CSS_SPAWN_WIZARD_BASE: &str = include_str!("../../static/css/spawn-wizard-base.css");
+pub const CSS_SPAWN_WIZARD_PRO: &str = include_str!("../../static/css/spawn-wizard-pro.css");
+pub const CSS_SPAWN_WIZARD_THEME: &str = include_str!("../../static/css/spawn-wizard-theme.css");
 pub const CSS_TOKENS: &str = include_str!("../../static/css/tokens.css");
 pub const CSS_TUNE_PANEL: &str = include_str!("../../static/css/tune-panel.css");
+pub const LICENSE_FIRA_CODE_TXT: &str = include_str!("../../static/fonts/LICENSE-Fira-Code.txt");
+pub const LICENSE_INTER_TXT: &str = include_str!("../../static/fonts/LICENSE-Inter.txt");
+pub const README_MD: &str = include_str!("../../static/fonts/README.md");
+pub static FIRACODE_MEDIUM_WOFF2: &[u8] =
+    include_bytes!("../../static/fonts/fira-code/FiraCode-Medium.woff2");
+pub static FIRACODE_REGULAR_WOFF2: &[u8] =
+    include_bytes!("../../static/fonts/fira-code/FiraCode-Regular.woff2");
+pub static FIRACODE_SEMIBOLD_WOFF2: &[u8] =
+    include_bytes!("../../static/fonts/fira-code/FiraCode-SemiBold.woff2");
+pub static INTER_BOLD_WOFF2: &[u8] = include_bytes!("../../static/fonts/inter/Inter-Bold.woff2");
+pub static INTER_EXTRABOLD_WOFF2: &[u8] =
+    include_bytes!("../../static/fonts/inter/Inter-ExtraBold.woff2");
+pub static INTER_MEDIUM_WOFF2: &[u8] =
+    include_bytes!("../../static/fonts/inter/Inter-Medium.woff2");
+pub static INTER_REGULAR_WOFF2: &[u8] =
+    include_bytes!("../../static/fonts/inter/Inter-Regular.woff2");
+pub static INTER_SEMIBOLD_WOFF2: &[u8] =
+    include_bytes!("../../static/fonts/inter/Inter-SemiBold.woff2");
 pub const ICON_SVG: &str = include_str!("../../static/icon.svg");
 pub const INDEX_HTML: &str = include_str!("../../static/index.html");
 pub const BOOTSTRAP_JS: &str = include_str!("../../static/js/bootstrap.js");
@@ -31,11 +71,16 @@ pub const COMPAT_GLOBALS_JS: &str = include_str!("../../static/js/compat/globals
 pub const CONFIG_DOMPURIFY_INIT_JS: &str = include_str!("../../static/js/config/dompurify-init.js");
 pub const CORE_APP_STATE_JS: &str = include_str!("../../static/js/core/app-state.js");
 pub const CORE_FORMAT_JS: &str = include_str!("../../static/js/core/format.js");
+pub const CORE_IDENTITY_JS: &str = include_str!("../../static/js/core/identity.js");
+pub const CORE_PLATFORM_INFO_JS: &str = include_str!("../../static/js/core/platform-info.js");
 pub const CORE_TOOLTIP_JS: &str = include_str!("../../static/js/core/tooltip.js");
 pub const FEATURES_ANIMATE_JS: &str = include_str!("../../static/js/features/animate.js");
+pub const FEATURES_APP_HOME_MIGRATION_JS: &str =
+    include_str!("../../static/js/features/app-home-migration.js");
 pub const FEATURES_ATTACH_DETACH_JS: &str =
     include_str!("../../static/js/features/attach-detach.js");
 pub const FEATURES_AUTH_JS: &str = include_str!("../../static/js/features/auth.js");
+pub const FEATURES_CALIBRATION_JS: &str = include_str!("../../static/js/features/calibration.js");
 pub const FEATURES_CHAT_FOCUS_MODE_JS: &str =
     include_str!("../../static/js/features/chat-focus-mode.js");
 pub const FEATURES_CHAT_HISTORY_QA_JS: &str =
@@ -53,6 +98,8 @@ pub const FEATURES_CHAT_SESSIONS_SIDEBAR_JS: &str =
 pub const FEATURES_CHAT_STATE_JS: &str = include_str!("../../static/js/features/chat-state.js");
 pub const FEATURES_CHAT_SUGGESTIONS_JS: &str =
     include_str!("../../static/js/features/chat-suggestions.js");
+pub const FEATURES_CHAT_TEMPLATE_PANEL_JS: &str =
+    include_str!("../../static/js/features/chat-template-panel.js");
 pub const FEATURES_CHAT_TEMPLATE_REGISTRY_JS: &str =
     include_str!("../../static/js/features/chat-template-registry.js");
 pub const FEATURES_CHAT_TEMPLATES_JS: &str =
@@ -67,6 +114,8 @@ pub const FEATURES_DASHBOARD_RENDER_JS: &str =
     include_str!("../../static/js/features/dashboard-render.js");
 pub const FEATURES_DASHBOARD_WS_JS: &str = include_str!("../../static/js/features/dashboard-ws.js");
 pub const FEATURES_DB_ADMIN_JS: &str = include_str!("../../static/js/features/db-admin.js");
+pub const FEATURES_EVIDENCE_DRAWER_JS: &str =
+    include_str!("../../static/js/features/evidence-drawer.js");
 pub const FEATURES_FILE_BROWSER_LAUNCHER_JS: &str =
     include_str!("../../static/js/features/file-browser-launcher.js");
 pub const FEATURES_FILE_BROWSER_JS: &str = include_str!("../../static/js/features/file-browser.js");
@@ -74,11 +123,21 @@ pub const FEATURES_HF_BROWSE_JS: &str = include_str!("../../static/js/features/h
 pub const FEATURES_LHM_JS: &str = include_str!("../../static/js/features/lhm.js");
 pub const FEATURES_LLAMA_UPDATER_JS: &str =
     include_str!("../../static/js/features/llama-updater.js");
+pub const FEATURES_MODEL_ROOT_MIGRATION_JS: &str =
+    include_str!("../../static/js/features/model-root-migration.js");
 pub const FEATURES_MODELS_JS: &str = include_str!("../../static/js/features/models.js");
 pub const FEATURES_NAV_JS: &str = include_str!("../../static/js/features/nav.js");
 pub const FEATURES_NETWORK_DETECTION_JS: &str =
     include_str!("../../static/js/features/network-detection.js");
+pub const FEATURES_PRESET_EDITOR_MLX_JS: &str =
+    include_str!("../../static/js/features/preset-editor-mlx.js");
 pub const FEATURES_PRESETS_JS: &str = include_str!("../../static/js/features/presets.js");
+pub const FEATURES_RAPID_MLX_CARDS_JS: &str =
+    include_str!("../../static/js/features/rapid-mlx-cards.js");
+pub const FEATURES_RAPID_MLX_PREFILL_JS: &str =
+    include_str!("../../static/js/features/rapid-mlx-prefill.js");
+pub const FEATURES_RAPID_MLX_UPDATER_JS: &str =
+    include_str!("../../static/js/features/rapid-mlx-updater.js");
 pub const FEATURES_REMOTE_AGENT_JS: &str = include_str!("../../static/js/features/remote-agent.js");
 pub const FEATURES_ROUTER_JS: &str = include_str!("../../static/js/features/router.js");
 pub const FEATURES_SENSOR_BRIDGE_JS: &str =
@@ -89,6 +148,58 @@ pub const FEATURES_SETUP_VIEW_JS: &str = include_str!("../../static/js/features/
 pub const FEATURES_SHORTCUTS_JS: &str = include_str!("../../static/js/features/shortcuts.js");
 pub const FEATURES_SPAWN_READINESS_JS: &str =
     include_str!("../../static/js/features/spawn-readiness.js");
+pub const FEATURES_SPAWN_WIZARD_AUTOSIZE_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-autosize.js");
+pub const FEATURES_SPAWN_WIZARD_BINARY_PREREQ_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-binary-prereq.js");
+pub const FEATURES_SPAWN_WIZARD_CHAT_TEMPLATE_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-chat-template.js");
+pub const FEATURES_SPAWN_WIZARD_CONTEXT_FIT_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-context-fit.js");
+pub const FEATURES_SPAWN_WIZARD_FORMAT_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-format.js");
+pub const FEATURES_SPAWN_WIZARD_GROUPS_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-groups.js");
+pub const FEATURES_SPAWN_WIZARD_GUIDED_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-guided.js");
+pub const FEATURES_SPAWN_WIZARD_HARDWARE_MODEL_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-hardware-model.js");
+pub const FEATURES_SPAWN_WIZARD_HF_BROWSE_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-hf-browse.js");
+pub const FEATURES_SPAWN_WIZARD_HF_DOWNLOAD_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-hf-download.js");
+pub const FEATURES_SPAWN_WIZARD_HF_ORIGIN_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-hf-origin.js");
+pub const FEATURES_SPAWN_WIZARD_HF_TAGS_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-hf-tags.js");
+pub const FEATURES_SPAWN_WIZARD_IA_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-ia.js");
+pub const FEATURES_SPAWN_WIZARD_LLAMA_IA_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-llama-ia.js");
+pub const FEATURES_SPAWN_WIZARD_MLX_IA_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-mlx-ia.js");
+pub const FEATURES_SPAWN_WIZARD_MMPROJ_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-mmproj.js");
+pub const FEATURES_SPAWN_WIZARD_MODEL_CARD_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-model-card.js");
+pub const FEATURES_SPAWN_WIZARD_MTP_DRAFT_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-mtp-draft.js");
+pub const FEATURES_SPAWN_WIZARD_RAPID_MLX_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-rapid-mlx.js");
+pub const FEATURES_SPAWN_WIZARD_REVIEW_STEP_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-review-step.js");
+pub const FEATURES_SPAWN_WIZARD_SETTING_STATE_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-setting-state.js");
+pub const FEATURES_SPAWN_WIZARD_SPAWN_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-spawn.js");
+pub const FEATURES_SPAWN_WIZARD_STICKY_VRAM_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-sticky-vram.js");
+pub const FEATURES_SPAWN_WIZARD_THIRD_PARTY_IMPORT_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-third-party-import.js");
+pub const FEATURES_SPAWN_WIZARD_TUNING_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-tuning.js");
+pub const FEATURES_SPAWN_WIZARD_VRAM_DISPLAY_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-vram-display.js");
 pub const FEATURES_SPAWN_WIZARD_JS: &str = include_str!("../../static/js/features/spawn-wizard.js");
 pub const FEATURES_TELEMETRY_GRADE_JS: &str =
     include_str!("../../static/js/features/telemetry-grade.js");
@@ -97,6 +208,8 @@ pub const FEATURES_TEMPLATE_AUTOUPDATER_JS: &str =
 pub const FEATURES_TOAST_JS: &str = include_str!("../../static/js/features/toast.js");
 pub const FEATURES_TUNE_PANEL_JS: &str = include_str!("../../static/js/features/tune-panel.js");
 pub const FEATURES_TUNING_CARDS_JS: &str = include_str!("../../static/js/features/tuning-cards.js");
+pub const FEATURES_UPDATER_SHARED_JS: &str =
+    include_str!("../../static/js/features/updater-shared.js");
 pub const FEATURES_UPDATES_JS: &str = include_str!("../../static/js/features/updates.js");
 pub const FEATURES_USER_MENU_JS: &str = include_str!("../../static/js/features/user-menu.js");
 pub const FEATURES_VRAM_ESTIMATE_JS: &str =

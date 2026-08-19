@@ -1,0 +1,18 @@
+{
+  "model": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
+  "suite": "cache",
+  "receipts": [
+    {
+      "label": "00-cache-200000-ram-8192-int4-checkpoint-0",
+      "receipt": "00-00-cache-200000-ram-8192-int4-checkpoint-0.json",
+      "manifest": null
+    },
+    {
+      "label": "01-cache-200000-ram-8192-int4-checkpoint-8192",
+      "receipt": "01-01-cache-200000-ram-8192-int4-checkpoint-8192.json",
+      "manifest": null
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

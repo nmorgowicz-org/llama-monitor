@@ -1,0 +1,33 @@
+{
+  "model": "nightmedia/Qwen3.5-9B-DS9-USS-Defiant-1M-q8-hi-mlx",
+  "suite": "prefill",
+  "receipts": [
+    {
+      "label": "00-prefill-512-32000-int8",
+      "receipt": "00-00-prefill-512-32000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "01-prefill-512-65536-int8",
+      "receipt": "01-01-prefill-512-65536-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "02-prefill-512-131072-int8",
+      "receipt": "02-02-prefill-512-131072-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "03-prefill-512-160000-int8",
+      "receipt": "03-03-prefill-512-160000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "04-prefill-512-200000-int8",
+      "receipt": "04-04-prefill-512-200000-int8.json",
+      "manifest": null
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

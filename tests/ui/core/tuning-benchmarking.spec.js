@@ -120,4 +120,37 @@ test.describe('Tuning and Benchmarking', () => {
     await card.locator('.tune-suggestion-apply').click();
     await expect(page.locator('.toast.toast-error')).toBeVisible();
   });
+
+  test('Rapid-MLX benchmark advice stays informational-only', async ({ page }) => {
+    await page.locator('#benchmark-pill').click();
+
+    await page.route('**/api/benchmark', async (route) => {
+      if (route.request().method() !== 'POST') { await route.continue(); return; }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          backend: 'rapid-mlx',
+          gen_tokens_per_second: 2.5,
+          prompt_tokens_per_second: 120,
+          time_to_first_token_ms: 2000,
+          suggestions: [
+            {
+              label: 'Review Rapid-MLX runtime settings',
+              description: 'Informational guidance only; no llama.cpp fields are actionable here.',
+              param: '',
+              value: null,
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.locator('#tune-run-btn').click();
+
+    const card = page.locator('.tune-suggestion-card');
+    await expect(card).toHaveCount(1);
+    await expect(card).toContainText('Review Rapid-MLX runtime settings');
+    await expect(card.locator('.tune-suggestion-apply')).toHaveCount(0);
+  });
 });

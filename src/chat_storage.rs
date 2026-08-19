@@ -6,6 +6,9 @@ use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+const MAX_ADMIN_QUERY_ROWS: usize = 1_000;
+const MAX_ADMIN_QUERY_RESULT_BYTES: usize = 1_048_576;
+
 const SCHEMA_SQL: &str = r#"
 PRAGMA journal_mode=WAL;
 PRAGMA synchronous=NORMAL;
@@ -219,6 +222,14 @@ pub struct SearchResultsPage {
 }
 
 // ── Storage ───────────────────────────────────────────────────────────────────
+
+impl Default for ChatStorage {
+    fn default() -> Self {
+        let random_id: u32 = rand::random();
+        let path = std::env::temp_dir().join(format!("llama_monitor_test_{}.db", random_id));
+        Self::open(&path).expect("Failed to open test chat database")
+    }
+}
 
 pub struct ChatStorage {
     // Option so restore_from_path can atomically close and reopen the connection
@@ -1149,7 +1160,26 @@ impl ChatStorage {
             Ok(serde_json::Value::Object(row_data))
         })?;
 
-        let collected: Vec<serde_json::Value> = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut collected = Vec::new();
+        let mut result_bytes = 0usize;
+        for row in rows {
+            if collected.len() >= MAX_ADMIN_QUERY_ROWS {
+                return Err(anyhow::anyhow!(
+                    "Query result exceeds the {} row limit; add a LIMIT clause",
+                    MAX_ADMIN_QUERY_ROWS
+                ));
+            }
+            let row = row?;
+            let row_bytes = serde_json::to_vec(&row)?;
+            result_bytes = result_bytes.saturating_add(row_bytes.len());
+            if result_bytes > MAX_ADMIN_QUERY_RESULT_BYTES {
+                return Err(anyhow::anyhow!(
+                    "Query result exceeds the {} byte limit; narrow the selected columns or add a LIMIT clause",
+                    MAX_ADMIN_QUERY_RESULT_BYTES
+                ));
+            }
+            collected.push(row);
+        }
 
         Ok(serde_json::json!({
             "columns": column_names,
@@ -1669,5 +1699,31 @@ mod tests {
             .search("dragon", 10, 0, &[], Some("tab-x"))
             .expect("empty scope");
         assert_eq!(empty.total, 0);
+    }
+
+    #[test]
+    fn admin_query_rejects_unbounded_row_results() {
+        let dir = tempdir().expect("temp dir");
+        let store = ChatStorage::open(&dir.path().join("chat.db")).expect("open storage");
+        let error = store
+        .execute_query(
+            "SELECT n FROM (WITH RECURSIVE rows(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM rows WHERE n < 1001) SELECT n FROM rows)",
+            true,
+        )
+        .expect_err("row limit must be enforced");
+        assert!(error.to_string().contains("row limit"));
+    }
+
+    #[test]
+    fn admin_query_rejects_unbounded_result_bytes() {
+        let dir = tempdir().expect("temp dir");
+        let store = ChatStorage::open(&dir.path().join("chat.db")).expect("open storage");
+        let error = store
+        .execute_query(
+            "SELECT payload FROM (WITH RECURSIVE rows(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM rows WHERE n < 1000) SELECT printf('%01200d', n) AS payload FROM rows)",
+            true,
+        )
+        .expect_err("byte limit must be enforced");
+        assert!(error.to_string().contains("byte limit"));
     }
 }

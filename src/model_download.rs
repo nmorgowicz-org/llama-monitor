@@ -22,9 +22,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures_util::StreamExt;
-use hf_hub::api::sync::ApiBuilder;
-use hf_hub::{Repo, RepoType};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Notify;
@@ -43,6 +41,24 @@ pub struct DownloadStatus {
     pub message: String,
     /// Absolute filesystem path where the file is being saved.
     pub local_path: String,
+}
+
+/// Persisted beside an interrupted `.part` file so a restart can offer a real
+/// resume action instead of asking the user to reconstruct the Hugging Face
+/// repository and filename.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DownloadResumeMetadata {
+    pub repo_id: String,
+    pub file_path: String,
+    pub save_as: Option<String>,
+}
+
+pub fn resume_metadata_path(part_path: &Path) -> std::path::PathBuf {
+    part_path.with_extension("part.json")
+}
+
+pub fn load_resume_metadata(part_path: &Path) -> Option<DownloadResumeMetadata> {
+    serde_json::from_reader(std::fs::File::open(resume_metadata_path(part_path)).ok()?).ok()
 }
 
 /// Specific reasons why `start_download` refused to begin.
@@ -222,6 +238,21 @@ pub fn start_download(
         )));
     }
 
+    let part_path = local_path.with_extension("part");
+    let resume_metadata = DownloadResumeMetadata {
+        repo_id: repo_id_owned.clone(),
+        file_path: file_path_owned.clone(),
+        save_as: save_as.map(str::to_owned),
+    };
+    if let Err(error) = std::fs::write(
+        resume_metadata_path(&part_path),
+        serde_json::to_vec_pretty(&resume_metadata).unwrap_or_default(),
+    ) {
+        return Err(DownloadStartError::Generic(format!(
+            "Failed to record resumable download metadata: {error}"
+        )));
+    }
+
     // Restore .part to real name so run_download can resume from existing file.
     if !local_path.exists() {
         let part_path = local_path.with_extension("part");
@@ -318,18 +349,8 @@ async fn run_download(
         }
     };
 
-    // Resolve the HF download URL via hf-hub.
-    let api = match ApiBuilder::new().with_token(hf_token.clone()).build() {
-        Ok(a) => a,
-        Err(e) => {
-            set_failed(&task, format!("Failed to build HF API client: {e}"));
-            return;
-        }
-    };
-
-    let url = api
-        .repo(Repo::new(repo_id.clone(), RepoType::Model))
-        .url(&file_path);
+    // Resolve the HF download URL.
+    let url = crate::hf::hf_resolve_download_url(&repo_id, &file_path);
     if url.is_empty() {
         set_failed(
             &task,
@@ -368,6 +389,22 @@ async fn run_download(
 
     // Populate total_bytes from Content-Length so the status endpoint can compute ETA.
     let content_length = resp.content_length();
+
+    // The commit `main` actually resolved to, for the provenance sidecar written on
+    // completion. This is the only point it is knowable: the redirect Hugging Face serves
+    // carries it, and once the body starts streaming the header is gone. Absent means the
+    // file came from whatever the branch pointed at, which is recorded as such rather than
+    // guessed at.
+    let resolved_revision = resp
+        .headers()
+        .get("x-repo-commit")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)
+        .filter(|sha| {
+            !sha.is_empty()
+                && sha.len() <= 128
+                && sha.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        });
 
     // When resuming, perform a basic sanity check to avoid corrupting the file
     // if the server-side content changed or our partial is invalid.
@@ -567,6 +604,34 @@ async fn run_download(
     };
     t.status = "completed".into();
     t.message = "Download completed.".into();
+
+    // Record where this file came from while the answer is still in scope. The library scan
+    // sees only a filename on disk, so without this the origin is unrecoverable -- which is
+    // exactly why the lineage row on the model cards had never rendered.
+    if let (Some(dir), Some(name)) = (
+        local_path.parent(),
+        local_path.file_name().and_then(|n| n.to_str()),
+    ) && let Err(e) = crate::models::provenance::record_download(
+        dir,
+        name,
+        crate::models::provenance::DownloadProvenance {
+            repo_id: repo_id.clone(),
+            revision: resolved_revision.clone(),
+            remote_path: file_path.clone(),
+            downloaded_at: std::time::SystemTime::UNIX_EPOCH
+                .elapsed()
+                .unwrap_or_default()
+                .as_secs(),
+            size_bytes: written,
+        },
+    ) {
+        // The file downloaded fine; only its lineage is missing. Report it and leave the
+        // download successful rather than failing a multi-gigabyte transfer over a sidecar.
+        eprintln!("[warn] could not record provenance  file={file_path}  error={e}");
+    }
+
+    let _ = std::fs::remove_file(resume_metadata_path(&local_path.with_extension("part")));
+
     if is_tty {
         let elapsed = stream_start.elapsed().as_secs_f64();
         let transferred = written.saturating_sub(resume_from);
@@ -653,6 +718,7 @@ fn set_failed(task: &Arc<Mutex<DownloadTask>>, msg: String) {
             path.display()
         );
         let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(resume_metadata_path(&path.with_extension("part")));
     }
 }
 
@@ -843,4 +909,37 @@ pub fn cancel_download(download_id: &str) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resume_metadata_round_trips_beside_partial_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("model.gguf.part");
+        std::fs::write(&part, b"partial").unwrap();
+        let metadata = DownloadResumeMetadata {
+            repo_id: "org/model".into(),
+            file_path: "model.gguf".into(),
+            save_as: Some("model.gguf".into()),
+        };
+        std::fs::write(
+            resume_metadata_path(&part),
+            serde_json::to_vec(&metadata).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(load_resume_metadata(&part).unwrap().repo_id, "org/model");
+        assert_eq!(load_resume_metadata(&part).unwrap().file_path, "model.gguf");
+    }
+
+    #[test]
+    fn missing_resume_metadata_is_degraded_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("legacy.gguf.part");
+        std::fs::write(&part, b"partial").unwrap();
+        assert!(load_resume_metadata(&part).is_none());
+    }
 }

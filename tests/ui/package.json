@@ -4,6 +4,9 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
+    "test:in-memory": "playwright test --grep @in-memory-test",
+    "test:fake-data": "playwright test --grep @fake-data-bypass",
+    "test:runtime": "LLAMA_MONITOR_HAS_RUNTIME=1 playwright test --grep @runtime-required",
     "test:ssh": "playwright test remote-agent-ssh.integration.spec.js",
     "test:ai": "LLAMA_MONITOR_HAS_AI=1 playwright test",
     "test:headed": "playwright test --headless=false",
@@ -12,9 +15,13 @@
     "capture:list": "node capture.mjs --list-scenarios",
     "capture:sparkline": "node capture.mjs --scenario sparkline",
     "capture:gifs": "node capture.mjs --scenario gifs",
-    "update-baseline": "node -e \"import('./update-baseline.mjs').then(m => m.default())\""
+    "update-baseline": "node -e \"import('./update-baseline.mjs').then(m => m.default())\"",
+    "capture:group": "node capture/cli-group.mjs",
+    "capture:manifest": "node capture/cli-manifest.mjs"
   },
   "devDependencies": {
-    "@playwright/test": "1.61.1"
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "1.62.1",
+    "puppeteer": "25.5.0"
   }
 }

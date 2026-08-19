@@ -136,7 +136,7 @@ fn sanitize_guided_content(input: &str) -> String {
                     let text = if eff.is_empty() || eff == t {
                         t.to_string()
                     } else if eff.len() > 120 {
-                        format!("{}: {}", t, &eff[..117].trim())
+                        format!("{}: {}", t, eff[..117].trim())
                     } else {
                         format!("{}: {}", t, eff)
                     };
@@ -172,8 +172,8 @@ fn api_chat_guided(
                 if !check_api_token(&auth, &cfg) {
                     return Ok(unauthorized_api_token());
                 }
-                let (url, permit) = prepare_inference_request(&state).await?;
-                let client = build_upstream_client(std::time::Duration::from_secs(120))?;
+                let prepared = prepare_inference_request(&state).await?;
+                let client = build_upstream_client()?;
                 let mut request_body = body.to_vec();
 
                 if let Ok(mut val) = serde_json::from_slice::<serde_json::Value>(&request_body) {
@@ -187,14 +187,20 @@ fn api_chat_guided(
                     request_body =
                         serde_json::to_vec(&val).unwrap_or_else(|_| request_body.clone());
                 }
+                request_body = prepared.map_chat_body(&request_body)?;
+                let url = prepared.url.clone();
 
                 let resp = send_upstream_request_with_retry(|| {
-                    client
-                        .post(&url)
-                        .header("Content-Type", "application/json")
-                        .body(request_body.clone())
+                    prepared.authenticate(
+                        client
+                            .post(&url)
+                            .timeout(std::time::Duration::from_secs(120))
+                            .header("Content-Type", "application/json")
+                            .body(request_body.clone()),
+                    )
                 })
                 .await?;
+                let permit = prepared.permit;
 
                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
                 let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
@@ -205,7 +211,14 @@ fn api_chat_guided(
                     let mut stream = resp.bytes_stream();
                     let mut buf = String::new();
 
-                    while let Some(chunk) = stream.next().await {
+                    loop {
+                        let chunk = tokio::select! {
+                            () = tx.closed() => return,
+                            chunk = stream.next() => chunk,
+                        };
+                        let Some(chunk) = chunk else {
+                            break;
+                        };
                         match chunk {
                             Ok(bytes) => {
                                 if tx.is_closed() {

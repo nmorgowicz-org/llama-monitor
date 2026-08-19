@@ -314,6 +314,20 @@ entirely on-GPU and are very fast.
 
 ## Loader choice: llama.cpp vs MLX
 
+### llama.cpp model load mode
+
+The Pro Spawn Wizard and Preset Editor expose llama.cpp's typed `load_mode` policy:
+
+- `mmap` is the default and keeps normal memory-mapped loading behavior.
+- `none` replaces the legacy `--no-mmap` spelling for users who explicitly need it.
+- `mlock` and `mmap+mlock` pin mapped pages; use only with sufficient RAM.
+- `dio` is an opt-in direct-I/O mode supported only by compatible llama.cpp builds.
+
+Older presets containing `no_mmap` are migrated to an equivalent typed mode and
+retain the legacy field for compatibility. Non-default modes are launch policy,
+not benchmark recommendations, and should be qualified separately with a
+matching no-spec control.
+
 - **Dense ≥27B:** llama.cpp ≈ MLX (both bandwidth-bound; the gap is near zero above
   27B — MLX only wins big *under ~14B*). Quant choice moves throughput ~20%; loader
   choice moves it a couple t/s.
@@ -417,6 +431,85 @@ llama-bench -m <moe.gguf> -ngl 99 -fa 1 --n-cpu-moe 48 -n 64 -r 1   # then 40, 3
 - `-r` is repetitions (higher = less noise, slower). Use `-r 1` for quick depth
   sweeps, `-r 2+` for numbers you'll publish.
 
+### Calibration (bounded v1)
+
+Phase 7 adds an optional `server_qualification` request to the calibration
+start payload. The default lane is `parallel_requests: 1` with the
+`latency_memory` track. `tool_correctness` is independently selectable;
+concurrency requires explicit `allow_concurrency: true`. MTP and n-gram tracks
+run only when managed-runtime capability evidence is present and include an
+explicit no-spec baseline; DFLASH remains capability-gated and fail-closed
+until a verified llama.cpp signal is available; this only omits the
+DFLASH-specific receipt and does not block a DFLASH-capable preset from launch.
+MTP qualification is likewise a bounded compatibility/smoke check: it preserves
+the preset's existing `n_max`/`p_min` values and does not attempt to optimize
+speculative decoding across workload-specific prompts.
+
+Calibration is the evidence-first path for llama.cpp tuning. The current
+release boundary exposes bounded, explicitly confirmed Quick and Balanced
+candidate plans; Thorough search is not part of the 2.0 release contract. It
+does not stop an active server or emit Rapid-MLX settings. The job records
+durable journal transitions and a receipt under the active application home,
+and an interrupted trial is surfaced as a suspected crash instead of being
+retried silently.
+
+The authenticated API is:
+
+- **POST `/api/calibrations/preflight`** with `{ "preset_id": "...",
+  "budget": "quick" | "balanced", "workload": { ... } }` — validates a
+  local llama.cpp preset, configured managed `llama-bench`, model library
+  membership, and returns a redacted fingerprint plus the bounded candidate
+  and verification-trial plan.
+- **POST `/api/calibrations`** — starts the bounded trial. The request must
+  include the preflight fingerprint, a supported `budget` (`quick` or
+  `balanced`), and the exact `CALIBRATE` confirmation string returned by the
+  application; active-server stop/restart is not permitted in this version.
+- **GET `/api/calibrations`** — lists durable job snapshots from the active
+  application home. Protected receipt contents and manifests are never
+  returned by this endpoint.
+- **GET `/api/calibrations/{id}`** — polls the durable job snapshot.
+- **GET `/api/calibrations/{id}/receipt`** — reads the authenticated measured
+  receipt and apply history.
+- **POST `/api/calibrations/{id}/cancel`** — requests cancellation and cleans up
+  the owned benchmark process.
+- **POST `/api/calibrations/{id}/resume`** — explicitly resumes a job recovered
+  as a suspected crash. It requires the `RESUME_CALIBRATION` confirmation;
+  finished trial results are loaded from the protected journal and are not
+  silently repeated.
+- **POST `/api/calibrations/{id}/apply`** — requires `db-admin-token`, the
+  `APPLY_CALIBRATION` confirmation, and the expected target fingerprint. It
+  creates a derived preset by default; updating the source preset is an
+  explicit `create_derived: false` choice. Applying never changes the active
+  session, runs one bounded post-apply `llama-bench` validation by default,
+  and records before/after fingerprints plus validation status in the receipt.
+  A failed validation immediately restores the source or removes the derived
+  preset.
+- **POST `/api/calibrations/{id}/rollback`** — requires `db-admin-token`, the
+  `ROLLBACK_CALIBRATION` confirmation, and the applied preset fingerprint. It
+  restores the private pre-apply snapshot (or removes the derived preset) only
+  when the preset is unchanged since apply; conflicting edits fail closed.
+- **POST `/api/calibrations/{id}/forget`** — requires `db-admin-token` and
+  `FORGET_CALIBRATION`; removes a terminal job, its receipt, and private
+  rollback backups. Active jobs must be cancelled first.
+
+Quick and Balanced Calibration report measured candidate results, baseline
+deltas, Pareto tradeoffs, and confidence/noise warnings. They are not a claim
+that one run has found an optimal configuration: Balanced verification remains
+bounded and Thorough refinement is deferred. Rapid-MLX benchmark output remains
+informational-only until a separate backend-owned factor catalog and receipt
+qualification exists.
+
+#### Spawn Wizard receipt reuse
+
+Spawn Wizard calls `POST /api/calibrations/match` with a saved llama.cpp preset,
+workload, and budget. Results are tiered: exact receipts require the complete
+artifact/runtime fingerprint; compatible evidence requires the same
+introspected family/shape, GGUF weight-quantization signature,
+hardware/workload, and normalized runtime capabilities; related evidence may
+have a different weight quantization and is review-only. Runtime build changes
+are disclosed rather than treated as a user-facing version pin. Rapid-MLX
+receipts never cross into this llama.cpp evidence path.
+
 ### Built-in tuning and benchmark endpoints
 
 The app exposes several POST endpoints (all require api-token auth) that automate
@@ -485,6 +578,60 @@ and Spawn Wizard.
 Always confirm with `llama-bench -m <model> -fa 1 -ngl 99 -ctk <k> -ctv <v> -d <depth>`
 at your **real** context depth — short-context benchmarks hide the long-context
 collapse that dominates agentic use.
+
+---
+
+## Wizard control disclosure (Guided and Pro)
+
+The wizard now presents Guided recommendations and a searchable Pro view over one canonical
+state registry. Tier metadata controls Guided disclosure and default resolution; it never
+removes a control, and Pro modified-only/reset actions operate on the same state.
+
+Every hardware-step control in the Spawn Wizard is declared once, per loader, in
+`static/js/features/spawn-wizard-groups.js` as a `{ id, tier, quickValue? }` row. The tier
+governs two things and nothing else: whether the control is disabled with a wizard-written
+value on Quick, and whether its group starts open or collapsed. **No tier ever removes a
+control from the DOM** — everything is reachable at every profile, just closed by default
+above Quick.
+
+### llama.cpp
+
+| Tier | Controls |
+|---|---|
+| Quick (disabled, wizard-written) | `spawn-context-size`, `spawn-batch-size`, `spawn-gpu-layers` (→ `auto`) |
+| Balanced (editable, visible) | the three above, plus `spawn-cache-type-k/v`, `spawn-kv-unified`, `hw-quant-select`, `hw-mmproj-select`, `hw-use-mtp`, `spawn-parallel-slots` |
+| Advanced (auto-opened) | `spawn-ubatch-size`, `spawn-flash-attn`, `spawn-prio`, `spawn-threads`, `spawn-threads-batch`, `spawn-n-cpu-moe`, `spawn-tensor-split`, `spawn-cache-mode`, `spawn-cache-ram`, `spawn-fit-enable`/`spawn-fit-target`, `spawn-mlock` |
+| Advanced, nested collapse | `#spawn-spec-details`: `spawn-spec-type`, `spawn-spec-draft-type-k/v`, `spawn-draft-model`, `spawn-spec-draft-n-min`, `spawn-spec-draft-p-min` |
+
+### Rapid-MLX
+
+| Group | Control | Tier | Rationale |
+|---|---|---|---|
+| Generation — thinking | `spawn-rapid-reasoning-mode` | Quick, read-only readout | Effective value is always `on` — see [rapid-mlx-runtime.md](rapid-mlx-runtime.md#reasoning-profile-and-kv-cache-dtype). Editable only at Advanced, with the requested→effective diff shown inline. |
+| Generation — sampling | `spawn-sampling-mode` | Balanced | MLX peer of KV-quant-as-quality-dial; client sampling params still win, so it's low risk. |
+| Generation — protocol | `spawn-rapid-tool-call-parser` | Balanced | Auto-detected; override is a "my finetune is unusual" case, same weight as picking a chat template. |
+| Generation — protocol | `spawn-rapid-reasoning-parser` | Balanced | Same as above. |
+| Generation — protocol | `spawn-rapid-hybrid-mode` | Advanced | No llama.cpp equivalent; can disagree with runtime introspection on hybrid/linear-attention layers — wrong answer changes the memory model, not just speed. Peer of `spawn-tensor-split`. |
+| Cache & Perf — active memory | `spawn-kv-cache-dtype` | Advanced, annotated | Peer of `spawn-cache-type-k/v`, but inert — pinned to int8 by the reasoning profile. |
+| Cache & Perf — active memory | `spawn-turboquant-mode` | Advanced, badged "not applied" | Withheld pending per-model qualification receipts — see [rapid-mlx-runtime.md](rapid-mlx-runtime.md#turboquant-and-pflash). |
+| Cache & Perf — active memory | `spawn-rapid-prefill-step-size` | Advanced | Peer of `spawn-ubatch-size`. |
+| Cache & Perf — retained cache | `spawn-rapid-cache-mode` (Auto/Off/Custom) | Balanced | Peer of `spawn-cache-ram`, but promoted: retained cache is a context-fit scenario axis (see [vram-estimator.md](vram-estimator.md#mlx-context-fit-cards)), so it must be reachable at the tier those cards live at. Numeric `spawn-retained-cache-mib` field only appears on Custom. |
+| Cache & Perf — retained cache | `spawn-rapid-hybrid-cache-entries` | Advanced | Working-set count; no llama.cpp peer. |
+| Cache & Perf — scheduler | `spawn-rapid-max-num-seqs` | Balanced | Peer of `spawn-parallel-slots` — also a context-fit scenario axis, same reasoning as retained cache. |
+| Cache & Perf — scheduler | `spawn-rapid-max-concurrent-requests` | Advanced | Admission limit distinct from sequence count; no llama.cpp peer. |
+| Cache & Perf — scheduler | `spawn-rapid-gpu-memory-utilization` | Advanced | Peer of `spawn-fit-target` — a memory-budget ceiling. |
+| Cache & Perf — scheduler | `spawn-rapid-pflash-policy` | Advanced, badged, default off | Ruled out at Rapid-MLX 0.11.0 — see [rapid-mlx-runtime.md](rapid-mlx-runtime.md#turboquant-and-pflash). |
+| Cache & Perf — scheduler | `spawn-rapid-prefill-batch-size` | Advanced | Peer of `spawn-batch-size`. |
+| Cache & Perf — scheduler | `spawn-rapid-completion-batch-size` | Advanced | No direct peer; batching internals. |
+| Server & Safety — tool integration | `spawn-rapid-auto-tool-choice` | Balanced | User-facing capability toggle gated on parser compatibility; peer in spirit to `hw-use-mtp`. |
+| Server & Safety — companions | `spawn-rapid-speculative-*` (8 controls) | Advanced, nested collapse | Structural peer of `#spawn-spec-details`. |
+
+Every Quick-tier control must carry a `quickValue` the wizard writes when it disables the
+control (`spawn-rapid-reasoning-mode` → `on`, `spawn-gpu-layers` → `auto`) — a Quick-disabled
+control with nothing to write into it would be a dead control. This is enforced at load time
+by `assertQuickValueCoverage()` and offline by `npm run validate-wizard-groups`. See
+[spawn-wizard.md](spawn-wizard.md#control-tier-registry-quickbalancedadvanced-disclosure) for
+the full I1/I2/I3 invariant writeup.
 
 ---
 

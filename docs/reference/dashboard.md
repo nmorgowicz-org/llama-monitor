@@ -2,6 +2,17 @@
 
 Llama Monitor's monitoring surface is split between a live top-nav cockpit, the Server tab, and host telemetry cards that light up when the app can read local hardware or reach a remote agent.
 
+## Diagnostics, Doctor, and storage
+
+The Server dashboard's Doctor findings are cross-backend and evidence-based. Each finding has a condition, explanation, concrete remediation, and a short reason why it happens. Missing or stale runtime fields remain explicitly unavailable; they are never rendered as zeroes. The same detection result supplies novice and power-user wording.
+
+Database observability is local and authenticated:
+
+- `/api/db/stats`, `/api/db/integrity`, `/api/db/indexes`, and `/api/db/backups` require the regular `api-token`.
+- Maintenance and manual backup creation are bounded operations; manual backups retain the seven newest files.
+- Restore, repair, and backup deletion require the elevated `db-admin-token` and use owned backup paths only.
+- Backup listings expose metadata only and are capped at 256 entries. Database query results are capped at 1,000 rows and 1 MiB; no raw prompt/response telemetry is exported by the monitoring metrics surface.
+
 ## SPA Navigation
 
 Top-level views (Dashboard, Chat, Logs, Server, Spawn) are now SPA routes:
@@ -55,7 +66,7 @@ The popover is populated in real time from WebSocket data; each row shows a gree
 
 The Server tab is the main monitoring dashboard. It combines llama.cpp inference data from `/metrics` and `/slots` with host telemetry when available.
 
-![Inference Section](../screenshots/dashboard-performance-section.png)
+![Inference Section](../screenshots/dashboard--neutral--performance-section.png)
 
 | Card | What it shows |
 |------|----------------|
@@ -66,7 +77,7 @@ The Server tab is the main monitoring dashboard. It combines llama.cpp inference
 | **Connection details** | Activity rail (recent request timeline), request count, and average duration |
 | **Model & Decoding** | Active model name, quantization, sampler config inline, speculative decoding chip and config grid |
 
-![Server Tab](../screenshots/settings-server-tab.png)
+![Server Tab](../screenshots/neutral--settings-server-tab.png)
 
 ### Fine-grained metrics
 
@@ -97,7 +108,7 @@ The Tuning panel provides access to server tuning settings, including sampling p
 - Adjust sampling (temperature, top_p, etc.), memory tuning, and speculative decoding settings where available.
 - Changes apply to the running llama-server when supported.
 
-![Tuning Panel](../screenshots/tune-panel-open.png)
+![Tuning Panel](../screenshots/tune-panel--neutral--open.png)
 
 ## Llama Updater
 
@@ -107,7 +118,7 @@ The Llama Updater manages the `llama-server` binary version directly from the da
 
 A pill in the top navigation bar displays the currently installed build number in the form `llama.cpp · bXXXXX`. When a newer build is available on GitHub, the pill turns red and shows an upward arrow (↑) with the latest build number, for example `llama.cpp · ↑ b5432`. Hovering the pill shows a tooltip with the full upgrade range (e.g., `Update available: b4321 → b5432. Click to manage.`).
 
-![Llama Updater Pill](../screenshots/llama-updater-pill.png)
+![Llama Updater Pill](../screenshots/llama-updater--llamacpp-local--pill.png)
 
 ### Version modal
 
@@ -115,7 +126,7 @@ Clicking the pill opens a version modal that lists the last 8 `llama.cpp` releas
 
 Clicking any row displays that release's notes in a side pane. The **Install** button is shown for every non-current release; clicking it downloads, validates, and promotes a new `llama-server` binary. During installation the pill displays `Installing…` with a live timer. On success the running llama-server is restarted automatically to pick up the new binary.
 
-![Llama Updater Version Modal](../screenshots/llama-updater-version-modal.png)
+![Llama Updater Version Modal](../screenshots/llama-updater--llamacpp-local--version-modal.png)
 
 ### Background version checks
 
@@ -438,7 +449,7 @@ Clock visualization:
 
 - GPU clocks can be shown as dual-ring orbits (one for core, one for memory) with meters, or as chips, or as plain numeric values.
 
-![GPU & System Metrics](../screenshots/dashboard-gpu-section.png)
+![GPU & System Metrics](../screenshots/dashboard--neutral--gpu-section.png)
 
 ### System metrics
 
@@ -709,4 +720,91 @@ Open the shortcuts modal with `Ctrl+/`.
 | `Ctrl+.` | Stop server |
 | `Escape` | Close the active modal |
 
-![Keyboard Shortcuts](../screenshots/panels-keyboard-shortcuts.png)
+![Keyboard Shortcuts](../screenshots/neutral--panels-keyboard-shortcuts.png)
+## Backend-aware inference telemetry
+
+The performance dashboard selects its inference cards from the active runtime's
+normalized telemetry contract. The backend field is emitted via WebSocket and
+drives which card set is rendered.
+
+- **llama.cpp sessions** use the standard llama.cpp cards: throughput, generation,
+  context, slots, speculative decoding, and sampler config.
+- **Rapid-MLX sessions** replace llama.cpp cards with Rapid-MLX-specific telemetry
+  cards.
+
+### Rapid-MLX telemetry cards
+
+When the active session's backend is Rapid-MLX, the dashboard renders the following
+cards (in order) based on what metrics are available:
+
+![Rapid-MLX dashboard telemetry](../screenshots/dashboard-rapid-mlx--rapidmlx-local--dark.png)
+
+- **Rapid-MLX runtime** — model identity, runtime state (e.g. Ready, Degraded),
+  uptime. Marked live or degraded depending on health.
+- **Inference throughput** — prompt and generation tokens/sec, when available.
+- **Request queue** — running and waiting request counts; labeled "active" when
+  requests are running.
+- **Metal runtime memory** — active memory, peak memory, and cache memory usage in
+  human-readable units.
+- **Prefix & cache state** — global cache hit rate, cache entries, memory in use,
+  and whether multimodal cache is available.
+- **Cumulative totals** — completed requests, prompt tokens, completion tokens, and
+  compute steps.
+- **Request activity** — count of recognized active requests.
+- **Live progress** — an accessible progress bar driven from the backend's
+  progress value (0–100%) when present.
+
+Each card is shown only when its underlying metric is available; if it later
+becomes unavailable, it is removed from the grid so the layout reflows cleanly.
+
+### Partial telemetry (stale metrics)
+
+Rapid-MLX telemetry is intentionally graceful when metrics are missing:
+
+![Rapid-MLX partial telemetry](../screenshots/dashboard-rapid-mlx--rapidmlx-local--partial.png)
+
+- **Before first sample** — the inference area shows a compact "Connecting to
+  Rapid-MLX telemetry…" status instead of llama.cpp cards.
+- **Missing metrics (graceful degradation)** — when a previously available metric
+  stops appearing:
+  - For 1–2 polls: the card keeps its last known values and displays a stale
+    indicator with an age and a "X/3" counter.
+  - On the 3rd consecutive missing poll: the card is removed.
+- **Runtime card degradation** — if polling fails while the runtime card is
+  available, it is kept visible but marked as degraded with
+  "Telemetry unavailable" and a stale label instead of being removed.
+- **Zero vs. missing** — a real `0.0` throughput is displayed as zero (not as
+  "N/A") to differentiate from genuinely missing fields.
+
+This prevents the UI from freezing around stale values or cluttering the dashboard
+with irrelevant cards.
+
+### Engine · Model indicator
+
+The top navigation bar includes an Engine · Model indicator that shows which
+inference backend is currently active and what model is loaded:
+
+- Format: `Rapid-MLX · <model>` or `llama.cpp · <model>`.
+- Visible when a running session has an identified backend and model.
+- Includes a live state dot:
+  - Green "live" dot while generating.
+  - Subtle "idle-active" dot when the server is running but idle.
+- Hovering the indicator shows the full model identity and whether it is
+  generating or idle.
+
+This lets the user confirm at a glance whether they are running on llama.cpp or
+Rapid-MLX without opening the Server tab.
+
+### Backend-aware session management
+
+Session creation, restore, and display are backend-aware:
+
+- **Recent endpoints** — each recent session card labels its backend (e.g.
+  "Rapid-MLX" or "llama.cpp") in the meta line.
+- **Spawn-saved sessions** — when restoring a saved model, the detail line shows
+  which engine the preset was saved for.
+- **Attach flow** — when reconnecting to a saved endpoint, the backend is
+  pre-selected based on how the session was originally created.
+- **WebSocket payload** — the backend field reflects the active session's backend
+  and is used by all dashboard components (cards, cockpit, indicators) to decide
+  which telemetry path to render.

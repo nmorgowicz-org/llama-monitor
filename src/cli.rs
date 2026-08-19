@@ -3,16 +3,17 @@ use std::path::PathBuf;
 
 #[derive(Parser, Debug, Clone)]
 #[command(
-    name = "llama-monitor",
+    name = "local-llm-foundry",
+    bin_name = "local-llm-foundry",
     version,
-    about = "Web dashboard for llama.cpp server management and GPU monitoring"
+    about = "Web dashboard for local inference server management and GPU monitoring"
 )]
 pub struct AppArgs {
-    /// Path to the llama-server binary
+    /// Path to the llama-server binary (llama.cpp backend)
     #[arg(short = 's', long)]
     pub llama_server_path: Option<PathBuf>,
 
-    /// Working directory for llama-server
+    /// Working directory for llama-server (llama.cpp backend)
     #[arg(long)]
     pub llama_server_cwd: Option<PathBuf>,
 
@@ -42,12 +43,50 @@ pub struct AppArgs {
     #[arg(long)]
     pub form_auth: Option<String>,
 
+    /// Record a speculative-decoding requalification report and exit.
+    ///
+    /// Takes the requalification.json written by
+    /// scripts/rapid-mlx-requalify-spec-decode.mjs and stores its verdict against the
+    /// installed Rapid-MLX runtime, which is what lets multi-token prediction turn on
+    /// for a build the gates actually passed on. The report is refused if it was
+    /// measured on a different build.
+    #[arg(long, value_name = "REPORT_JSON")]
+    pub ingest_spec_decode_report: Option<PathBuf>,
+
     /// Clear the persisted dashboard auth config and exit.
     ///
     /// Use this for local password recovery when form/basic auth is managed
     /// through auth-config.json rather than startup flags.
     #[arg(long)]
     pub clear_auth_config: bool,
+
+    /// Print the detected application-root migration state and exit.
+    #[arg(long)]
+    pub app_home_migration_status: bool,
+
+    /// Preview the legacy-to-Foundry application-root migration and exit.
+    #[arg(long)]
+    pub app_home_migration_preview: bool,
+
+    /// Execute a previously previewed application-root migration in maintenance mode.
+    #[arg(long)]
+    pub app_home_migrate: bool,
+
+    /// Preview the receipt-scoped rollback to the retained legacy root.
+    #[arg(long)]
+    pub app_home_rollback_preview: bool,
+
+    /// Remove the migrated canonical root and return to the retained legacy root.
+    #[arg(long)]
+    pub app_home_rollback: bool,
+
+    /// Queue receipt-scoped removal of the retained legacy root.
+    #[arg(long)]
+    pub app_home_cleanup: bool,
+
+    /// Confirmation required by --app-home-migrate.
+    #[arg(long)]
+    pub confirm: Option<String>,
 
     /// Directory containing .gguf model files for auto-discovery
     #[arg(short = 'm', long)]
@@ -61,9 +100,18 @@ pub struct AppArgs {
     #[arg(long)]
     pub sessions_file: Option<PathBuf>,
 
-    /// Override the config directory (default: ~/.config/llama-monitor)
+    /// Override the config directory (default: ~/.config/local-llm-foundry;
+    /// legacy installations remain selectable until the explicit
+    /// application-root migration is completed)
+    /// the explicit 2.0 application-root migration is selected)
     #[arg(long)]
     pub config_dir: Option<PathBuf>,
+
+    /// Use an explicitly isolated application-home pair for migration API
+    /// qualification. The root must be beneath the current user's temp dir;
+    /// this never changes normal production root discovery.
+    #[arg(long, value_name = "TEMP_ROOT")]
+    pub migration_test_root: Option<PathBuf>,
 
     /// GPU monitoring backend: auto, rocm, nvidia, none
     #[arg(long, default_value = "auto")]
@@ -181,6 +229,12 @@ mod tests {
         assert!(args.basic_auth.is_none());
         assert!(args.form_auth.is_none());
         assert!(!args.clear_auth_config);
+        assert!(!args.app_home_migration_status);
+        assert!(!args.app_home_migration_preview);
+        assert!(!args.app_home_migrate);
+        assert!(!args.app_home_rollback_preview);
+        assert!(!args.app_home_rollback);
+        assert!(args.confirm.is_none());
         assert!(!args.remote_agent_ssh_autostart);
         assert_eq!(args.gpu_backend, "auto");
         assert!(!args.tls);

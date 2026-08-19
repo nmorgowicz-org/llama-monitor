@@ -1,24 +1,52 @@
 /**
- * update-baseline.mjs — re-measures the JS module count by doing a headless
- * cold load against the running test server and writes the new count to
+ * update-baseline.mjs — re-measures the JS module count with a headless
+ * cold load against an ephemeral static asset server and writes the new count to
  * core/js-module-baseline.json.
  *
  * Usage:  cd tests/ui && npm run update-baseline
  *
- * The test server must already be running on http://127.0.0.1:7778, OR
- * LLAMA_MONITOR_UI_URL can point to another instance.
+ * Set LLAMA_MONITOR_UI_URL to measure a running app; otherwise the script
+ * serves static/index.html itself and never starts llama-monitor.
  */
 
 import { chromium } from '@playwright/test';
-import { writeFileSync, readFileSync } from 'fs';
+import { createServer } from 'http';
+import { writeFileSync, readFileSync, existsSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { join, dirname } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASELINE_FILE = join(__dirname, 'core/js-module-baseline.json');
-const BASE_URL = process.env.LLAMA_MONITOR_UI_URL || 'http://127.0.0.1:7778';
+const CONFIGURED_BASE_URL = process.env.LLAMA_MONITOR_UI_URL || '';
+
+function startStaticServer() {
+  const repoRoot = join(__dirname, '..', '..');
+  const staticRoot = join(repoRoot, 'static');
+  const server = createServer((req, res) => {
+    const requestPath = decodeURIComponent((req.url || '/').split('?')[0]);
+    const relative = requestPath === '/' ? 'index.html' : requestPath.replace(/^\/+/, '');
+    const filePath = join(staticRoot, relative);
+    if (!filePath.startsWith(staticRoot) || !existsSync(filePath) || !statSync(filePath).isFile()) {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end('{}');
+      return;
+    }
+    const contentType = filePath.endsWith('.html') ? 'text/html' : filePath.endsWith('.css') ? 'text/css' : 'application/javascript';
+    res.writeHead(200, { 'content-type': contentType });
+    res.end(readFileSync(filePath));
+  });
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      resolve({ server, baseUrl: `http://127.0.0.1:${port}` });
+    });
+  });
+}
 
 export default async function updateBaseline() {
+  const local = CONFIGURED_BASE_URL ? null : await startStaticServer();
+  const baseUrl = CONFIGURED_BASE_URL || local.baseUrl;
   const browser = await chromium.launch();
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -27,15 +55,20 @@ export default async function updateBaseline() {
   page.on('request', req => {
     const url = req.url();
     if (url.endsWith('.js')) {
-      jsFiles.push(url.replace(BASE_URL, ''));
+      jsFiles.push(url.replace(baseUrl, ''));
     }
   });
 
   try {
-    await page.goto(BASE_URL, { waitUntil: 'load' });
+    await page.goto(baseUrl, { waitUntil: 'load' });
     await page.waitForSelector('html.modules-ready', { timeout: 15000 });
+    // The update checker is intentionally imported from requestIdleCallback after
+    // modules-ready. Include that bounded deferred module so the baseline records
+    // the maximum normal cold-load closure instead of racing the idle callback.
+    await page.waitForTimeout(3500);
   } finally {
     await browser.close();
+    local?.server.close();
   }
 
   const existing = JSON.parse(readFileSync(BASELINE_FILE, 'utf8'));

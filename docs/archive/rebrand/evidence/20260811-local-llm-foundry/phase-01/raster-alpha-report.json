@@ -1,0 +1,100 @@
+[
+  {
+    "file": "/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/brand/token-ingot-16.png",
+    "width": 16,
+    "height": 16,
+    "has_transparency": true,
+    "transparent_pixels": 114
+  },
+  {
+    "file": "/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/brand/token-ingot-20.png",
+    "width": 20,
+    "height": 20,
+    "has_transparency": true,
+    "transparent_pixels": 192
+  },
+  {
+    "file": "/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/brand/token-ingot-22.png",
+    "width": 22,
+    "height": 22,
+    "has_transparency": true,
+    "transparent_pixels": 224
+  },
+  {
+    "file": "/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/brand/token-ingot-24.png",
+    "width": 24,
+    "height": 24,
+    "has_transparency": true,
+    "transparent_pixels": 276
+  },
+  {
+    "file": "/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/brand/token-ingot-32.png",
+    "width": 32,
+    "height": 32,
+    "has_transparency": true,
+    "transparent_pixels": 498
+  },
+  {
+    "file": "/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/brand/token-ingot-64.png",
+    "width": 64,
+    "height": 64,
+    "has_transparency": true,
+    "transparent_pixels": 2142
+  },
+  {
+    "file": "/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/brand/token-ingot-128.png",
+    "width": 128,
+    "height": 128,
+    "has_transparency": true,
+    "transparent_pixels": 8842
+  },
+  {
+    "file": "/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/brand/token-ingot-180.png",
+    "width": 180,
+    "height": 180,
+    "has_transparency": true,
+    "transparent_pixels": 17618
+  },
+  {
+    "file": "/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/brand/token-ingot-192.png",
+    "width": 192,
+    "height": 192,
+    "has_transparency": true,
+    "transparent_pixels": 20078
+  },
+  {
+    "file": "/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/brand/token-ingot-256.png",
+    "width": 256,
+    "height": 256,
+    "has_transparency": true,
+    "transparent_pixels": 35880
+  },
+  {
+    "file": "/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/brand/token-ingot-512.png",
+    "width": 512,
+    "height": 512,
+    "has_transparency": true,
+    "transparent_pixels": 144364
+  },
+  {
+    "file": "/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/brand/token-ingot-1024.png",
+    "width": 1024,
+    "height": 1024,
+    "has_transparency": true,
+    "transparent_pixels": 579173
+  },
+  {
+    "file": "/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/brand/token-ingot-maskable-192.png",
+    "width": 192,
+    "height": 192,
+    "has_transparency": true,
+    "transparent_pixels": 30000
+  },
+  {
+    "file": "/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/brand/token-ingot-maskable-512.png",
+    "width": 512,
+    "height": 512,
+    "has_transparency": true,
+    "transparent_pixels": 213475
+  }
+]

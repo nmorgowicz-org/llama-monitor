@@ -13,6 +13,8 @@ use super::common::{
 };
 use super::{ApiCtx, ApiRoute};
 
+const MAX_BACKUP_LIST_ENTRIES: usize = 256;
+
 pub(crate) fn routes(ctx: ApiCtx, chat_storage: Arc<ChatStorage>) -> ApiRoute {
     let config = ctx.config;
 
@@ -440,11 +442,18 @@ fn api_db_backups(app_config: Arc<AppConfig>) -> ApiRoute {
                 let backups_root = cfg.config_dir.join("backups");
                 let mut backups = Vec::new();
                 let mut total_size = 0u64;
+                let mut truncated = false;
 
-                for (kind, subdir) in [("auto", "auto"), ("daily", "daily"), ("manual", "manual")] {
+                'subdirs: for (kind, subdir) in
+                    [("auto", "auto"), ("daily", "daily"), ("manual", "manual")]
+                {
                     let dir = backups_root.join(subdir);
                     if let Ok(entries) = std::fs::read_dir(&dir) {
                         for entry in entries.filter_map(|e| e.ok()) {
+                            if backups.len() >= MAX_BACKUP_LIST_ENTRIES {
+                                truncated = true;
+                                break 'subdirs;
+                            }
                             if let Ok(metadata) = entry.metadata()
                                 && metadata.is_file()
                             {
@@ -476,9 +485,10 @@ fn api_db_backups(app_config: Arc<AppConfig>) -> ApiRoute {
 
                 Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
                     warp::reply::json(&serde_json::json!({
-                        "backups": backups,
-                        "total_size": total_size,
-                    })),
+                            "backups": backups,
+                    "total_size": total_size,
+                    "truncated": truncated,
+                        })),
                     warp::http::StatusCode::OK,
                 )) as Box<dyn warp::reply::Reply>)
             }

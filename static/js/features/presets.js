@@ -3,17 +3,35 @@
 // Preset CRUD: load, save, copy, delete, reset. Modal management.
 
 import { sessionState, lastSystemMetrics } from '../core/app-state.js';
+import { getPlatformInfo } from '../core/platform-info.js';
 import { escapeHtml } from '../core/format.js';
 import { buildArchitectureLabel, isMoEEligible } from './setup-view.js';
 import { openModelFileBrowser, openChatTemplateLibraryBrowser, uploadChatTemplateFromBrowser } from './file-browser-launcher.js';
+import { configureMlxPresetEditor } from './preset-editor-mlx.js';
 import { applySettings, saveSettings } from './settings.js';
 import { showToast, showToastWithActions, showConfirmDialog } from './toast.js';
 import { renderSuggestionCards, suggestionPatch, requestNcpuMoeTune } from './tuning-cards.js';
 import {
-    COMMUNITY_TEMPLATES,
     buildCommunityTemplateInstallRequest,
-    detectCommunityTemplateFamily,
+    communityFamilyFromGgufArchitecture,
+    communityTemplateFamilyFor,
+    getDefaultTemplateForFamily,
 } from './chat-template-registry.js';
+import { buildEstimateBody, rapidEstimatePolicyFromConfig } from './vram-estimate.js';
+import { rapidMlxPrefillStepSizeDefault, rapidMlxProfileHasVision } from './rapid-mlx-prefill.js';
+import { openEstimateEvidenceDrawer } from './evidence-drawer.js';
+import { initCalibrationUi } from './calibration.js';
+import {
+    chatTemplateStatusText,
+    openChatTemplateManageModal,
+    bindChatTemplateManageModalChrome,
+    fetchReleases,
+} from './chat-template-panel.js';
+
+
+let newPresetSeed = null;
+let _presetRapidMlxPrefillExplicit = false;
+let _presetEditorNavInitialized = false;
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -56,6 +74,32 @@ function setStructuredOutputMode(mode) {
 
 function isRunningStatus(status) {
     return String(status || '').toLowerCase() === 'running';
+}
+
+export function presetModelSource(preset) {
+    const rapidMlx = preset?.rapid_mlx;
+    if (preset?.backend === 'rapid_mlx') {
+        const ms = rapidMlx?.model_source;
+        if (ms?.kind === 'hugging_face_repo') {
+            return ms.repo_id || '';
+        }
+        if (ms?.kind === 'mlx_directory') {
+            return ms.path || '';
+        }
+        if (ms?.kind === 'alias') {
+            return ms.value || '';
+        }
+        return rapidMlx?.model_source_view?.canonical_identity
+            || rapidMlx?.model_source_view?.display_name || '';
+    }
+    return preset?.model_path || preset?.hf_repo || '';
+}
+
+// Same lookup `savePreset`/`_buildFormPreset` use to find the preset currently
+// loaded in the modal — needed so VRAM estimates route to the right backend.
+function _currentModalPreset() {
+    const id = document.getElementById('modal-preset-id')?.value;
+    return id ? (sessionState.presets.find(p => p.id === id) || {}) : (newPresetSeed || {});
 }
 
 export function syncSelectedPresetSelection(presetId, options = {}) {
@@ -133,10 +177,83 @@ function normalizeModelSourceInput(value) {
     return { model_path: '', hf_repo: input };
 }
 
+function _presetChatTemplateName(path) {
+    if (!path) return '';
+    return path.split(/[\\/]/).pop().replace(/\.jinja$/, '');
+}
+
+// Refreshes the novice-view status line + primary button label from the
+// current value of the chat-template-file field. Async: looks up
+// installed-at from the release index when a template is set.
+async function updatePresetChatTemplateStatusLine() {
+    const statusEl = document.getElementById('preset-chat-template-status');
+    const primaryBtn = document.getElementById('preset-recommended-chat-template-btn');
+    const path = strVal('modal-chat-template-file');
+    if (!statusEl) return;
+
+    if (!path) {
+        statusEl.textContent = chatTemplateStatusText({ mode: 'builtin' });
+        if (primaryBtn) primaryBtn.textContent = 'Use recommended template';
+        return;
+    }
+
+    const name = _presetChatTemplateName(path);
+    let installedAt = null;
+    try {
+        const releases = await fetchReleases(name);
+        if (releases.ok) {
+            const active = (releases.releases || []).find(r => r.sha256 === releases.active_sha256) || releases.releases?.[0];
+            installedAt = active?.installed_at || null;
+        }
+    } catch { /* non-fatal — status line still shows the custom state */ }
+
+    statusEl.textContent = chatTemplateStatusText({ mode: 'custom', tplDisplay: name, installedAt });
+    if (primaryBtn) primaryBtn.textContent = 'Revert to built-in';
+}
+
+// Resolves the community-template family for a preset using real model
+// metadata only — never filename matching. Prefers the backend-derived
+// `preset.family` (set from GGUF `general.architecture` by ensure_gguf_metadata
+// on the server); falls back to a live GGUF-metadata read for local models
+// whose preset hasn't been backfilled yet.
+async function communityTemplateFamilyForPreset(preset) {
+    const fromPreset = communityTemplateFamilyFor(preset?.family);
+    if (fromPreset) return fromPreset;
+
+    const modelPath = preset?.model_path || strVal('modal-model-path');
+    if (!modelPath || !looksLikeLocalModelSource(modelPath)) return null;
+
+    try {
+        const headers = window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' };
+        const resp = await fetch('/api/models/gguf-meta', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ model_path: modelPath }),
+        });
+        if (!resp.ok) return null;
+        const meta = await resp.json().catch(() => ({}));
+        if (!meta.ok || !meta.architecture) return null;
+        return communityFamilyFromGgufArchitecture(meta.architecture);
+    } catch {
+        return null;
+    }
+}
+
 async function installRecommendedChatTemplateForPreset() {
-    const modelSource = strVal('modal-model-path');
-    const family = detectCommunityTemplateFamily(modelSource);
-    const template = family ? COMMUNITY_TEMPLATES[family] : null;
+    // The primary button toggles: "Use recommended template" installs one,
+    // "Revert to built-in" (shown once a custom template is active) clears it.
+    const currentPath = strVal('modal-chat-template-file');
+    if (currentPath) {
+        setVal('modal-chat-template-file', '');
+        await updatePresetChatTemplateStatusLine();
+        showToast('Reverted to built-in template', 'success');
+        return;
+    }
+
+    const family = await communityTemplateFamilyForPreset(_currentModalPreset());
+    const template = getDefaultTemplateForFamily(family);
     if (!template) {
         showToast('No community template recommendation for this model', 'warn');
         return;
@@ -158,7 +275,9 @@ async function installRecommendedChatTemplateForPreset() {
         if (!resp.ok || !data.ok || !data.path) {
             throw new Error(data.error || `HTTP ${resp.status}`);
         }
-        setVal('modal-chat-template-file', data.path);
+        const templatePath = (template.transformed && data.transformed_path) ? data.transformed_path : data.path;
+        setVal('modal-chat-template-file', templatePath);
+        await updatePresetChatTemplateStatusLine();
         showToast(
             data.already_existed ? 'Recommended template selected' : 'Recommended template installed',
             'success',
@@ -169,6 +288,21 @@ async function installRecommendedChatTemplateForPreset() {
     } finally {
         if (button) button.disabled = false;
     }
+}
+
+function bindRecommendedChatTemplateButton() {
+    const modal = document.getElementById('preset-modal');
+    if (!modal || modal.dataset.recommendedTemplateBound === 'true') return;
+    // Delegate from the stable modal shell. The form contents can be refreshed
+    // while model metadata is loading, so binding the transient button node can
+    // lose the handler between modal open and the user's click.
+    modal.addEventListener('click', event => {
+        const button = event.target.closest?.('#preset-recommended-chat-template-btn');
+        if (!button || button.disabled) return;
+        event.preventDefault();
+        void installRecommendedChatTemplateForPreset();
+    });
+    modal.dataset.recommendedTemplateBound = 'true';
 }
 
 function clearFieldErrors() {
@@ -242,7 +376,7 @@ export async function loadPresets(selectId) {
     sel.innerHTML = '';
     sessionState.presets.forEach(p => {
         // Skip built-in/example presets that have no model (they are templates, not usable)
-        if (!p.model_path && !p.hf_repo) return;
+        if (!presetModelSource(p)) return;
         const opt = document.createElement('option');
         opt.value = p.id;
         opt.textContent = p.name;
@@ -378,7 +512,7 @@ function syncPresetDisplay(sel) {
     const preset = (sessionState.presets || []).find(p => p.id === sel.value);
     if (!preset) return;
 
-    const fullName = preset.name || (preset.model_path || preset.hf_repo || '').split('/').pop() || '';
+    const fullName = preset.name || presetModelSource(preset).split('/').pop() || '';
     const displayName = buildShortPresetName(preset, fullName);
 
     labelEl.textContent = displayName;
@@ -396,7 +530,7 @@ function syncPresetDisplay(sel) {
 }
 
 function buildShortPresetName(p, fullName) {
-    const base = fullName || p.name || (p.model_path || p.hf_repo || '').split('/').pop() || '';
+    const base = fullName || p.name || presetModelSource(p).split('/').pop() || '';
     if (!base) return '';
     // Normalize underscores to hyphens; CSS text-overflow handles truncation.
     return base.replace(/_/g, '-').replace(/-{2,}/g, '-').trim();
@@ -404,7 +538,7 @@ function buildShortPresetName(p, fullName) {
 
 function buildPresetChips(p) {
     const chips = [];
-    const name = p.name || (p.model_path || p.hf_repo || '').split('/').pop() || '';
+    const name = p.name || presetModelSource(p).split('/').pop() || '';
 
     // Quant chip
     const qMatch = name.match(/(Q\d+[_-]?[A-Z0-9]+)/i);
@@ -464,25 +598,56 @@ document.addEventListener('DOMContentLoaded', () => {
             sel.click();
         }
     });
+
 });
 
 // ── Modal ──────────────────────────────────────────────────────────────────────
 
 // ── Performance advisor (config-time hints) ──────────────────────────────────
-let _presetAdvisorTimer = null;
+ let _presetAdvisorTimer = null;
 let _presetAdvisorSeq = 0;
 let _presetIsUnified = null; // cached platform check
 let _presetRamUsedBytes = 0;
 let _presetVramBytes = 0;
 let _presetRamBytes = 0;    // cached RAM total (bytes)
 let _presetMetalLimitMb = 0; // cached iogpu.wired_limit_mb (0 = use heuristic)
+let _presetSnapshot = null; // MemoryAvailabilitySnapshot — refreshed periodically
+let _presetSnapshotAge = 0; // timestamp when snapshot was fetched
 
 // ── VRAM live estimate ────────────────────────────────────────────────────────
 let _presetVramTimer = null;
 let _presetVramSeq = 0;
 
+/// Phase 5b Part C: Fetch MemoryAvailabilitySnapshot for accurate availability.
+/// Cached briefly (30s) to avoid excessive API calls while remaining responsive.
+async function _presetRefreshSnapshot() {
+    const now = Date.now();
+    // Refresh if we have no snapshot or it's older than 30 seconds.
+    if (_presetSnapshot && (now - _presetSnapshotAge) < 30000) {
+        return _presetSnapshot;
+    }
+    try {
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const resp = await fetch('/api/memory-availability', { headers });
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        if (!data.ok || !data.snapshot) return null;
+        _presetSnapshot = data.snapshot;
+        _presetSnapshotAge = now;
+        return _presetSnapshot;
+    } catch {
+        return null;
+    }
+}
+
 function _presetAvailBytes() {
     if (!_presetIsUnified) return _presetVramBytes;
+    // Phase 5b Part C: use current_safe_availability_bytes from the snapshot,
+    // NOT a stale fraction of total RAM.
+    if (_presetSnapshot && _presetSnapshot.current_safe_availability_bytes > 0) {
+        return _presetSnapshot.current_safe_availability_bytes;
+    }
+    // Fallback: stale heuristic (should not normally be used after snapshot is fetched).
     if (_presetRamBytes === 0) return 0;
     const limitBytes = _presetMetalLimitMb > 0 ? _presetMetalLimitMb * 1024 * 1024 : null;
     const fraction = _presetRamBytes <= 36 * 1024 ** 3 ? 2 / 3 : 3 / 4;
@@ -499,7 +664,7 @@ async function _ensureUnifiedFlag() {
     try {
         const headers = window.authHeaders ? window.authHeaders() : {};
         const [platform, sys, gpu] = await Promise.all([
-            fetch('/api/llama-binary/platform-info', { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
+            getPlatformInfo().catch(() => null),
             fetch('/metrics/system', { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
             fetch('/metrics/gpu', { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
         ]);
@@ -585,7 +750,10 @@ export function updatePresetAdvisor() {
             ctk, ctv,
             is_unified: isUnified,
             spec_type: specType || null,
-            has_mtp: /mtp/i.test(name),
+  // Draft/head artifacts often lack introspectable MTP metadata. Keep the
+  // filename signal as a provisional hint, never as confirmed model state.
+  has_mtp: false,
+  mtp_inferred: /(?:mtp|draft(?:[-_]model)?)/i.test(name),
         };
         const seq = ++_presetAdvisorSeq;
         try {
@@ -766,6 +934,7 @@ async function autoSizePreset() {
             : { 'Content-Type': 'application/json' };
         const body = {
             model_path: modelVal,
+            native_context_limit: _presetNativeContextLimit || null,
             n_ctx: parseInt(document.getElementById('modal-context-size')?.value) || 128000,
             ctk: document.getElementById('modal-ctk')?.value || 'q8_0',
             ctv: document.getElementById('modal-ctv')?.value || 'f16',
@@ -778,6 +947,7 @@ async function autoSizePreset() {
             available_vram_bytes: _presetAvailBytes(),
             available_ram_bytes: _presetAvailableRamBytes(),
             is_unified_memory: !!_presetIsUnified,
+            backend: _currentModalPreset()?.backend === 'rapid_mlx' ? 'rapid_mlx' : 'llama_cpp',
         };
 
         const resp = await fetch('/api/vram/auto-size', { method: 'POST', headers, body: JSON.stringify(body) });
@@ -814,15 +984,24 @@ export function updatePresetVram() {
     const box = document.getElementById('preset-vram-display');
     const strip = document.getElementById('preset-vram-strip');
     if (!box) return;
+    const setStripVisible = (visible) => {
+        if (!strip) return;
+        strip.classList.toggle('is-empty', !visible);
+        strip.setAttribute('aria-hidden', String(!visible));
+    };
     updatePresetMlockWarning();
     updatePresetMmapHint();
     const modelVal = document.getElementById('modal-model-path')?.value.trim() || '';
-    if (!modelVal) { if (strip) strip.style.display = 'none'; return; }
-    if (strip) strip.style.display = '';
+    if (!modelVal) { setStripVisible(false); return; }
+    setStripVisible(true);
     box.innerHTML = '<div class="preset-vram-loading">Estimating VRAM…</div>';
     clearTimeout(_presetVramTimer);
     _presetVramTimer = setTimeout(async () => {
         const isUnified = await _ensureUnifiedFlag();
+        // Phase 5b Part C: refresh memory state from the snapshot (no infinite cache).
+        if (isUnified) {
+            await _presetRefreshSnapshot();
+        }
         // Platform flag is now resolved — refresh the Apple Silicon mmap hint.
         updatePresetMmapHint();
         const nCtx = parseInt(document.getElementById('modal-context-size')?.value) || 131072;
@@ -834,19 +1013,28 @@ export function updatePresetVram() {
         const gpuLayers = parseInt(document.getElementById('modal-gpu-layers')?.value);
         const mmprojPath = document.getElementById('modal-mmproj')?.value?.trim() || '';
         const available_vram_bytes = _presetAvailBytes();
-        const body = {
+        const currentPreset = _currentModalPreset();
+        const isRapidMlx = currentPreset?.backend === 'rapid_mlx';
+        const backend = isRapidMlx ? 'rapid_mlx' : 'llama_cpp';
+        const rapidPolicy = isRapidMlx ? _rapidEstimatePolicyFromForm(currentPreset?.rapid_mlx) : {};
+
+        // Builder item 6: use canonical body builder for cross-surface equality.
+        const body = buildEstimateBody({
+            backend,
             model_path: modelVal,
             n_ctx: nCtx,
-            ctk, ctv,
             parallel_slots: parallelSlots,
             ubatch_size: ubatch,
+            ctk: backend === 'llama_cpp' ? ctk : undefined,
+            ctv: backend === 'llama_cpp' ? ctv : undefined,
             n_cpu_moe: nCpuMoe,
             gpu_layers: Number.isFinite(gpuLayers) ? gpuLayers : -1,
             available_vram_bytes,
             available_ram_bytes: _presetAvailableRamBytes(),
             is_unified_memory: !!isUnified,
-            ...(mmprojPath ? { mmproj_path: mmprojPath } : {}),
-        };
+            mmproj_path: mmprojPath || null,
+            ...rapidPolicy,
+        });
         const seq = ++_presetVramSeq;
         try {
             const headers = window.authHeaders
@@ -854,14 +1042,39 @@ export function updatePresetVram() {
                 : { 'Content-Type': 'application/json' };
             const r = await fetch('/api/vram-estimate', { method: 'POST', headers, body: JSON.stringify(body) });
             if (seq !== _presetVramSeq) return;
-            const hideStrip = () => { if (strip) strip.style.display = 'none'; };
+            const hideStrip = () => setStripVisible(false);
             if (!r.ok) { hideStrip(); return; }
             const data = await r.json();
             if (data.error) { hideStrip(); return; }
             _renderPresetVram(box, data);
             updatePresetMlockWarning(data);
-        } catch { if (seq === _presetVramSeq && strip) strip.style.display = 'none'; }
+        } catch { if (seq === _presetVramSeq) setStripVisible(false); }
     }, 350);
+}
+
+function _rapidEstimatePolicyFromForm(fallback = {}) {
+    const prefixEnabled = document.getElementById('modal-rapid-prefix-cache-enabled')?.checked !== false;
+    const speculativeEnabled = !!document.getElementById('modal-rapid-speculative-enabled')?.checked;
+    const speculativeSource = document.getElementById('modal-rapid-speculative-source')?.value || 'embedded';
+    const speculativeModel = document.getElementById('modal-rapid-speculative-model')?.value?.trim() || '';
+    const speculativeReady = speculativeEnabled && (speculativeSource !== 'external' || speculativeModel);
+    const config = {
+        ...fallback,
+        kv_cache_dtype: document.getElementById('modal-rapid-kv-cache-dtype')?.value || null,
+        turboquant_mode: document.getElementById('modal-rapid-turboquant-mode')?.value || null,
+        prefix_cache_enabled: prefixEnabled,
+        retained_cache_mib: prefixEnabled
+            ? Number(document.getElementById('modal-rapid-cache-memory-mib')?.value || 8192)
+            : 0,
+        prefill_step_size: Number(document.getElementById('modal-rapid-prefill-step-size')?.value || 512),
+        speculative_config: speculativeReady ? {
+            method: 'mtp',
+            model: speculativeSource === 'external' ? speculativeModel : null,
+            num_speculative_tokens: Number(document.getElementById('modal-rapid-speculative-tokens')?.value || 2),
+            disable_auto_k: !!document.getElementById('modal-rapid-speculative-disable-auto-k')?.checked,
+        } : null,
+    };
+    return rapidEstimatePolicyFromConfig(config);
 }
 
 function _renderPresetVram(el, data) {
@@ -872,10 +1085,21 @@ function _renderPresetVram(el, data) {
     const avail   = data.available_bytes || 0;  // budget we sent
     const used    = data.total_bytes || 0;       // total model + context size
     const weights = data.weights_bytes || 0;
-    const kv      = data.kv_cache_bytes || 0;
+
+    // Builder item 6: Rapid-MLX active/retained KV split — distinct totals.
+    // For Rapid-MLX with workload_scenario: show active + retained separately.
+    // For llama.cpp or legacy calls: unified kv_cache_bytes.
+    const isRapidSplit = (data.active_kv_bytes || 0) > 0 && (data.retained_kv_bytes || 0) > 0;
+    const activeKV = data.active_kv_bytes || 0;
+    const retainedKV = data.retained_kv_bytes || 0;
+    const kv = isRapidSplit ? 0 : (data.kv_cache_bytes || 0); // unified KV when no split
     const mmproj  = data.mmproj_bytes || 0;
     const mtp     = data.mtp_bytes || 0;
     const overhead = data.overhead_bytes || 0;
+    const linearState = data.linear_attn_state_bytes || 0;
+    const tqTransient = data.turboquant_transient_peak_bytes || 0;
+    // Phase 6 Part B: prefix cache budget display (informational, not consumed until active).
+    const prefixCacheBudget = data.mlx_prefix_cache_bytes || 0;
 
     // Bar 100% = budget so free headroom is visible; fall back to used if no budget
     const barTotal = avail > 0 ? avail : used;
@@ -903,11 +1127,43 @@ function _renderPresetVram(el, data) {
 
     const parts = [];
     if (weights > 0) parts.push(`Weights ${fmt(weights)}`);
-    if (kv > 0) parts.push(`KV ${fmt(kv)}`);
+    if (isRapidSplit) {
+        if (activeKV > 0) parts.push(`Active KV ${fmt(activeKV)}`);
+        if (retainedKV > 0) parts.push(`Retained KV ${fmt(retainedKV)}`);
+    } else if (kv > 0) {
+        parts.push(`KV ${fmt(kv)}`);
+    }
+    if (linearState > 0) parts.push(`Linear attn ${fmt(linearState)}`);
     if (mmproj > 0) parts.push(`mmproj ${fmt(mmproj)}`);
     if (mtp > 0) parts.push(`MTP ${fmt(mtp)}`);
+    if (tqTransient > 0) parts.push(`TQ transient ${fmt(tqTransient)}`);
     if (overhead > 0) parts.push(`overhead ${fmt(overhead)}`);
     if (avail > 0 && free > 0) parts.push(`${fmt(free)} budget headroom`);
+    // Phase 6 Part B: show prefix cache budget as informational (not consumed until active).
+    if (prefixCacheBudget > 0) parts.push(`Rapid retained cache ${fmt(prefixCacheBudget)}`);
+    const nativeContextLimit = Number(data.native_context_limit || 0);
+    const selectedContext = Number(document.getElementById('modal-context-size')?.value || 0);
+    if (_presetNativeContextLimit !== nativeContextLimit) {
+        _presetNativeContextLimit = nativeContextLimit;
+        _renderContextPills();
+    }
+    const nativeHint = document.getElementById('preset-context-native-hint');
+    if (nativeHint) {
+        if (nativeContextLimit > 0) {
+            nativeHint.textContent = selectedContext > nativeContextLimit
+                ? `Native model maximum: ${Math.round(nativeContextLimit / 1024)}k. This selection needs Advanced Context extension controls and is not benchmark-qualified.`
+                : `Native model maximum: ${Math.round(nativeContextLimit / 1024)}k. Higher context requires separately qualified Advanced Context extension controls.`;
+            nativeHint.style.display = '';
+        } else {
+            nativeHint.style.display = 'none';
+        }
+    }
+    if (nativeContextLimit > 0) {
+        const nativeLabel = `${Math.round(nativeContextLimit / 1024)}k native max`;
+        parts.push(selectedContext > nativeContextLimit
+            ? `${nativeLabel} · Advanced Context required`
+            : nativeLabel);
+    }
 
     // Show post-load system RAM projection when we have live metrics
     const sys = lastSystemMetrics;
@@ -943,15 +1199,29 @@ function _renderPresetVram(el, data) {
             `</div>`;
     }
 
+    // Builder item 6: distinct active/retained segments for Rapid-MLX when applicable.
+    const kvSegments = isRapidSplit
+        ? `<div class="vram-segment seg-active-kv" style="width:${pct(activeKV)}" title="Active KV Cache"></div>
+           <div class="vram-segment seg-retained-kv" style="width:${pct(retainedKV)}" title="Retained KV Cache"></div>`
+        : `<div class="vram-segment seg-kv" style="width:${pct(kv)}" title="KV Cache"></div>`;
+    const linearSeg = linearState > 0
+        ? `<div class="vram-segment seg-overhead" style="width:${pct(linearState)}" title="Linear Attention State"></div>`
+        : '';
+    const tqSeg = tqTransient > 0
+        ? `<div class="vram-segment seg-overhead" style="width:${pct(tqTransient)}" title="TurboQuant Transient"></div>`
+        : '';
+
     // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes the VRAM bar HTML
     el.innerHTML = window.DOMPurify.sanitize(`
         <div class="preset-vram-row">
             <span class="preset-memory-kind">${_presetIsUnified ? 'MEM' : 'VRAM'}</span>
             <div class="vram-bar">
                 <div class="vram-segment seg-weights" style="width:${pct(weights)}" title="Weights"></div>
-                <div class="vram-segment seg-kv" style="width:${pct(kv)}" title="KV Cache"></div>
+                ${kvSegments}
                 <div class="vram-segment seg-mmproj" style="width:${pct(mmproj)}" title="Vision Projector"></div>
                 <div class="vram-segment seg-mtp" style="width:${pct(mtp)}" title="MTP Heads"></div>
+                ${linearSeg}
+                ${tqSeg}
                 <div class="vram-segment seg-overhead" style="width:${pct(overhead)}" title="Overhead"></div>
                 <div class="vram-segment seg-free" style="width:${pct(free)}" title="Budget Headroom"></div>
             </div>
@@ -963,6 +1233,8 @@ function _renderPresetVram(el, data) {
         ${systemLine}
     `);
     el.style.display = '';
+    const explain = document.getElementById('preset-vram-explain');
+    if (explain) explain.onclick = () => openEstimateEvidenceDrawer(data, 'Preset memory estimate', explain);
 }
 
 // Empirically auto-tune n_cpu_moe for the preset's model via llama-bench.
@@ -998,32 +1270,62 @@ async function autoTunePreset() {
     }
 }
 
-export function openPresetModal(mode, section) {
+export function openPresetModal(mode, section, seedPreset = null) {
     const modal = document.getElementById('preset-modal');
     const title = document.getElementById('modal-title');
     const subtitle = document.getElementById('preset-editor-subtitle');
+    const formatPill = document.getElementById('preset-editor-format');
     const form = document.getElementById('preset-form');
+    // Tests and other modal managers may close overlays by setting inert and
+    // aria-hidden directly. Always restore the modal's interactive state when
+    // opening it again; otherwise the overlay can paint while swallowing every
+    // click and select action inside it.
+    modal.removeAttribute('aria-hidden');
+    modal.inert = false;
+    modal.classList.remove('closing');
+    initPresetEditorNav();
+    bindRecommendedChatTemplateButton();
     form.reset();
+    updatePresetChatTemplateStatusLine();
+    if (formatPill) formatPill.hidden = true;
     clearFieldErrors();
+    newPresetSeed = mode === 'new' && seedPreset ? structuredClone(seedPreset) : null;
+    _presetRapidMlxProfile = null;
+    _presetRapidMlxPrefillExplicit = false;
 
     if (mode === 'edit') {
         const id = document.getElementById('preset-select').value;
         const p = sessionState.presets.find(pr => pr.id === id);
         if (!p) { showToast('No preset selected', 'warn'); return; }
         title.textContent = 'Edit Preset';
-        if (subtitle) subtitle.textContent = p.name;
+        if (subtitle) {
+            subtitle.textContent = 'Model profile';
+            subtitle.title = p.name;
+        }
+        if (formatPill) {
+            const source = presetModelSource(p).toLowerCase();
+            const format = p.backend === 'rapid_mlx' ? 'MLX' : source.endsWith('.gguf') ? 'GGUF' : '';
+            formatPill.textContent = format;
+            formatPill.hidden = !format;
+            formatPill.title = format ? `${format} preset` : '';
+        }
         setVal('modal-preset-id', p.id);
         // Model & Memory
         setVal('modal-name', p.name);
         // Prefill model field:
         // - If model_path present, treat as local file.
         // - Else if hf_repo present, treat as HF repo.
-        const modelValue = p.model_path || p.hf_repo || '';
+        const modelValue = presetModelSource(p);
         setVal('modal-model-path', modelValue);
+        document.getElementById('modal-model-path').title = modelValue;
         _renderPresetArchInfo(p);
         setVal('modal-alias', p.alias || '');
+        // Fetch live Rapid-MLX profile when editing a Rapid-MLX preset
+        _presetRapidMlxPrefillExplicit = p.rapid_mlx?.prefill_step_size != null;
+        _schedulePresetRapidMlxProfile();
         numOrEmpty('modal-gpu-layers', p.gpu_layers);
-        setChk('modal-no-mmap', p.no_mmap);
+  setChk('modal-no-mmap', p.no_mmap);
+  setOpt('modal-load-mode', p.load_mode || (p.no_mmap ? 'none' : 'mmap'));
         setChk('modal-mlock', p.mlock);
         // Context & KV
         setVal('modal-context-size', p.context_size || 128000);
@@ -1039,7 +1341,13 @@ export function openPresetModal(mode, section) {
         const cacheIdleHint = document.getElementById('cache-idle-slots-hint');
         if (cacheIdleHint) cacheIdleHint.style.display = (p.parallel_slots || 1) > 1 ? '' : 'none';
         setOpt('modal-prio', p.prio != null ? String(p.prio) : '');
-        setOpt('modal-prio-batch', p.prio_batch != null ? String(p.prio_batch) : '');
+ setOpt('modal-prio-batch', p.prio_batch != null ? String(p.prio_batch) : '');
+        numOrEmpty('modal-verbosity', p.verbosity ?? 4);
+        setChk('modal-no-cont-batching', p.no_cont_batching);
+        setChk('modal-swa-full', p.swa_full);
+        numOrEmpty('modal-ctx-checkpoints', p.ctx_checkpoints);
+        numOrEmpty('modal-checkpoint-min-step', p.checkpoint_min_step);
+        numOrEmpty('modal-cache-reuse', p.cache_reuse);
         setOpt('modal-cache-idle-slots', p.cache_idle_slots == null ? '' : p.cache_idle_slots ? 'true' : 'false');
         numOrEmpty('modal-threads', p.threads);
         numOrEmpty('modal-threads-batch', p.threads_batch);
@@ -1049,6 +1357,7 @@ export function openPresetModal(mode, section) {
         numOrEmpty('modal-top-k', p.top_k);
         numOrEmpty('modal-min-p', p.min_p);
         numOrEmpty('modal-repeat-penalty', p.repeat_penalty);
+        numOrEmpty('modal-repeat-last-n', p.repeat_last_n);
         numOrEmpty('modal-presence-penalty', p.presence_penalty);
         setOpt('modal-enable-thinking', p.enable_thinking == null ? '' : String(!!p.enable_thinking));
         setOpt('modal-preserve-thinking', p.preserve_thinking == null ? '' : String(!!p.preserve_thinking));
@@ -1142,14 +1451,81 @@ export function openPresetModal(mode, section) {
         _toggleSpecFields(specType);
         // Context extras
         setOpt('modal-kv-unified', p.kv_unified == null ? '' : String(p.kv_unified));
+        setOpt('modal-cache-mode', p.cache_mode || 'custom');
         numOrEmpty('modal-cache-ram-mib', p.cache_ram_mib);
+        _toggleCacheRamField(p.cache_mode || 'custom');
         // Model extras
         setVal('modal-mmproj', p.mmproj || '');
         _toggleVisionTokens(!!p.mmproj);
         setVal('modal-chat-template-file', p.chat_template_file || '');
+        updatePresetChatTemplateStatusLine();
         // Advanced
         setOpt('modal-bind-host', p.bind_host || '');
-        numOrEmpty('modal-port', p.port);
+        numOrEmpty('modal-port', p.backend === 'rapid_mlx' ? p.rapid_mlx?.port : p.port);
+        setOpt('modal-rapid-enable-thinking', p.rapid_mlx?.enable_thinking == null ? '' : String(!!p.rapid_mlx.enable_thinking));
+        // reasoning_effort removed: config field exists but argv builder does not emit --reasoning-effort.
+        // Phase 6: 8 GiB retained cache is the qualified interactive default.
+        const prefixCacheEnabled = p.rapid_mlx?.prefix_cache_enabled ?? true;
+        if (document.getElementById('modal-rapid-prefix-cache-enabled')) {
+            document.getElementById('modal-rapid-prefix-cache-enabled').checked = prefixCacheEnabled;
+        }
+        setOpt('modal-rapid-cache-memory-mib', String(p.rapid_mlx?.retained_cache_mib ?? (prefixCacheEnabled ? 8192 : 0)));
+        setOpt('modal-rapid-hybrid-cache-entries', String(p.rapid_mlx?.hybrid_cache_entries ?? 0));
+        setOpt('modal-rapid-cache-mode', p.rapid_mlx?.cache_mode || 'custom');
+        _toggleRapidCacheFields(p.rapid_mlx?.cache_mode || 'custom');
+        // Phase 7: Rapid-MLX advanced controls (D6 catalog IDs).
+        setOpt('modal-rapid-kv-cache-dtype', p.rapid_mlx?.kv_cache_dtype || '');
+        setOpt('modal-rapid-prefill-step-size', String(p.rapid_mlx?.prefill_step_size || 512));
+        const speculative = p.rapid_mlx?.speculative_config || null;
+        const speculativeEnabled = !!speculative;
+        const speculativeSource = speculative?.model ? 'external' : 'embedded';
+        const speculativeEnabledEl = document.getElementById('modal-rapid-speculative-enabled');
+        if (speculativeEnabledEl) speculativeEnabledEl.checked = speculativeEnabled;
+        setOpt('modal-rapid-speculative-source', speculativeSource);
+        setVal('modal-rapid-speculative-model', speculative?.model || '');
+        setOpt('modal-rapid-speculative-tokens', String(speculative?.num_speculative_tokens || 2));
+        const disableAutoKEl = document.getElementById('modal-rapid-speculative-disable-auto-k');
+        if (disableAutoKEl) disableAutoKEl.checked = !!speculative?.disable_auto_k;
+        /* Restore trust_remote_code_consent for MTP companion if previously granted */
+        const trustWrap = document.getElementById('modal-rapid-speculative-trust-wrap');
+        const trustCheck = document.getElementById('modal-rapid-speculative-trust-consent');
+        const trustWarning = document.getElementById('modal-rapid-speculative-trust-warning');
+        const storedConsent = p.rapid_mlx?.trust_remote_code_consent || null;
+        if (trustWrap && trustCheck && trustWarning && storedConsent) {
+            _speculativeTrustState.repoId = storedConsent.split('@')[0] || '';
+            _speculativeTrustState.revision = storedConsent.split('@').slice(1).join('@') || '';
+            _speculativeTrustState.trustRequired = true;
+            trustWarning.textContent =
+                'This companion model requires trust_remote_code (custom Python code execution).';
+            trustCheck.checked = true;
+            trustWrap.style.display = '';
+        }
+        const autoToolChoiceEl = document.getElementById('modal-rapid-auto-tool-choice');
+        if (autoToolChoiceEl) autoToolChoiceEl.checked = !!p.rapid_mlx?.auto_tool_choice;
+        _syncRapidSpeculativeEditor();
+        setOpt('modal-rapid-turboquant-mode', p.rapid_mlx?.turboquant_mode || 'none');
+        setOpt('modal-rapid-gpu-memory-utilization', p.rapid_mlx?.gpu_memory_utilization == null ? '' : String(p.rapid_mlx.gpu_memory_utilization));
+        setOpt('modal-rapid-max-num-seqs', p.rapid_mlx?.max_num_seqs == null ? '' : String(p.rapid_mlx.max_num_seqs));
+        setOpt('modal-rapid-max-concurrent-requests', p.rapid_mlx?.max_concurrent_requests == null ? '' : String(p.rapid_mlx.max_concurrent_requests));
+        setOpt('modal-rapid-prefill-batch-size', p.rapid_mlx?.prefill_batch_size == null ? '' : String(p.rapid_mlx.prefill_batch_size));
+        setOpt('modal-rapid-completion-batch-size', p.rapid_mlx?.completion_batch_size == null ? '' : String(p.rapid_mlx.completion_batch_size));
+        setOpt('modal-rapid-pflash-policy', p.rapid_mlx?.pflash_policy || 'off');
+        setOpt('modal-rapid-tool-call-parser', p.rapid_mlx?.tool_call_parser || '');
+        setOpt('modal-rapid-reasoning-parser', p.rapid_mlx?.reasoning_parser || '');
+        setOpt('modal-rapid-sampling-mode', p.rapid_mlx?.sampling_mode || 'auto');
+        const reasoningModeChecked = !p.rapid_mlx?.no_thinking && p.rapid_mlx?.reasoning_mode !== 'off';
+        if (document.getElementById('modal-rapid-reasoning-mode')) {
+            document.getElementById('modal-rapid-reasoning-mode').checked = reasoningModeChecked;
+        }
+        // Load Rapid-MLX sampling defaults into shared form fields
+        if (p.rapid_mlx?.default_temperature != null) numOrEmpty('modal-temperature', p.rapid_mlx.default_temperature);
+        if (p.rapid_mlx?.default_top_p != null) numOrEmpty('modal-top-p', p.rapid_mlx.default_top_p);
+        if (p.rapid_mlx?.default_top_k != null) numOrEmpty('modal-top-k', p.rapid_mlx.default_top_k);
+        if (p.rapid_mlx?.default_min_p != null) numOrEmpty('modal-min-p', p.rapid_mlx.default_min_p);
+        if (p.rapid_mlx?.default_repetition_penalty != null) numOrEmpty('modal-repeat-penalty', p.rapid_mlx.default_repetition_penalty);
+        if (p.rapid_mlx?.default_presence_penalty != null) numOrEmpty('modal-presence-penalty', p.rapid_mlx.default_presence_penalty);
+        if (p.rapid_mlx?.default_frequency_penalty != null) numOrEmpty('modal-rapid-frequency-penalty', p.rapid_mlx.default_frequency_penalty);
+        if (p.rapid_mlx?.max_tokens != null) numOrEmpty('modal-max-tokens', p.rapid_mlx.max_tokens);
         setVal('modal-api-key', p.api_key || '');
         numOrEmpty('modal-max-tokens', p.max_tokens);
         numOrEmpty('modal-seed', p.seed);
@@ -1164,19 +1540,38 @@ export function openPresetModal(mode, section) {
         numOrEmpty('modal-spec-draft-p-split', p.spec_draft_p_split);
         numOrEmpty('modal-image-min-tokens', qwenVLImageTokens(p).min_tokens);
         numOrEmpty('modal-image-max-tokens', p.image_max_tokens);
+        _configureBackendPresetEditor(p);
     } else {
         title.textContent = 'New Preset';
-        if (subtitle) subtitle.textContent = 'New model profile';
+        if (subtitle) {
+            subtitle.textContent = newPresetSeed?.backend === 'rapid_mlx'
+                ? 'Rapid-MLX model profile'
+                : 'New model profile';
+            subtitle.title = '';
+        }
+        if (formatPill && newPresetSeed?.backend === 'rapid_mlx') {
+            formatPill.textContent = 'MLX';
+            formatPill.title = 'MLX preset';
+            formatPill.hidden = false;
+        }
         setVal('modal-preset-id', '');
+        setVal('modal-name', newPresetSeed?.name || '');
+        setVal('modal-model-path', presetModelSource(newPresetSeed));
+        document.getElementById('modal-model-path').title = presetModelSource(newPresetSeed);
         setVal('modal-context-size', 128000);
         setVal('modal-ctk', 'q8_0');
         setVal('modal-ctv', 'f16');
         setVal('modal-batch-size', 2048);
         setVal('modal-ubatch-size', 2048);
         setVal('modal-parallel-slots', 1);
+        numOrEmpty('modal-port', newPresetSeed?.backend === 'rapid_mlx'
+            ? newPresetSeed.rapid_mlx?.port
+            : newPresetSeed?.port);
         _toggleFitTarget(false);
         _toggleSpecFields('');
         setStructuredOutputMode('');
+        _configureBackendPresetEditor(newPresetSeed);
+        _presetRapidMlxPrefillExplicit = newPresetSeed?.rapid_mlx?.prefill_step_size != null;
     }
 
     const presetModel = document.getElementById('modal-model-path')?.value.trim();
@@ -1192,8 +1587,13 @@ export function openPresetModal(mode, section) {
     const deleteBtn = document.getElementById('preset-modal-delete');
     if (mode === 'edit') {
         if (deleteBtn) deleteBtn.style.display = '';
+        const calibrateBtn = document.getElementById('preset-modal-calibrate');
+        const editingPreset = sessionState.presets.find(preset => preset.id === document.getElementById('modal-preset-id')?.value);
+        if (calibrateBtn) calibrateBtn.style.display = editingPreset?.backend === 'rapid_mlx' ? 'none' : '';
     } else {
         if (deleteBtn) deleteBtn.style.display = 'none';
+        const calibrateBtn = document.getElementById('preset-modal-calibrate');
+        if (calibrateBtn) calibrateBtn.style.display = 'none';
     }
 
     modal.classList.add('open');
@@ -1229,6 +1629,7 @@ export function openPresetModal(mode, section) {
 
 export function closePresetModal() {
     document.getElementById('preset-modal').classList.remove('open');
+    newPresetSeed = null;
 }
 
 // ── Presets Panel ──────────────────────────────────────────────────────────────
@@ -1259,9 +1660,7 @@ function _renderPresetsPanel() {
     if (!body) return;
     body.innerHTML = '';
 
-    const presets = (sessionState.presets || []).filter(
-        p => p.model_path || p.hf_repo
-    );
+    const presets = (sessionState.presets || []).filter(presetModelSource);
     if (!presets.length) {
         const empty = document.createElement('div');
         empty.className = 'presets-panel-empty';
@@ -1288,7 +1687,15 @@ function _renderPresetsPanel() {
         info.appendChild(name);
 
         const metaParts = [];
-        if (preset.model_path) metaParts.push(preset.model_path.split(/[/\\]/).pop() || preset.model_path);
+        const rapidMlx = preset.rapid_mlx;
+        if (preset.backend === 'rapid_mlx') {
+            const modelIdentity = rapidMlx?.model_source_view?.canonical_identity
+                || rapidMlx?.model_source_view?.display_name;
+            if (modelIdentity) {
+                metaParts.push(modelIdentity.split(/[/\\]/).pop() || modelIdentity);
+                metaParts.push('Rapid-MLX');
+            }
+        } else if (preset.model_path) metaParts.push(preset.model_path.split(/[/\\]/).pop() || preset.model_path);
         else if (preset.hf_repo) metaParts.push(preset.hf_repo);
         if (preset.bind_host === '0.0.0.0') metaParts.push('LAN');
         if (preset.context_size) metaParts.push(`${Math.round(preset.context_size / 1024)}k context`);
@@ -1418,6 +1825,20 @@ function _toggleVisionTokens(enabled) {
     if (wrap) wrap.style.display = enabled ? '' : 'none';
 }
 
+function _toggleCacheRamField(cacheMode) {
+    const wrap = document.getElementById('modal-cache-ram-mib-wrap');
+    if (wrap) wrap.style.display = cacheMode === 'custom' ? '' : 'none';
+}
+
+function _toggleRapidCacheFields(cacheMode) {
+    const custom = cacheMode === 'custom';
+    ['modal-rapid-prefix-cache-enabled', 'modal-rapid-cache-memory-mib', 'modal-rapid-hybrid-cache-entries']
+        .forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.disabled = !custom;
+        });
+}
+
 function _ensureUbatchForImageTokens(imageMaxTokens) {
     // Gemma4-specific: non-causal vision attention requires all image tokens in a single ubatch.
     // If image-max-tokens > ubatch, we auto-raise ubatch to avoid crashes.
@@ -1505,7 +1926,533 @@ function _hideSummary() {
     if (saveBtn) { saveBtn.textContent = 'Save'; saveBtn.dataset.confirmed = ''; }
 }
 
+function _configureBackendPresetEditor(preset) {
+    const modal = document.getElementById('preset-modal');
+    const isRapid = preset?.backend === 'rapid_mlx';
+    modal?.classList.toggle('preset-editor--rapid-mlx', isRapid);
+
+    // Phase 7: Toggle Rapid-MLX advanced rows based on backend (inline styles override CSS).
+    // The webui rows are gone from this list because they are gone from index.html: they were
+    // gated on llama.cpp's --ui/--path, which rapid-mlx does not have.
+    const rapidRows = ['pe-row-rapid-advanced', 'pe-row-rapid-workload', 'pe-row-rapid-reasoning', 'pe-row-rapid-reasoning-mode', 'pe-row-rapid-parser-overrides', 'pe-row-rapid-architecture-overrides', 'pe-row-rapid-speculative', 'pe-row-rapid-throughput', 'pe-row-rapid-batch-sizes', 'pe-row-rapid-cache-mode', 'pe-row-rapid-prefix-cache', 'pe-row-rapid-cache-memory', 'pe-row-rapid-hybrid-cache-entries'];
+    rapidRows.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = isRapid ? '' : 'none';
+    });
+
+    // MTP/concurrency teaching panel removed (Phase 7B2).
+
+    const modelLabel = document.querySelector('label[for="modal-model-path"]');
+    const modelInput = document.getElementById('modal-model-path');
+    const portLabel = document.querySelector('label[for="modal-port"]');
+    const modelSection = modal?.querySelector('.preset-editor-section[data-section="model"]');
+    const modelTitle = modelSection?.querySelector('.pe-section-title');
+    const modelDescription = modelSection?.querySelector('.pe-section-desc');
+    const advancedSection = modal?.querySelector('.preset-editor-section[data-section="advanced"]');
+    const advancedNavLabel = modal?.querySelector('.preset-nav-item[data-section="advanced"] .pni-label');
+    const advancedTitle = advancedSection?.querySelector('.pe-section-title');
+    const advancedDescription = advancedSection?.querySelector('.pe-section-desc');
+    if (modelTitle) modelTitle.textContent = isRapid ? 'Rapid-MLX Model' : 'Model & Memory';
+    if (modelDescription) {
+        modelDescription.textContent = isRapid
+            ? 'MLX model directory or Hugging Face repository'
+            : 'Model file path, GPU offloading, memory locking';
+    }
+    if (advancedTitle) advancedTitle.textContent = isRapid ? 'Rapid-MLX Server' : 'Advanced';
+    if (advancedNavLabel) advancedNavLabel.textContent = isRapid ? 'Server' : 'Advanced';
+    if (advancedDescription) {
+        advancedDescription.textContent = isRapid
+            ? 'Local server port'
+            : 'Server access, fit-to-VRAM, seed, and extra CLI flags';
+    }
+    if (modelLabel) {
+        modelLabel.firstChild.textContent = isRapid ? 'MLX Model Path ' : 'Model Path ';
+        modelLabel.title = isRapid
+            ? 'Local MLX model directory or Hugging Face MLX repository id'
+            : 'Absolute path to the .gguf model file on disk';
+    }
+    if (modelInput) {
+        modelInput.placeholder = isRapid ? 'mlx-community/model-name or /path/to/model' : '';
+    }
+    if (portLabel) {
+        portLabel.title = isRapid
+            ? 'TCP port Rapid-MLX listens on.'
+            : 'TCP port llama-server listens on. Default 8001. Change if you run multiple servers simultaneously.';
+    }
+    configureMlxPresetEditor(modal, isRapid);
+}
+
+async function _fetchSidecarsForPreset() {
+    const listEl = document.getElementById('modal-rapid-speculative-sidecars-list');
+    if (!listEl) return;
+
+    listEl.innerHTML = '<span style="color:var(--text-muted,#888);">Loading…</span>';
+
+    try {
+        const resp = await fetch('/api/hf/mtp-sidecars', { headers: window.authHeaders ? window.authHeaders() : {} });
+        const data = await resp.json();
+
+        if (!data.ok || !data.sidecars || data.sidecars.length === 0) {
+            listEl.innerHTML = '<span style="color:var(--text-muted,#888);">No local sidecars found. Build one with scripts/build-mtp-head.py</span>';
+            return;
+        }
+
+        const modelInput = document.getElementById('modal-rapid-speculative-model');
+
+        // Build sidecar list
+        let html = '';
+        data.sidecars.forEach((s, i) => {
+            const vram = s.estimatedMemoryBytes != null
+                ? '~' + (s.estimatedMemoryBytes >= 1073741824
+                    ? (s.estimatedMemoryBytes / 1073741824).toFixed(1) + ' GB'
+                    : Math.round(s.estimatedMemoryBytes / 1048576) + ' MB')
+                : '? VRAM';
+
+            const trunkShort = s.trunk ? s.trunk.split('/').pop() : '?';
+
+            html += '<button type="button" class="pe-action-btn" data-sidecar-index="' + i + '" style="display:block; width:100%; text-align:left; padding:6px 8px; margin-bottom:4px; font-size:11px; background:var(--color-surface,#1a1d24); border:1px solid var(--color-border,#2a2d34); border-radius:4px; cursor:pointer;">';
+            html += '<strong>' + DOMPurify.sanitize(s.slug) + '</strong> ';
+            html += '<span style="color:var(--text-muted,#888);">' + vram + '</span>';
+            if (s.trunk) html += ' <span style="color:var(--text-muted,#888);">for ' + DOMPurify.sanitize(trunkShort) + '</span>';
+            if (s.builtAt) html += ' <span style="color:var(--text-muted,#888);">(' + (function(dt) { if (!dt) return ''; const d = new Date(dt); const diff = (Date.now() - d.getTime()) / 1000; if (diff < 60) return 'just now'; if (diff < 3600) return Math.floor(diff / 60) + 'm ago'; if (diff < 86400) return Math.floor(diff / 3600) + 'h ago'; return Math.floor(diff / 86400) + 'd ago'; })(s.builtAt) + ')</span>';
+            if (!s.normCheckPassed) html += ' <span style="color:var(--err,#e65c5c);">⚠ norm check failed</span>';
+            html += '</button>';
+        });
+
+        // eslint-disable-next-line no-unsanitized/property -- sidecar list built from our own API, all server strings are safe
+        listEl.innerHTML = html;
+
+        // Wire click handlers
+        listEl.querySelectorAll('[data-sidecar-index]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const idx = parseInt(btn.getAttribute('data-sidecar-index'));
+                const sidecar = data.sidecars[idx];
+
+                // Set the companion model path
+                if (modelInput) {
+                    modelInput.value = sidecar.path;
+                }
+
+                // Update trust state for pin status display
+                _speculativeTrustState.repoId = sidecar.slug;
+                _speculativeTrustState.revision = sidecar.sha256 ? sidecar.sha256.substring(0, 12) : '';
+                _speculativeTrustState.trustRequired = false;
+                _speculativeTrustState.estimatedMemoryBytes = sidecar.estimatedMemoryBytes;
+                _speculativeTrustState.resolvedAt = sidecar.builtAt;
+                _speculativeTrustState.stale = false;
+                _renderSpeculativePinStatus();
+            });
+        });
+    } catch (err) {
+        // eslint-disable-next-line no-unsanitized/property -- error message sanitized via DOMPurify
+        listEl.innerHTML = '<span style="color:var(--err,#e65c5c);">Failed to load sidecars: ' + DOMPurify.sanitize(err.message) + '</span>';
+    }
+}
+
+function _syncRapidSpeculativeEditor() {
+    const enabled = !!document.getElementById('modal-rapid-speculative-enabled')?.checked;
+    const external = document.getElementById('modal-rapid-speculative-source')?.value === 'external';
+    const modelWrap = document.getElementById('modal-rapid-speculative-model-wrap');
+    if (modelWrap) modelWrap.style.display = enabled && external ? '' : 'none';
+    // If toggling off or switching away from external, also hide trust section and pin status
+    const trustWrap = document.getElementById('modal-rapid-speculative-trust-wrap');
+    if (trustWrap && (!enabled || !external)) {
+        trustWrap.style.display = 'none';
+    }
+    const pinWrap = document.getElementById('modal-rapid-speculative-pin-status-wrap');
+    if (pinWrap && (!enabled || !external)) {
+        pinWrap.style.display = 'none';
+    }
+    const sidecarsWrap = document.getElementById('modal-rapid-speculative-sidecars-wrap');
+    if (sidecarsWrap) {
+        if (enabled && external) {
+            sidecarsWrap.style.display = '';
+            _fetchSidecarsForPreset();
+        } else {
+            sidecarsWrap.style.display = 'none';
+        }
+    }
+}
+
+document.addEventListener('change', (event) => {
+    if (event.target?.id === 'modal-rapid-speculative-enabled' || event.target?.id === 'modal-rapid-speculative-source') {
+        _syncRapidSpeculativeEditor();
+    }
+});
+
+/* ── Trust remote code: MTP companion preflight ─────────────────────────── */
+
+let _speculativeTrustState = {
+    repoId: '',
+    revision: '',
+    trustRequired: false,
+    loading: false,
+    timeout: null,
+    resolvedAt: '',
+    lastRecheckAt: '',
+    upstreamUnchanged: null,
+    stale: false,
+    estimatedMemoryBytes: null,
+    mtpSidecar: null,
+    mtpDepthMax: null,
+};
+
+function _timeAgo(dt) {
+    if (!dt) return '';
+    const d = new Date(dt);
+    const diff = (Date.now() - d.getTime()) / 1000;
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
+}
+
+function _renderSpeculativePinStatus() {
+    const wrap = document.getElementById('modal-rapid-speculative-pin-status-wrap');
+    const el = document.getElementById('modal-rapid-speculative-pin-status');
+    if (!wrap || !el) return;
+
+    if (!_speculativeTrustState.repoId) {
+        wrap.style.display = 'none';
+        return;
+    }
+
+    const rev = _speculativeTrustState.revision.substring(0, 12);
+    const stale = _speculativeTrustState.stale;
+    const trust = _speculativeTrustState.trustRequired;
+    const mem = _speculativeTrustState.estimatedMemoryBytes;
+    const sidecar = _speculativeTrustState.mtpSidecar;
+    const depth = _speculativeTrustState.mtpDepthMax;
+
+    // Determine if this is a local sidecar (no revision sha or revision is a hash)
+    const isLocalSidecar = !_speculativeTrustState.revision || _speculativeTrustState.revision.length > 12;
+
+    let parts = [];
+    /* Status indicator */
+    parts.push('<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:' + (stale ? 'var(--warn,#e6a41c)' : 'var(--success,#5ce68a)') + '"></span>');
+
+    if (isLocalSidecar) {
+        /* Local sidecar: show slug + label */
+        parts.push('<span>' + _speculativeTrustState.repoId + '</span>');
+        parts.push('<span style="color:var(--text-muted,#888);">(local sidecar)</span>');
+    } else {
+        /* HF repo pin: show repo@sha */
+        parts.push('<span>' + _speculativeTrustState.repoId + '@' + rev + '</span>');
+    }
+
+    /* Trust flag */
+    if (trust) {
+        parts.push('<span style="color:var(--err,#e65c5c);">(trust_remote_code)</span>');
+    }
+    /* Memory estimate */
+    if (mem != null) {
+        let memStr;
+        if (mem >= 1073741824) {
+            memStr = '~' + (mem / 1073741824).toFixed(1) + ' GB';
+        } else {
+            memStr = '~' + Math.round(mem / 1048576) + ' MB';
+        }
+        parts.push('<span style="color:var(--text-muted,#888);">~' + memStr + ' VRAM</span>');
+    }
+    /* Quantization info (from mtplx_runtime.json) */
+    if (sidecar) {
+        parts.push('<span style="color:var(--text-muted,#888);">sidecar:' + sidecar + (depth != null ? ' d' + depth : '') + '</span>');
+    }
+    /* Resolved time */
+    if (_speculativeTrustState.resolvedAt) {
+        parts.push('<span style="color:var(--text-muted,#888);">resolved ' + _timeAgo(_speculativeTrustState.resolvedAt) + '</span>');
+    }
+
+    /* Re-check button only for HF repo pins */
+    if (!isLocalSidecar) {
+        parts.push('<button type="button" class="pe-action-btn" id="modal-rapid-speculative-pin-recheck" style="font-size:11px; padding:2px 8px; margin-left:4px;">Re-check</button>');
+    }
+
+    // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes HTML
+    el.innerHTML = DOMPurify.sanitize(parts.join(' '));
+    wrap.style.display = '';
+
+    /* Wire re-check button */
+    const btn = document.getElementById('modal-rapid-speculative-pin-recheck');
+    if (btn) {
+        btn.addEventListener('click', async () => {
+            if (!_speculativeTrustState.repoId) return;
+            btn.disabled = true;
+            btn.textContent = '…';
+            try {
+                const resp = await fetch(
+                    '/api/hf/mtp-preflight/recheck?repo=' + encodeURIComponent(_speculativeTrustState.repoId),
+                    { method: 'POST', headers: window.authHeaders ? window.authHeaders() : {} }
+                );
+                const data = await resp.json();
+                if (!data || data.ok !== true) {
+                    // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes HTML
+                    el.innerHTML = DOMPurify.sanitize('<span style="color:var(--err,#e65c5c);">Re-check failed: ' + (data?.error || 'unknown') + '</span>');
+                    setTimeout(_renderSpeculativePinStatus, 3000);
+                    return;
+                }
+                _speculativeTrustState.revision = data.revision;
+                _speculativeTrustState.trustRequired = !!data.trustRemoteCodeRequired;
+                _speculativeTrustState.lastRecheckAt = data.lastRecheckAt || '';
+                _speculativeTrustState.upstreamUnchanged = data.upstreamUnchanged ?? null;
+                _speculativeTrustState.resolvedAt = data.resolvedAt || '';
+                _speculativeTrustState.stale = false;
+                _renderSpeculativePinStatus();
+            } catch (e) {
+                // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes HTML
+                el.innerHTML = DOMPurify.sanitize('<span style="color:var(--err,#e65c5c);">Re-check failed: ' + e.message + '</span>');
+                setTimeout(_renderSpeculativePinStatus, 3000);
+            } finally {
+                btn.disabled = false;
+            }
+        });
+    }
+}
+
+async function _checkSpeculativeModelTrust(repoId) {
+    const trustWrap = document.getElementById('modal-rapid-speculative-trust-wrap');
+    const warningEl = document.getElementById('modal-rapid-speculative-trust-warning');
+    const consentCheck = document.getElementById('modal-rapid-speculative-trust-consent');
+    const pinWrap = document.getElementById('modal-rapid-speculative-pin-status-wrap');
+    if (!trustWrap || !warningEl || !consentCheck) return;
+
+    /* Reset */
+    _speculativeTrustState = { repoId: '', revision: '', trustRequired: false, loading: false, timeout: null, resolvedAt: '', lastRecheckAt: '', upstreamUnchanged: null, stale: false, estimatedMemoryBytes: null, mtpSidecar: null, mtpDepthMax: null };
+    trustWrap.style.display = 'none';
+    consentCheck.checked = false;
+    warningEl.textContent = '';
+    if (pinWrap) pinWrap.style.display = 'none';
+
+    if (!repoId || !repoId.includes('/')) return;
+    if (!/^[\w._-]+\/[\w._-]+$/.test(repoId)) return;
+
+    _speculativeTrustState.loading = true;
+    try {
+        const resp = await fetch(
+            '/api/hf/mtp-preflight?repo=' + encodeURIComponent(repoId),
+            { headers: window.authHeaders ? window.authHeaders() : {} }
+        );
+        const data = await resp.json();
+        if (!data || data.ok !== true) {
+            _speculativeTrustState.loading = false;
+            return;
+        }
+        _speculativeTrustState.repoId = data.repoId;
+        _speculativeTrustState.revision = data.revision;
+        _speculativeTrustState.trustRequired = !!data.trustRemoteCodeRequired;
+        _speculativeTrustState.resolvedAt = data.resolvedAt || '';
+        _speculativeTrustState.lastRecheckAt = data.lastRecheckAt || '';
+        _speculativeTrustState.upstreamUnchanged = data.upstreamUnchanged ?? null;
+        _speculativeTrustState.stale = !!data.stale;
+        _speculativeTrustState.estimatedMemoryBytes = data.estimatedMemoryBytes ?? null;
+        _speculativeTrustState.mtpSidecar = data.mtpSidecar ?? null;
+        _speculativeTrustState.mtpDepthMax = data.mtpDepthMax ?? null;
+        _speculativeTrustState.loading = false;
+
+        /* Pin status UI — always show when pinned */
+        _renderSpeculativePinStatus();
+
+        if (_speculativeTrustState.trustRequired) {
+            let msg = 'This companion model requires trust_remote_code (custom Python code execution).';
+            msg += '\nPinned to ' + data.repoId + '@' + data.revision.substring(0, 12);
+            if (_speculativeTrustState.stale) {
+                msg += ' (stale — consider re-checking)';
+            }
+            if (data.upstreamUnchanged === false) {
+                msg += ' (upstream changed)';
+            }
+            warningEl.textContent = msg;
+            consentCheck.checked = false;
+            trustWrap.style.display = '';
+        } else {
+            warningEl.textContent = 'Pinned to ' + data.repoId + '@' + data.revision.substring(0, 12) + ' (no trust_remote_code needed)';
+            trustWrap.style.display = '';
+        }
+    } catch {
+        _speculativeTrustState.loading = false;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const modelInput = document.getElementById('modal-rapid-speculative-model');
+    if (!modelInput) return;
+
+    modelInput.addEventListener('input', () => {
+        const value = (modelInput.value || '').trim();
+        if (_speculativeTrustState.timeout) clearTimeout(_speculativeTrustState.timeout);
+        if (!value || _speculativeTrustState.loading) return;
+        _speculativeTrustState.timeout = setTimeout(() => _checkSpeculativeModelTrust(value), 600);
+    });
+
+    /* Re-check pin button */
+    const recheckBtn = document.getElementById('modal-rapid-speculative-recheck');
+    const recheckStatus = document.getElementById('modal-rapid-speculative-recheck-status');
+    if (recheckBtn) {
+        recheckBtn.addEventListener('click', async () => {
+            if (!_speculativeTrustState.repoId) return;
+            recheckBtn.disabled = true;
+            recheckBtn.textContent = 'Re-checking...';
+            try {
+                const resp = await fetch(
+                    '/api/hf/mtp-preflight/recheck?repo=' + encodeURIComponent(_speculativeTrustState.repoId),
+                    { method: 'POST', headers: window.authHeaders ? window.authHeaders() : {} }
+                );
+                const data = await resp.json();
+                if (!data || data.ok !== true) {
+                    recheckStatus.textContent = 'Re-check failed: ' + (data?.error || 'unknown error');
+                    recheckStatus.style.display = '';
+                    recheckStatus.style.color = 'var(--err,#e65c5c)';
+                    return;
+                }
+                /* Update state */
+                _speculativeTrustState.revision = data.revision;
+                _speculativeTrustState.trustRequired = !!data.trustRemoteCodeRequired;
+                _speculativeTrustState.lastRecheckAt = data.lastRecheckAt || '';
+                _speculativeTrustState.upstreamUnchanged = data.upstreamUnchanged ?? null;
+                _speculativeTrustState.resolvedAt = data.resolvedAt || '';
+                _speculativeTrustState.stale = false;
+
+                /* Update warning text */
+                const warningEl = document.getElementById('modal-rapid-speculative-trust-warning');
+                if (_speculativeTrustState.trustRequired) {
+                    let msg = 'This companion model requires trust_remote_code (custom Python code execution).';
+                    msg += '\nPinned to ' + data.repoId + '@' + data.revision.substring(0, 12);
+                    if (data.upstreamUnchanged === false) {
+                        msg += ' (upstream changed)';
+                    }
+                    warningEl.textContent = msg;
+                } else {
+                    warningEl.textContent = 'Pinned to ' + data.repoId + '@' + data.revision.substring(0, 12) + ' (no trust_remote_code needed)';
+                }
+
+                recheckStatus.textContent = 'Pin verified at ' + new Date(data.lastRecheckAt).toLocaleTimeString();
+                recheckStatus.style.display = '';
+                recheckStatus.style.color = 'var(--success,#5ce68a)';
+            } catch (e) {
+                recheckStatus.textContent = 'Re-check failed: ' + e.message;
+                recheckStatus.style.display = '';
+                recheckStatus.style.color = 'var(--err,#e65c5c)';
+            } finally {
+                recheckBtn.disabled = false;
+                recheckBtn.textContent = 'Re-check pin';
+            }
+        });
+    }
+});
+
 function _buildFormPreset(existing) {
+    if (existing.backend === 'rapid_mlx') {
+        const rapidPort = intOrNull('modal-port');
+        return {
+            ...existing,
+            name: strVal('modal-name'),
+            port: rapidPort,
+            rapid_mlx: existing.rapid_mlx ? {
+                ...existing.rapid_mlx,
+                // model_source preserved via spread above; input is display-only for Rapid-MLX.
+                // Writing model_path from display_name creates stale noise (DoD item 22, gap 3).
+                port: rapidPort,
+                ...(function() {
+                    const et = nullableBoolOpt('modal-rapid-enable-thinking');
+                    const re = strVal('modal-rapid-reasoning-effort');
+                    const out = {};
+                    out.enable_thinking = et;
+                    // reasoning_effort removed: config field exists but argv builder does not emit --reasoning-effort.
+                    // Phase 6 Part B: prefix cache enabled toggle.
+                    out.cache_mode = strVal('modal-rapid-cache-mode') || 'custom';
+                    const pceInput = document.getElementById('modal-rapid-prefix-cache-enabled');
+                    const cacheMib = Number(document.getElementById('modal-rapid-cache-memory-mib')?.value || 0);
+                    const retainedCacheEnabled = !!pceInput?.checked && cacheMib > 0;
+                    out.prefix_cache_enabled = retainedCacheEnabled;
+                    out.retained_cache_mib = retainedCacheEnabled ? cacheMib : null;
+                    out.disk_checkpoint_interval = 0;
+                    // Entry count is meaningless with the cache off, so it follows the toggle
+                    // rather than persisting a number that would never reach the runtime --
+                    // the argv builder emits --hybrid-cache-entries on the field alone, without
+                    // consulting the toggle, so a stale value would still reach the server.
+                    const hybridEntries = Number(strVal('modal-rapid-hybrid-cache-entries') || 0);
+                    out.hybrid_cache_entries = retainedCacheEnabled && hybridEntries > 0 ? hybridEntries : null;
+                    // Phase 7: Rapid-MLX advanced controls (D6 catalog IDs).
+                    // Every one of these writes unconditionally, including when the choice is
+                    // "unset"/"auto". `out` is spread over the stored rapid_mlx below, so a key
+                    // the save path omits keeps its previous value -- which meant choosing
+                    // "(unset)" or "Auto" on a preset that already had a value silently did
+                    // nothing and the old value kept reaching argv. The load path fills all of
+                    // these controls, so re-reading them preserves untouched values; serde
+                    // reads null into the same None an absent key would have produced.
+                    const kvDtype = strVal('modal-rapid-kv-cache-dtype');
+                    const tqMode = strVal('modal-rapid-turboquant-mode');
+                    const toolParser = strVal('modal-rapid-tool-call-parser');
+                    const reasoningParser = strVal('modal-rapid-reasoning-parser');
+                    const samplingMode = strVal('modal-rapid-sampling-mode');
+                    const rmInput = document.getElementById('modal-rapid-reasoning-mode');
+                    out.kv_cache_dtype = kvDtype || null;
+                    out.turboquant_mode = tqMode && tqMode !== 'auto' ? tqMode : null;
+                    out.tool_call_parser = toolParser || null;
+                    out.reasoning_parser = reasoningParser || null;
+                    out.sampling_mode = samplingMode && samplingMode !== 'auto' ? samplingMode : null;
+                    if (rmInput) out.reasoning_mode = rmInput.checked ? 'on' : 'off';
+                    out.no_thinking = rmInput ? !rmInput.checked : false;
+                    out.auto_tool_choice = !!document.getElementById('modal-rapid-auto-tool-choice')?.checked;
+                    const specEnabled = !!document.getElementById('modal-rapid-speculative-enabled')?.checked;
+                    const specSource = strVal('modal-rapid-speculative-source') || 'embedded';
+                    const specModel = strVal('modal-rapid-speculative-model').trim();
+                    out.speculative_config = specEnabled ? {
+                        method: 'mtp',
+                        ...(specSource === 'external' ? { model: specModel } : {}),
+                        num_speculative_tokens: Number(strVal('modal-rapid-speculative-tokens') || 2),
+                        disable_auto_k: !!document.getElementById('modal-rapid-speculative-disable-auto-k')?.checked,
+                    } : null;
+                    // Trust remote code consent for MTP companion: only set when required
+                    // and explicitly consented. If consent checkbox is off but trust is
+                    // required, launch will fail-closed — that's correct and safe.
+                    const tcCheck = document.getElementById('modal-rapid-speculative-trust-consent');
+                    if (_speculativeTrustState.trustRequired && tcCheck?.checked && _speculativeTrustState.repoId && _speculativeTrustState.revision) {
+                        out.trust_remote_code_consent = _speculativeTrustState.repoId + '@' + _speculativeTrustState.revision;
+                    } else {
+                        out.trust_remote_code_consent = null;
+                    }
+                    // prefill_step_size is a plain u32 backend-side, not an Option, so it takes
+                    // the control's value directly rather than a null.
+                    out.prefill_step_size = Number(strVal('modal-rapid-prefill-step-size') || 512);
+                    // Throughput / memory. Auto ('') means "omit the flag and take the runtime
+                    // default", which is not the same as an explicit value -- so Auto writes
+                    // null, not a placeholder number. It has to write *something*: `out` is
+                    // spread over the stored rapid_mlx, so an omitted key leaves the old value
+                    // in place and selecting Auto would never stick. The load path fills every
+                    // one of these controls, so re-reading them preserves untouched values.
+                    const numOrNull = (id) => { const v = strVal(id); return v ? Number(v) : null; };
+                    out.gpu_memory_utilization = numOrNull('modal-rapid-gpu-memory-utilization');
+                    out.max_num_seqs = numOrNull('modal-rapid-max-num-seqs');
+                    out.max_concurrent_requests = numOrNull('modal-rapid-max-concurrent-requests');
+                    out.prefill_batch_size = numOrNull('modal-rapid-prefill-batch-size');
+                    out.completion_batch_size = numOrNull('modal-rapid-completion-batch-size');
+                    const pflash = strVal('modal-rapid-pflash-policy');
+                    if (pflash) out.pflash_policy = pflash;
+                    // Sampling defaults (--default-* flags for Rapid-MLX)
+                    const temp = floatOrNull('modal-temperature');
+                    const topP = floatOrNull('modal-top-p');
+                    const topK = intOrNull('modal-top-k');
+                    const minP = floatOrNull('modal-min-p');
+                    const repeatPen = floatOrNull('modal-repeat-penalty');
+                    const presencePen = floatOrNull('modal-presence-penalty');
+                    const frequencyPen = floatOrNull('modal-rapid-frequency-penalty');
+                    const maxTok = intOrNull('modal-max-tokens');
+                    // Same rule as above: clearing one of these inputs has to write null, or
+                    // the spread would keep the old default and it could never be cleared.
+                    out.default_temperature = temp;
+                    out.default_top_p = topP;
+                    out.default_top_k = topK;
+                    out.default_min_p = minP;
+                    out.default_repetition_penalty = repeatPen;
+                    out.default_presence_penalty = presencePen;
+                    out.default_frequency_penalty = frequencyPen;
+                    out.max_tokens = maxTok;
+                    return out;
+                })(),
+            } : null,
+        };
+    }
     const modelSource = normalizeModelSourceInput(strVal('modal-model-path'));
     const fitEnabled = nullableBoolOpt('modal-fit-enabled');
     return {
@@ -1519,19 +2466,27 @@ function _buildFormPreset(existing) {
         mmproj: strVal('modal-mmproj') || null,
         chat_template_file: strVal('modal-chat-template-file') || null,
         gpu_layers: intOrNull('modal-gpu-layers'),
-        no_mmap: document.getElementById('modal-no-mmap').checked,
+    no_mmap: document.getElementById('modal-no-mmap').checked,
+    load_mode: strVal('modal-load-mode') || null,
         mlock: document.getElementById('modal-mlock').checked,
         context_size: parseInt(document.getElementById('modal-context-size').value) || 128000,
         ctk: strVal('modal-ctk') || 'q8_0',
         ctv: strVal('modal-ctv') || 'f16',
         flash_attn: strVal('modal-flash-attn'),
         kv_unified: nullableBoolOpt('modal-kv-unified'),
+        cache_mode: strVal('modal-cache-mode') || 'custom',
         cache_ram_mib: intOrNull('modal-cache-ram-mib'),
         batch_size: parseInt(document.getElementById('modal-batch-size').value) || 2048,
         ubatch_size: parseInt(document.getElementById('modal-ubatch-size').value) || 2048,
         parallel_slots: parseInt(document.getElementById('modal-parallel-slots').value) || 1,
         prio: intOrNull('modal-prio'),
         prio_batch: intOrNull('modal-prio-batch'),
+        verbosity: intOrNull('modal-verbosity') ?? 4,
+        no_cont_batching: document.getElementById('modal-no-cont-batching').checked,
+        swa_full: document.getElementById('modal-swa-full').checked,
+        ctx_checkpoints: intOrNull('modal-ctx-checkpoints'),
+        checkpoint_min_step: intOrNull('modal-checkpoint-min-step'),
+        cache_reuse: intOrNull('modal-cache-reuse'),
         cache_idle_slots: nullableBoolOpt('modal-cache-idle-slots'),
         threads: intOrNull('modal-threads'),
         threads_batch: intOrNull('modal-threads-batch'),
@@ -1540,6 +2495,7 @@ function _buildFormPreset(existing) {
         top_k: intOrNull('modal-top-k'),
         min_p: floatOrNull('modal-min-p'),
         repeat_penalty: floatOrNull('modal-repeat-penalty'),
+        repeat_last_n: intOrNull('modal-repeat-last-n'),
         presence_penalty: floatOrNull('modal-presence-penalty'),
         enable_thinking: nullableBoolOpt('modal-enable-thinking'),
         preserve_thinking: nullableBoolOpt('modal-preserve-thinking'),
@@ -1592,13 +2548,13 @@ const CHANGE_LABELS = {
     image_min_tokens: 'Vision Min Tokens', image_max_tokens: 'Vision Max Tokens',
     gpu_layers: 'GPU Layers', no_mmap: 'no-mmap', mlock: 'mlock',
     context_size: 'Context Size', ctk: 'KV Key Type', ctv: 'KV Value Type',
-    flash_attn: 'Flash Attn', kv_unified: 'KV Unified', cache_ram_mib: 'Prefix Cache RAM',
+    flash_attn: 'Flash Attn', kv_unified: 'KV Unified', cache_mode: 'Prompt Cache Mode', cache_ram_mib: 'Prefix Cache RAM',
     fit_enabled: 'Fit to VRAM', fit_target: 'Fit Target',
     batch_size: 'Batch Size', ubatch_size: 'Micro-batch', parallel_slots: 'Parallel Slots',
-    prio: 'Thread Priority', prio_batch: 'Batch Priority', cache_idle_slots: 'Cache Idle Slots',
+    prio: 'Thread Priority', prio_batch: 'Batch Priority', verbosity: 'Server Log Verbosity', cache_idle_slots: 'Cache Idle Slots',
     threads: 'Threads (-t)', threads_batch: 'Batch Threads (-tb)',
     temperature: 'Temperature', top_p: 'Top-P', top_k: 'Top-K',
-    min_p: 'Min-P', repeat_penalty: 'Repeat Penalty', presence_penalty: 'Presence Penalty',
+ min_p: 'Min-P', repeat_penalty: 'Repeat Penalty', repeat_last_n: 'Repeat Last N', presence_penalty: 'Presence Penalty',
     enable_thinking: 'Thinking Mode', preserve_thinking: 'Preserve Thinking',
     tool_call_format: 'Tool Call Format',
     reasoning: 'Reasoning', reasoning_budget: 'Reasoning Budget',
@@ -1615,6 +2571,26 @@ const CHANGE_LABELS = {
     bind_host: 'Bind Host', port: 'Port', api_key: 'API Key', max_tokens: 'Max Tokens',
     seed: 'Seed',
     system_prompt_file: 'System Prompt File', grammar: 'Grammar', json_schema: 'JSON Schema', extra_args: 'Extra Args',
+};
+
+// Every Rapid-MLX setting lives under preset.rapid_mlx.*, which _buildChangeSummary used to
+// ignore entirely -- so the "confirm these changes" dialog was blind to the whole backend and
+// a user could change reusable prompt storage or speculative decoding and be shown nothing.
+const RAPID_CHANGE_LABELS = {
+    port: 'Port', model_source: 'Model', enable_thinking: 'Thinking Mode',
+    reasoning_mode: 'Reasoning Mode', reasoning_parser: 'Reasoning Parser',
+    tool_call_parser: 'Tool-call Parser', sampling_mode: 'Sampling Mode',
+    kv_cache_dtype: 'KV Cache Type', turboquant_mode: 'Reusable Prompt Storage',
+    cache_mode: 'Prompt Cache Mode', prefix_cache_enabled: 'Prefix Cache', retained_cache_mib: 'Retained Cache (MiB)',
+    prefill_step_size: 'Prefill Step Size', hybrid_mode: 'Hybrid Architecture',
+    gpu_memory_utilization: 'GPU Memory Utilization', max_num_seqs: 'Max Batched Sequences',
+    max_concurrent_requests: 'Max Concurrent Requests', pflash_policy: 'PFlash',
+    hybrid_cache_entries: 'Retained Prefix Entries',
+    prefill_batch_size: 'Prefill Batch Size', completion_batch_size: 'Completion Batch Size',
+    default_temperature: 'Temperature', default_top_p: 'Top-P', default_top_k: 'Top-K',
+    default_min_p: 'Min-P', default_repetition_penalty: 'Repeat Penalty',
+    default_presence_penalty: 'Presence Penalty', default_frequency_penalty: 'Frequency Penalty',
+    max_tokens: 'Max Tokens',
 };
 
 function _buildChangeSummary(existing, incoming) {
@@ -1635,6 +2611,17 @@ function _buildChangeSummary(existing, incoming) {
             changes.push({ label: CHANGE_LABELS[key], from: fPrev, to: fNext });
         }
     }
+    const prevRapid = existing?.rapid_mlx;
+    const nextRapid = incoming?.rapid_mlx;
+    if (prevRapid || nextRapid) {
+        for (const key of Object.keys(RAPID_CHANGE_LABELS)) {
+            const fPrev = fmt(prevRapid?.[key] ?? null);
+            const fNext = fmt(nextRapid?.[key] ?? null);
+            if (fPrev !== fNext) {
+                changes.push({ label: RAPID_CHANGE_LABELS[key], from: fPrev, to: fNext });
+            }
+        }
+    }
     return changes;
 }
 
@@ -1646,7 +2633,9 @@ export async function savePreset(event) {
 
     const id = document.getElementById('modal-preset-id').value;
     const saveBtn = document.getElementById('btn-modal-save');
-    const existing = id ? (sessionState.presets.find(p => p.id === id) || {}) : {};
+    const existing = id
+        ? (sessionState.presets.find(p => p.id === id) || {})
+        : (newPresetSeed || {});
     const preset = _buildFormPreset(existing);
 
     // Inline validation
@@ -1655,8 +2644,16 @@ export async function savePreset(event) {
         markFieldError('modal-name', 'Preset name is required.');
         valid = false;
     }
-    if (!preset.model_path && !preset.hf_repo) {
+    const rapidMlx = preset.rapid_mlx;
+    const hasModelSource = preset.backend === 'rapid_mlx'
+        ? !!(rapidMlx?.model_source || rapidMlx?.model_source_view)
+        : !!(preset.model_path || preset.hf_repo);
+    if (!hasModelSource) {
         markFieldError('modal-model-path', 'Model path or HuggingFace repo is required.');
+        valid = false;
+    }
+    if (preset.backend === 'rapid_mlx' && !preset.rapid_mlx?.port) {
+        markFieldError('modal-port', 'Rapid-MLX requires a valid server port.');
         valid = false;
     }
     const gpuLayers = parseInt(document.getElementById('modal-gpu-layers').value, 10);
@@ -1878,23 +2875,27 @@ export async function resetPresets() {
 // ── Preset Editor Nav ─────────────────────────────────────────────────────────
 
 function initPresetEditorNav() {
-    const navItems = document.querySelectorAll('.preset-nav-item');
-    const sections = document.querySelectorAll('.preset-editor-section');
+    const modal = document.getElementById('preset-modal');
+    if (!modal || _presetEditorNavInitialized) return;
 
-    navItems.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const target = btn.dataset.section;
-            // Deactivate all
-            navItems.forEach(b => b.classList.remove('active'));
-            sections.forEach(s => s.classList.remove('active'));
-            // Activate clicked
-            btn.classList.add('active');
-            const activeSection = document.querySelector('.preset-editor-section[data-section="' + target + '"]');
-            if (activeSection) activeSection.classList.add('active');
-            const modalBody = document.querySelector('#preset-modal .modal-body');
-            if (modalBody) modalBody.scrollTop = 0;
+    // Delegate from the stable modal shell. The editor moves nav items between
+    // groups for Rapid-MLX, so one-time listeners on the original NodeList are
+    // fragile and can miss a click after a reconfiguration.
+    modal.addEventListener('click', event => {
+        const btn = event.target.closest?.('.preset-nav-item');
+        if (!btn || !modal.contains(btn)) return;
+        const target = btn.dataset.section;
+        modal.querySelectorAll('.preset-nav-item').forEach(item => {
+            const active = item === btn;
+            item.classList.toggle('active', active);
+            item.setAttribute('aria-pressed', active ? 'true' : 'false');
         });
+        modal.querySelectorAll('.preset-editor-section').forEach(panel => {
+            panel.classList.toggle('active', panel.dataset.section === target);
+        });
+        modal.querySelector('.modal-body')?.scrollTo({ top: 0, behavior: 'instant' });
     });
+    _presetEditorNavInitialized = true;
 }
 
 // ── Model-family generation defaults ─────────────────────────────────────────
@@ -1903,6 +2904,7 @@ function initPresetEditorNav() {
 // fillEmpty=false: only render the preset pill switchers, don't overwrite existing values.
 async function _suggestGenerationDefaults(modelPath, fillEmpty = true) {
     const modelName = modelPath.split(/[/\\]/).pop() || modelPath;
+    const backend = _currentModalPreset()?.backend || 'llama_cpp';
     try {
         const headers = window.authHeaders
             ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
@@ -1926,14 +2928,18 @@ async function _suggestGenerationDefaults(modelPath, fillEmpty = true) {
         const resp = await fetch('/api/model-defaults', {
             method: 'POST',
             headers,
-            body: JSON.stringify({ model_name_or_repo: modelName, size_bytes: 0, tags: [], gguf_arch: ggufArch }),
+            body: JSON.stringify({ model_name_or_repo: modelName, size_bytes: 0, tags: [], gguf_arch: ggufArch, backend }),
         });
         if (!resp.ok) return;
         const d = await resp.json();
         if (d.error) return;
         const defaults = d.defaults || d;
+        const coverage = backend === 'rapid_mlx'
+            ? (d.modes?.[0]?.rapid_mlx_coverage || {})
+            : (d.modes?.[0]?.llama_cpp_coverage || {});
+        const canApplyDefaults = Object.values(coverage).some(Boolean);
 
-        if (fillEmpty) {
+        if (fillEmpty && canApplyDefaults) {
             // Only fill fields the user hasn't already set
             const fill = (id, val) => {
                 const el = document.getElementById(id);
@@ -1958,7 +2964,7 @@ async function _suggestGenerationDefaults(modelPath, fillEmpty = true) {
                 msgEl.value = defaults.reasoning_budget_message.replace(/\n/g, '\\n');
             }
         }
-        _renderGenerationPresetPills(d.presets || []);
+        _renderGenerationPresetPills(d.modes || []);
     } catch (_) {
         // Silent — best-effort only
     }
@@ -1993,7 +2999,10 @@ function _renderGenerationPresetPills(presets) {
         btn.type = 'button';
         btn.className = 'sampling-preset-pill' + (index === 0 ? ' active' : '');
         btn.textContent = preset.name;
-        if (preset.description) btn.title = preset.description;
+        const provenance = preset.provenance?.unsloth?.url || preset.provenance?.model_author?.source;
+        const badges = (preset.workload_badges || []).join(', ');
+        btn.title = [preset.description, badges && `Best for: ${badges}`, provenance && `Source: ${provenance}`]
+            .filter(Boolean).join('\n');
         btn.addEventListener('click', () => {
             container.querySelectorAll('.sampling-preset-pill').forEach(p => p.classList.remove('active'));
             btn.classList.add('active');
@@ -2004,6 +3013,15 @@ function _renderGenerationPresetPills(presets) {
 }
 
 function _applyGenerationPreset(preset) {
+    if (preset.id === 'model_default') {
+        ['modal-temperature', 'modal-top-p', 'modal-top-k', 'modal-min-p', 'modal-repeat-penalty', 'modal-presence-penalty', 'modal-rapid-frequency-penalty', 'modal-max-tokens', 'modal-reasoning-budget']
+            .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+        ['modal-enable-thinking', 'modal-preserve-thinking', 'modal-tool-call-format', 'modal-reasoning']
+            .forEach(id => setOpt(id, ''));
+        setVal('modal-reasoning-budget-message', '');
+        return;
+    }
+    if (preset.id === 'custom') return;
     numOrEmpty('modal-temperature', preset.temperature);
     numOrEmpty('modal-top-p', preset.top_p);
     numOrEmpty('modal-top-k', preset.top_k);
@@ -2017,6 +3035,8 @@ function _applyGenerationPreset(preset) {
     setOpt('modal-reasoning', preset.reasoning ? 'on' : 'off');
     numOrEmpty('modal-reasoning-budget', preset.reasoning_budget);
     setVal('modal-reasoning-budget-message', (preset.reasoning_budget_message || '').replace(/\n/g, '\\n'));
+    const samplingMode = document.getElementById('modal-rapid-sampling-mode');
+    if (samplingMode && preset.id) samplingMode.value = preset.id;
 }
 
 // ── Restart after preset save ──────────────────────────────────────────────────
@@ -2027,14 +3047,14 @@ function _offerRestartAfterPresetSave(presetId) {
     showToastWithActions(
         'Apply changes?',
         'info',
-        'Restart llama-server to load the updated preset.',
+        'Restart the local model server to load the updated preset.',
         [
             {
                 id: 'restart',
                 label: 'Restart Now',
                 primary: true,
                 handler: async () => {
-                    showToast('Restarting llama-server…', 'info');
+                    showToast('Restarting local model server…', 'info');
                     try {
                         await _restartServerWithPreset(presetId);
                     } catch (e) {
@@ -2066,7 +3086,7 @@ async function _restartServerWithPreset(presetId) {
         const token = tokenData.token;
         if (!token) throw new Error('Authentication required');
 
-        await fetch('/api/kill-llama', {
+        await fetch('/api/kill-server', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -2078,64 +3098,8 @@ async function _restartServerWithPreset(presetId) {
         throw new Error('Failed to stop server: ' + (e.message || e));
     }
 
-    // Build config from preset
-    const config = {
-        preset_id: presetId,
-        model_path: p.model_path || '',
-        hf_repo: p.hf_repo || null,
-        context_size: p.context_size || 128000,
-        ctk: p.ctk || 'q8_0',
-        ctv: p.ctv || 'f16',
-        tensor_split: p.tensor_split || '',
-        batch_size: p.batch_size || 2048,
-        ubatch_size: p.ubatch_size || p.batch_size || 2048,
-        no_mmap: !!p.no_mmap,
-        port: p.port || 8001,
-        ngram_spec: !!p.ngram_spec,
-        parallel_slots: p.parallel_slots || 1,
-        temperature: p.temperature,
-        top_p: p.top_p,
-        top_k: p.top_k,
-        min_p: p.min_p,
-        repeat_penalty: p.repeat_penalty,
-        presence_penalty: p.presence_penalty ?? null,
-        enable_thinking: p.enable_thinking ?? null,
-        preserve_thinking: p.preserve_thinking ?? null,
-        tool_call_format: p.tool_call_format || null,
-        reasoning: p.reasoning || null,
-        reasoning_budget: p.reasoning_budget ?? null,
-        reasoning_budget_message: p.reasoning_budget_message || null,
-        n_cpu_moe: p.n_cpu_moe,
-        gpu_layers: p.gpu_layers ?? null,
-        mlock: !!p.mlock,
-        flash_attn: p.flash_attn || '',
-        split_mode: p.split_mode || '',
-        main_gpu: p.main_gpu ?? null,
-        threads: p.threads ?? null,
-        threads_batch: p.threads_batch ?? null,
-        rope_scaling: p.rope_scaling || '',
-        rope_freq_base: p.rope_freq_base ?? null,
-        rope_freq_scale: p.rope_freq_scale ?? null,
-        spec_type: p.spec_type || null,
-        kv_unified: p.kv_unified ?? null,
-        cache_ram_mib: p.cache_ram_mib ?? null,
-        draft_model: p.draft_model || '',
-        draft_min: p.draft_min ?? null,
-        draft_max: p.draft_max ?? null,
-        spec_ngram_size: p.spec_ngram_size ?? null,
-        spec_draft_n_max: p.spec_draft_n_max ?? null,
-        seed: p.seed ?? null,
-        mmproj: p.mmproj || null,
-        chat_template_file: p.chat_template_file || null,
-        alias: p.alias || null,
-        max_tokens: p.max_tokens ?? null,
-        fit_enabled: p.fit_enabled ?? null,
-        fit_target: p.fit_target || null,
-        system_prompt_file: p.system_prompt_file || '',
-        extra_args: p.extra_args || '',
-        bind_host: p.bind_host || '127.0.0.1',
-        api_key: p.api_key || null,
-    };
+    // Rust owns backend selection, native config, and the resolved launch port.
+    const config = { preset_id: presetId };
 
     // Spawn new server
     const adminToken = await (async () => {
@@ -2168,14 +3132,16 @@ async function _restartServerWithPreset(presetId) {
     }
 
     // Wait for server to be ready
-    showToast('Starting llama-server…', 'info', 'Loading model on port ' + config.port, { duration: 12000 });
+    const backendLabel = data.backend === 'rapid_mlx' ? 'Rapid-MLX' : 'llama-server';
+    const launchPort = data.port;
+    showToast(`Starting ${backendLabel}…`, 'info', 'Loading model on port ' + launchPort, { duration: 12000 });
     try {
-        await (await import('./spawn-readiness.js')).waitForSpawnReadiness(config.port);
+        await (await import('./spawn-readiness.js')).waitForSpawnReadiness(launchPort);
     } catch (e) {
         throw new Error('Server did not become ready: ' + (e.message || e));
     }
 
-    showToast('llama-server restarted', 'success', '', { duration: 6000 });
+    showToast(`${backendLabel} restarted`, 'success', '', { duration: 6000 });
 }
 
 // ── Model architecture info (preset editor) ───────────────────────────────────
@@ -2245,13 +3211,121 @@ document.getElementById('modal-model-path')?.addEventListener('input', () => {
     ['modal-gpu-layers', 'modal-n-cpu-moe'].forEach(id => {
         document.getElementById(id)?.removeAttribute('max');
     });
+    // Fetch live Rapid-MLX profile for this model when backend is rapid_mlx
+    document.getElementById('modal-rapid-prefill-step-size')?.addEventListener('change', () => {
+        _presetRapidMlxPrefillExplicit = true;
+    });
+    _schedulePresetRapidMlxProfile();
 });
+
+// ── Rapid-MLX live model profile for preset editor ────────────────────────────
+
+let _presetRapidMlxProfileTimer = null;
+let _presetRapidMlxProfile = null;
+let _presetUnifiedProfile = null;
+let _presetNativeContextLimit = 0;
+
+function _schedulePresetRapidMlxProfile() {
+    clearTimeout(_presetRapidMlxProfileTimer);
+    _presetRapidMlxProfileTimer = setTimeout(async () => {
+        const preset = _currentModalPreset();
+        if (!preset || preset.backend !== 'rapid_mlx') {
+            _presetRapidMlxProfile = null;
+            _presetUnifiedProfile = null;
+            return;
+        }
+        const rapidMlx = preset.rapid_mlx;
+        const modelId = rapidMlx?.model_source_view?.canonical_identity
+            || rapidMlx?.model_source_view?.display_name
+            || presetModelSource(preset) || '';
+        if (!modelId || modelId.trim().length < 2) {
+            _presetRapidMlxProfile = null;
+            _presetUnifiedProfile = null;
+            return;
+        }
+        try {
+            const headers = window.authHeaders ? window.authHeaders() : {};
+
+            // Fetch both profiles in parallel
+            const [profileRes, unifiedRes] = await Promise.allSettled([
+                fetch(`/api/rapid-mlx/models/${encodeURIComponent(modelId)}/profile`, { headers }),
+                fetch(`/api/rapid-mlx/models/${encodeURIComponent(modelId)}/unified-profile`, { headers })
+            ]);
+
+            if (profileRes.status === 'fulfilled' && profileRes.value.ok) {
+                const pdata = await profileRes.value.json().catch(() => ({}));
+                _presetRapidMlxProfile = pdata.profile || null;
+            } else {
+                _presetRapidMlxProfile = null;
+            }
+
+            if (unifiedRes.status === 'fulfilled' && unifiedRes.value.ok) {
+                const udata = await unifiedRes.value.json().catch(() => ({}));
+                _presetUnifiedProfile = udata || null;
+            } else {
+                _presetUnifiedProfile = null;
+            }
+
+            if (rapidMlxProfileHasVision(_presetRapidMlxProfile) && !_presetRapidMlxPrefillExplicit) {
+                setOpt('modal-rapid-prefill-step-size', String(rapidMlxPrefillStepSizeDefault(_presetRapidMlxProfile)));
+                updatePresetVram();
+            }
+
+            // Apply unified profile recommendations as hints
+            if (_presetUnifiedProfile) {
+                _applyPresetUnifiedProfileHints(_presetUnifiedProfile);
+            }
+        } catch {
+            _presetRapidMlxProfile = null;
+            _presetUnifiedProfile = null;
+        }
+    }, 350);
+}
+
+function _applyPresetUnifiedProfileHints(up) {
+    const rec = up.recommended;
+    if (!rec) return;
+
+    // Hybrid mode recommendation hint
+    if (rec.hybrid_mode && rec.hybrid_mode !== 'auto') {
+        const hybridSel = document.getElementById('modal-rapid-hybrid-mode');
+        if (hybridSel) {
+            hybridSel.title = `Recommended: ${rec.hybrid_mode} (${up.sources?.hybrid_mode || 'unknown'} source)`;
+        }
+    }
+
+    // Tool-call parser recommendation hint
+    if (rec.tool_format) {
+        const toolSel = document.getElementById('modal-rapid-tool-call-parser');
+        if (toolSel) {
+            toolSel.title = `Recommended: ${rec.tool_format} (${up.sources?.tool_format || 'unknown'} source)`;
+        }
+    }
+
+    // Reasoning parser recommendation hint
+    if (rec.reasoning_parser) {
+        const reasonSel = document.getElementById('modal-rapid-reasoning-parser');
+        if (reasonSel) {
+            reasonSel.title = `Recommended: ${rec.reasoning_parser} (${up.sources?.reasoning_parser || 'unknown'} source)`;
+        }
+    }
+}
+
+export function getPresetRapidMlxProfile() {
+    return _presetRapidMlxProfile;
+}
+
+export function getPresetUnifiedProfile() {
+    return _presetUnifiedProfile;
+}
 
 // ── Init ───────────────────────────────────────────────────────────────────────
 
 export function initPresets() {
     // Init preset editor nav
     initPresetEditorNav();
+    initCalibrationUi();
+    window.addEventListener('presets:reload', () => { loadPresets(); });
 
     // Bind preset action buttons (toolbar — minimal)
     document.getElementById('preset-edit-btn')?.addEventListener('click', () => openPresetModal('edit'));
@@ -2272,6 +3346,28 @@ export function initPresets() {
     document.getElementById('preset-modal-cancel')?.addEventListener('click', closePresetModal);
     document.getElementById('preset-modal-back')?.addEventListener('click', _hideSummary);
     document.getElementById('preset-vram-auto-size')?.addEventListener('click', autoSizePreset);
+
+    // Chat Template Manage modal — shared with the Spawn Wizard(s) via chat-template-panel.js.
+    bindChatTemplateManageModalChrome();
+    document.getElementById('lifecycle-library-btn')?.addEventListener('click', async () => {
+        try {
+            await openChatTemplateLibraryBrowser('modal-chat-template-file');
+            await updatePresetChatTemplateStatusLine();
+        } catch (err) {
+            showToast('Template library unavailable: ' + (err.message || String(err)), 'error');
+        }
+    });
+    document.getElementById('lifecycle-upload-btn')?.addEventListener('click', async () => {
+        try {
+            const uploaded = await uploadChatTemplateFromBrowser();
+            if (!uploaded?.path) return;
+            setVal('modal-chat-template-file', uploaded.path);
+            await updatePresetChatTemplateStatusLine();
+            showToast('Template uploaded', 'success', uploaded.filename || 'Saved to template library');
+        } catch {
+            // uploadChatTemplateFromBrowser already surfaced the error
+        }
+    });
 
     // Duplicate preset from within the modal
     document.getElementById('preset-modal-duplicate')?.addEventListener('click', async () => {
@@ -2315,73 +3411,32 @@ export function initPresets() {
     document.getElementById('modal-image-max-tokens')?.addEventListener('input', (e) => {
         _ensureUbatchForImageTokens(Number(e.target.value || 0));
     });
-    document.getElementById('preset-browse-chat-template-btn')?.addEventListener('click', async () => {
-        try {
-            await openChatTemplateLibraryBrowser('modal-chat-template-file');
-        } catch (err) {
-            showToast('Template library unavailable: ' + (err.message || String(err)), 'error');
-        }
+    document.getElementById('modal-cache-mode')?.addEventListener('change', (e) => {
+        _toggleCacheRamField(e.target.value);
     });
-    document.getElementById('preset-recommended-chat-template-btn')?.addEventListener(
-        'click',
-        installRecommendedChatTemplateForPreset,
-    );
-    document.getElementById('preset-check-chat-template-update-btn')?.addEventListener('click', async () => {
-        const path = (document.getElementById('modal-chat-template-file')?.value || '').trim();
+    document.getElementById('modal-rapid-cache-mode')?.addEventListener('change', (e) => {
+        _toggleRapidCacheFields(e.target.value);
+    });
+    bindRecommendedChatTemplateButton();
+    document.getElementById('preset-clear-chat-template-btn')?.addEventListener('click', async () => {
+        setVal('modal-chat-template-file', '');
+        await updatePresetChatTemplateStatusLine();
+    });
+    document.getElementById('preset-chat-template-manage-btn')?.addEventListener('click', async () => {
+        const path = strVal('modal-chat-template-file');
         if (!path) {
-            showToast('No template selected to check', 'warn');
+            showToast('No template selected yet', 'warn');
             return;
         }
-        const button = document.getElementById('preset-check-chat-template-update-btn');
-        const origText = button.textContent;
-        button.disabled = true;
-        button.textContent = 'Checking…';
-        try {
-            const headers = window.authHeaders
-                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
-                : { 'Content-Type': 'application/json' };
-            const resp = await fetch('/api/chat-template/check-update', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({ path }),
-            });
-            if (!resp.ok) {
-                showToast('Check failed: ' + (resp.statusText || 'Unexpected response'), 'error');
-                return;
-            }
-            const data = await resp.json();
-            if (data.changed) {
-                showToast(
-                    'Upstream template has changed since this install',
-                    'warn',
-                    'Use Recommended to re-download the latest version',
-                );
-            } else {
-                const hint = data.installed_at
-                    ? 'Installed ' + new Date(data.installed_at).toLocaleString()
-                    : 'No changes upstream';
-                showToast('Template is up to date', 'success', hint);
-            }
-        } catch (err) {
-            showToast('Check failed: ' + (err.message || String(err)), 'error');
-        } finally {
-            button.disabled = false;
-            button.textContent = origText;
-        }
+        const tplName = _presetChatTemplateName(path);
+        await openChatTemplateManageModal({
+            tplName,
+            currentPath: path,
+            onActivated: updatePresetChatTemplateStatusLine,
+            origin: 'preset-editor',
+        });
     });
-    document.getElementById('preset-upload-chat-template-btn')?.addEventListener('click', async () => {
-        try {
-            const uploaded = await uploadChatTemplateFromBrowser();
-            if (!uploaded?.path) return;
-            setVal('modal-chat-template-file', uploaded.path);
-            showToast('Template uploaded', 'success', uploaded.filename || 'Saved to template library');
-        } catch {
-            // uploadChatTemplateFromBrowser already surfaced the error
-        }
-    });
-    document.getElementById('preset-clear-chat-template-btn')?.addEventListener('click', () => {
-        setVal('modal-chat-template-file', '');
-    });
+    document.getElementById('modal-chat-template-file')?.addEventListener('change', updatePresetChatTemplateStatusLine);
     document.getElementById('preset-browse-draft-model-btn')?.addEventListener('click', () => openModelFileBrowser('modal-draft-model', 'gguf', null, 'draft-model'));
 
     // Fit-to-VRAM toggle shows/hides fit target
@@ -2582,10 +3637,11 @@ function _renderContextPills(mode, section) {
     const pillsContainer = document.getElementById('preset-context-pills');
     if (!pillsContainer) return;
     const pills = [
+        { label: '32k', value: 32768 },
         { label: '65k', value: 65536 },
         { label: '131k', value: 131072 },
         { label: '160k', value: 163840 },
-        { label: '212k', value: 212000 },
+        { label: '200k', value: 200000 },
         { label: '262k', value: 262144 },
     ];
     pillsContainer.innerHTML = '';
@@ -2594,8 +3650,15 @@ function _renderContextPills(mode, section) {
         pillEl.type = 'button';
         pillEl.className = 'preset-context-pill';
         pillEl.textContent = pill.label;
+        const advancedOnly = _presetNativeContextLimit > 0 && pill.value > _presetNativeContextLimit;
+        pillEl.disabled = advancedOnly;
+        pillEl.classList.toggle('preset-context-pill--advanced', advancedOnly);
+        if (advancedOnly) {
+            pillEl.title = `${pill.label} exceeds the native ${Math.round(_presetNativeContextLimit / 1024)}k model limit. Advanced Context extension is not configured.`;
+        }
         pillEl.onclick = (e) => {
             e.preventDefault();
+            if (advancedOnly) return;
             const input = document.getElementById('modal-context-size');
             if (input) {
                 input.value = pill.value;

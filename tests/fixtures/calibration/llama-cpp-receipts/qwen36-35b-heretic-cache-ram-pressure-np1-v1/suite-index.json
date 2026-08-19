@@ -1,0 +1,29 @@
+{
+  "model": "/Users/nick/.config/llama-monitor/models/gguf/Qwen3.6-35B-A3B-uncensored-heretic-Q4_K_M.gguf",
+  "backend": "llama.cpp",
+  "ubatch_sizes": [
+    512,
+    2048
+  ],
+  "context_sizes": [
+    32000,
+    65536,
+    131072,
+    160000,
+    200000
+  ],
+  "receipts": [
+    {
+      "label": "00-cache-ram-pressure-0-np1-roots2-8000",
+      "receipt": "00-00-cache-ram-pressure-0-np1-roots2-8000.json",
+      "manifest": null
+    },
+    {
+      "label": "01-cache-ram-pressure-8192-np1-roots2-8000",
+      "receipt": "01-01-cache-ram-pressure-8192-np1-roots2-8000.json",
+      "manifest": null
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

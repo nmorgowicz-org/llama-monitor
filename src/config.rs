@@ -11,6 +11,7 @@ use rand::TryRng;
 use rand::rngs::SysRng;
 
 use crate::cli::AppArgs;
+use crate::paths::AppPaths;
 
 /// Restrict file permissions to owner-only.
 /// Unix: sets mode 0600. Windows: uses icacls to remove inherited ACEs and
@@ -27,7 +28,7 @@ pub(crate) fn harden_file_permissions(path: &std::path::Path) {
             let _ = std::fs::set_permissions(path, perms);
         }
     }
-    #[cfg(windows)]
+    #[cfg(all(windows, not(test)))]
     {
         // Build the user identity string. Prefer USERDOMAIN\USERNAME for domain
         // accounts; fall back to USERNAME alone for local accounts.
@@ -73,6 +74,14 @@ pub(crate) fn harden_file_permissions(path: &std::path::Path) {
             );
         }
     }
+
+    // Unit tests use disposable temporary files. Applying ACL rewrites to each
+    // test artifact makes the temp directory non-reopenable on some Windows
+    // runners; production callers still take the hardened path above.
+    #[cfg(all(windows, test))]
+    {
+        let _ = path;
+    }
 }
 
 const ENCRYPTED_PREFIX: &str = "enc:";
@@ -95,24 +104,34 @@ fn derive_key(secret: &[u8]) -> [u8; 32] {
 /// Initialize the encryption key at startup.
 ///
 /// Priority:
-/// 1) LLAMA_MONITOR_ENCRYPTION_KEY (if set and non-empty).
+/// 1) LOCAL_LLM_FOUNDRY_ENCRYPTION_KEY (if set and non-empty), then the
+///    legacy LLAMA_MONITOR_ENCRYPTION_KEY alias.
 /// 2) Auto-generated key stored in config_dir/encryption-key.
 ///
 /// This ensures encryption is always enabled and fully automatic.
-pub fn init_encryption_key(config_dir: &std::path::Path) {
+pub fn init_encryption_key(config_dir: &std::path::Path) -> Result<(), &'static str> {
     if ENCRYPTION_KEY_CELL.get().is_some() {
-        return;
+        return Ok(());
     }
 
     // 1) Use env var if provided
-    if let Ok(secret) = std::env::var("LLAMA_MONITOR_ENCRYPTION_KEY")
-        && !secret.is_empty()
-        && secret.len() >= 16
+    let canonical_secret = std::env::var("LOCAL_LLM_FOUNDRY_ENCRYPTION_KEY").ok();
+    let legacy_secret = std::env::var("LLAMA_MONITOR_ENCRYPTION_KEY").ok();
+    let secret = match select_encryption_env(canonical_secret.as_deref(), legacy_secret.as_deref())
     {
+        Ok(secret) => secret,
+        Err(()) => {
+            eprintln!(
+                "[error] LOCAL_LLM_FOUNDRY_ENCRYPTION_KEY and LLAMA_MONITOR_ENCRYPTION_KEY differ; unset one variable and retry"
+            );
+            return Err("conflicting encryption environment aliases");
+        }
+    };
+    if let Some(secret) = secret {
         let key = derive_key(secret.as_bytes());
         let _ = ENCRYPTION_KEY_CELL.set(key);
-        eprintln!("[info] Using LLAMA_MONITOR_ENCRYPTION_KEY for at-rest encryption.");
-        return;
+        eprintln!("[info] Using environment-provided encryption key for at-rest encryption.");
+        return Ok(());
     }
 
     let key_file = config_dir.join("encryption-key");
@@ -126,7 +145,7 @@ pub fn init_encryption_key(config_dir: &std::path::Path) {
         key.copy_from_slice(&raw);
         let _ = ENCRYPTION_KEY_CELL.set(key);
         eprintln!("[info] Loaded auto-generated encryption key from {key_file:?}.");
-        return;
+        return Ok(());
     }
 
     // 3) Generate and persist a new key
@@ -143,6 +162,22 @@ pub fn init_encryption_key(config_dir: &std::path::Path) {
         );
     }
     let _ = ENCRYPTION_KEY_CELL.set(key);
+    Ok(())
+}
+
+/// Select a valid encryption environment alias without exposing its value.
+/// Empty/short aliases are ignored so a valid legacy value is not shadowed by
+/// an unusable canonical value. Unequal valid aliases fail closed.
+fn select_encryption_env<'a>(
+    canonical: Option<&'a str>,
+    legacy: Option<&'a str>,
+) -> Result<Option<&'a str>, ()> {
+    let canonical = canonical.filter(|value| !value.is_empty() && value.len() >= 16);
+    let legacy = legacy.filter(|value| !value.is_empty() && value.len() >= 16);
+    if canonical.is_some() && legacy.is_some() && canonical != legacy {
+        return Err(());
+    }
+    Ok(canonical.or(legacy))
 }
 
 /// Get the active encryption key, or None if initialization failed.
@@ -426,7 +461,10 @@ pub fn clear_auth_config(config_dir: &std::path::Path) -> std::io::Result<bool> 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct AppConfig {
+    pub app_paths: AppPaths,
     pub config_dir: PathBuf,
+    /// Explicit disposable migration roots used only by native qualification.
+    pub migration_test_root: Option<PathBuf>,
     pub llama_server_path: PathBuf,
     pub llama_server_cwd: PathBuf,
     pub port: u16,
@@ -466,59 +504,57 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn from_args(args: AppArgs) -> Self {
+        Self::from_args_inner(args, true)
+    }
+
+    /// Resolve paths and CLI state without reading or creating application
+    /// resources. Migration/status commands use this before selecting a root.
+    pub fn from_args_pure(args: AppArgs) -> Self {
+        Self::from_args_inner(args, false)
+    }
+
+    fn from_args_inner(args: AppArgs, initialize_resources: bool) -> Self {
         let default_server_cwd = PathBuf::from(".");
 
-        let config_dir = args.config_dir.unwrap_or_else(|| {
-            #[cfg(windows)]
-            {
-                // %APPDATA%\llama-monitor on Windows — matches agent.rs and every remote path.
-                dirs::config_dir()
-                    .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".config"))
-                    .join("llama-monitor")
-            }
-            #[cfg(not(windows))]
-            {
-                dirs::home_dir()
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join(".config")
-                    .join("llama-monitor")
-            }
-        });
+        let app_paths = AppPaths::from_root(AppPaths::resolve_root(args.config_dir.clone()));
+        let config_dir = app_paths.root.clone();
 
         // Default binary location: <config_dir>/bin/llama-server
-        // (On macOS/Linux: ~/.config/llama-monitor/bin/; on Windows: %APPDATA%\llama-monitor\bin\)
+        // (The legacy root remains selected until explicit 2.0 migration.)
         // Subdirectory keeps binaries separate from JSON config files.
         let binary_name = if cfg!(windows) {
             "llama-server.exe"
         } else {
             "llama-server"
         };
-        let default_server_path = config_dir.join("bin").join(binary_name);
+        let default_server_path = app_paths.bin_dir().join(binary_name);
 
         let presets_file = args
             .presets_file
-            .unwrap_or_else(|| config_dir.join("presets.json"));
+            .unwrap_or_else(|| app_paths.presets_file());
 
         Self {
+            app_paths: app_paths.clone(),
             config_dir: config_dir.clone(),
+            migration_test_root: args.migration_test_root,
             llama_server_path: args.llama_server_path.unwrap_or(default_server_path),
             llama_server_cwd: args.llama_server_cwd.unwrap_or(default_server_cwd),
             port: args.port,
             gpu_backend: args.gpu_backend,
             models_dir: args.models_dir,
             presets_file,
-            templates_file: config_dir.join("templates.json"),
-            gpu_env_file: config_dir.join("gpu-env.json"),
+            templates_file: app_paths.templates_file(),
+            gpu_env_file: app_paths.gpu_env_file(),
             gpu_arch_override: args.gpu_arch,
             gpu_devices_override: args.gpu_devices,
-            ui_settings_file: config_dir.join("ui-settings.json"),
-            auth_config_file: config_dir.join("auth-config.json"),
+            ui_settings_file: app_paths.ui_settings_file(),
+            auth_config_file: app_paths.auth_config_file(),
             sessions_file: args
                 .sessions_file
-                .unwrap_or_else(|| config_dir.join("sessions.json")),
-            ssh_known_hosts_file: config_dir.join("ssh-known-hosts.json"),
+                .unwrap_or_else(|| app_paths.sessions_file()),
+            ssh_known_hosts_file: app_paths.ssh_known_hosts_file(),
             llama_poll_interval: args.llama_poll_interval,
-            lhm_disabled_file: config_dir.join("lhm-disabled.json"),
+            lhm_disabled_file: app_paths.lhm_disabled_file(),
             agent_host: args.agent_host,
             agent_port: args.agent_port,
             agent_token: args.agent_token,
@@ -527,19 +563,27 @@ impl AppConfig {
             remote_agent_ssh_autostart: args.remote_agent_ssh_autostart,
             remote_agent_ssh_target: args.remote_agent_ssh_target,
             remote_agent_ssh_command: args.remote_agent_ssh_command,
-            tls_config: load_tls_config(&config_dir),
-            live_api_token_store: std::sync::Arc::new(std::sync::RwLock::new(ensure_api_token(
-                &config_dir,
-            ))),
+            tls_config: if initialize_resources {
+                load_tls_config(&config_dir)
+            } else {
+                TLSConfig::default()
+            },
+            live_api_token_store: std::sync::Arc::new(std::sync::RwLock::new(
+                initialize_resources
+                    .then(|| ensure_api_token(&config_dir))
+                    .flatten(),
+            )),
             live_db_admin_token_store: std::sync::Arc::new(std::sync::RwLock::new(
-                ensure_db_admin_token(&config_dir),
+                initialize_resources
+                    .then(|| ensure_db_admin_token(&config_dir))
+                    .flatten(),
             )),
 
             // Spawn V2: additional directories (backward-compatible defaults)
-            binaries_dir: config_dir.join("binaries"),
-            default_models_dir: config_dir.join("models"),
-            scripts_dir: config_dir.join("scripts"),
-            certs_dir: config_dir.join("certs"),
+            binaries_dir: app_paths.binaries_dir(),
+            default_models_dir: app_paths.models_dir(),
+            scripts_dir: app_paths.scripts_dir(),
+            certs_dir: app_paths.certs_dir(),
         }
     }
 
@@ -567,7 +611,9 @@ impl AppConfig {
     #[allow(dead_code)]
     pub fn for_test(api_token: Option<String>, db_admin_token: Option<String>) -> Self {
         Self {
+            app_paths: AppPaths::from_root(std::path::PathBuf::from("/tmp/llama-monitor-test")),
             config_dir: std::path::PathBuf::from("/tmp/llama-monitor-test"),
+            migration_test_root: None,
             llama_server_path: std::path::PathBuf::from("llama-server"),
             llama_server_cwd: std::path::PathBuf::from("."),
             port: 8001,
@@ -602,6 +648,58 @@ impl AppConfig {
             scripts_dir: std::path::PathBuf::from("/tmp/llama-monitor-test/scripts"),
             certs_dir: std::path::PathBuf::from("/tmp/llama-monitor-test/certs"),
         }
+    }
+}
+
+#[cfg(test)]
+mod path_resolution_tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn pure_resolution_does_not_create_a_root_or_tokens() {
+        let root = std::env::temp_dir().join(format!(
+            "local-llm-foundry-pure-resolution-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let args = AppArgs::parse_from([
+            "llama-monitor",
+            "--config-dir",
+            root.to_str().expect("temp path is UTF-8"),
+        ]);
+        let config = AppConfig::from_args_pure(args);
+        assert_eq!(config.config_dir, root);
+        assert!(!config.config_dir.exists());
+        assert!(config.live_api_token().is_none());
+        assert!(config.live_db_admin_token().is_none());
+    }
+
+    #[test]
+    fn encryption_alias_precedence_is_secret_safe() {
+        let canonical = "canonical-secret-value-1234";
+        let legacy = "legacy-secret-value-12345";
+        assert_eq!(
+            select_encryption_env(Some(canonical), None),
+            Ok(Some(canonical))
+        );
+        assert_eq!(select_encryption_env(None, Some(legacy)), Ok(Some(legacy)));
+        assert_eq!(
+            select_encryption_env(Some(canonical), Some(canonical)),
+            Ok(Some(canonical))
+        );
+        assert_eq!(
+            select_encryption_env(Some(canonical), Some(legacy)),
+            Err(())
+        );
+        assert_eq!(
+            select_encryption_env(Some("short"), Some(legacy)),
+            Ok(Some(legacy))
+        );
+        assert_eq!(
+            select_encryption_env(Some("ユニコード暗号化値123456"), None),
+            Ok(Some("ユニコード暗号化値123456"))
+        );
     }
 }
 

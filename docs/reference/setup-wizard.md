@@ -1,6 +1,17 @@
 # Setup Wizard Reference
 
-The Setup wizard is a 6-step guided flow for configuring and launching a llama-server instance. It handles hardware detection, VRAM-aware parameter selection, model acquisition (local, HuggingFace, third-party), and binary management.
+For external-client setup and endpoint ownership, see [External client profiles](external-clients.md).
+
+> **Same wizard, two docs, different audiences.** "Setup Wizard" and "Spawn Wizard" are two
+> names for one feature. This doc is the **user-facing walkthrough**: what each step looks
+> like, what the controls do, and the underlying HF/VRAM/chat-template API reference. For
+> the **frontend module architecture** (which `.js` file owns which piece of the wizard),
+> see [spawn-wizard.md](spawn-wizard.md) instead.
+
+The Setup wizard is a 3-step guided flow (Model / Hardware / Launch) for configuring and
+launching either a llama.cpp or Rapid-MLX local inference server. It handles engine
+recommendation, hardware detection, model acquisition, backend-owned settings, and runtime
+prerequisites.
 
 ## Welcome Screen
 
@@ -9,34 +20,47 @@ The first screen a user sees when launching Llama Monitor. It has two main panes
 - **Connect to running model** (left): Connect to an existing llama-server instance by entering the URL and optional API key.
 - **Local Server** (right): Configure and launch a local server using a preset or the Setup wizard.
 
-![Welcome screen](../screenshots/welcome-welcome.png)
+![Welcome screen](../screenshots/welcome--neutral--welcome.png)
 
 Entry points to the setup wizard: the **+ New model profile** button on the Local Server pane, the **+ New model profile** button in the top nav, and the **Start server** link on the logs empty state.
 
-![Setup wizard flow](../screenshots/spawn-wizard-flow.gif)
+![Setup wizard flow](../screenshots/llamacpp-local--spawn-wizard-flow.gif)
 
 ---
 
 ## Wizard Steps
 
-### Step 1 — Profile
+The wizard has three steps: **Model** (profile/use-case selection, engine selection, model
+source), **Hardware** (tuning, VRAM breakdown, and the pre-launch review), and **Launch**
+(network/security settings, spawn, and start-up monitoring).
 
-![Step 1 — Profile selection](../screenshots/spawn-wizard-step1-profiles.png)
+### Step 1: Model — Profile & use case
 
-The user selects a **hardware profile** and a **use case**.
+![Step 1 — Profile selection](../screenshots/spawn-wizard--llamacpp-local--model-profiles.png)
 
-**Hardware profiles** set defaults for GPU layers, batch size, and fit granularity:
+The user chooses a workload/use-case recommendation and an inference engine.
+
+The legacy profile names are retained only as compatibility metadata; they are not a user
+selection. Guided and Pro now share canonical state, while each engine exposes its own
+backend-native control registry.
+the control-tier registry in `static/js/features/spawn-wizard-groups.js`'s `CONTROLS` table,
+which is the single source of truth for two independent behaviors per control:
+
+- **Which profile it's disabled/locked at** (`tier: 'quick' | 'balanced' | 'advanced'`) — a
+  `quick`-tier control is disabled on the Quick profile and re-enabled on Balanced/Advanced.
+- **What forced value it's set to when disabled** (`quickValue`) — every `quick`-tier control
+  must carry one (enforced by `assertQuickValueCoverage()`), with two documented exceptions:
+  `spawn-context-size` and `spawn-batch-size` are Quick-disabled but keep whatever value they
+  already held rather than being forced to a specific number.
+
+llama.cpp's Quick-tier controls: `spawn-context-size` (disabled, unchanged), `spawn-batch-size`
+(disabled, unchanged), `spawn-gpu-layers` (disabled, forced to `auto`). Everything else is
+`balanced` or `advanced` tier — see [Control-tier registry](spawn-wizard.md#control-tier-registry-quickbalancedadvanced-disclosure)
+in spawn-wizard.md for the full table and the Rapid-MLX side.
 
 Fit has three states in both the setup wizard and preset editor. **Default** passes no fit
 arguments, **On** passes `--fit on` with the selected target margin, and **Off** passes
 `--fit off`.
-
-| Profile | GPU Layers | Batch | Fit Granularity |
-|---------|-----------|-------|-----------------|
-| Quick / Low-end | 0 (CPU only) | 512 | 512 |
-| Balanced | Auto | 1024 | 1024 |
-| Workstation | All | 2048 | 2048 |
-| Advanced | Manual | user-set | user-set |
 
 **Use cases** influence KV quant defaults and ubatch:
 
@@ -48,11 +72,31 @@ arguments, **On** passes `--fit on` with the selected target margin, and **Off**
 
 ---
 
-### Step 2 — Model
+### Step 1: Model — Engine & source
 
-The user picks a model source. Three source types:
+The user first chooses an inference engine, then picks a compatible model source. The
+engine cards distinguish an automatic recommendation from an explicit user choice. A
+later model or runtime check may update an automatic selection, but never replaces an
+explicit choice.
 
-![Step 2 — Model source selection](../screenshots/spawn-wizard-step2-source-cards.png)
+The recommendation is deterministic:
+
+| Model source | Recommendation |
+|---|---|
+| GGUF file or GGUF repository inventory | llama.cpp |
+| Validated MLX directory | Rapid-MLX when Apple Silicon and a compatible runtime are available |
+| Typed Rapid-MLX Hugging Face repository or alias | Rapid-MLX when locally available |
+| Authoritative safetensors source with revision/hash and conversion recipe | Rapid-MLX when locally available |
+| Bare or ambiguous Hugging Face repository | No automatic switch; the user chooses |
+
+Compatible managed, custom, Homebrew, Pip, and Pipx Rapid-MLX installations can satisfy
+the runtime check. Llama Monitor never mutates user-owned runtimes. Unsupported systems
+explain that local Rapid-MLX requires Apple Silicon macOS and retain remote attachment as
+an option.
+
+llama.cpp exposes three model-source types:
+
+![Step 2 — Model source selection](../screenshots/spawn-wizard--llamacpp-local--model-source-cards.png)
 
 #### Local GGUF File
 - User enters or browses an absolute path to a `.gguf` file.
@@ -60,10 +104,20 @@ The user picks a model source. Three source types:
 - Architecture heuristics are applied via `ModelArch::from_name_and_params()`.
 - When launched from the local Models library, the wizard carries over discovered metadata and shows a small reminder card with filename, quant, and estimated size/parameter hints.
 
+#### Rapid-MLX model sources
+
+Rapid-MLX accepts validated local MLX directories, explicitly selected compatible
+Hugging Face repositories, verified aliases, and authoritative safetensors sources.
+Typed source metadata is preserved unchanged through preset save and restore. A loose
+safetensors path is not promoted into a launch configuration because it lacks the
+revision/hash and conversion recipe required for reproducibility.
+
+GGUF remains first-class under llama.cpp and is not converted during this flow.
+
 #### HuggingFace Hub
 See [HuggingFace Integration](#huggingface-integration) below.
 
-![HuggingFace Hub file browser](../screenshots/spawn-wizard-step2-hf-base.png)
+![HuggingFace Hub file browser](../screenshots/spawn-wizard--llamacpp-local--model-hf-base.png)
 
 - The wizard includes a short helper explaining when a token is optional and links directly to `https://huggingface.co/settings/tokens`.
 - Recommended token type: **Read**.
@@ -84,18 +138,20 @@ override unset. The preset editor exposes the same lookup through its
 
 | Model family | Recommended template | Source |
 |---|---|---|
-| Qwen 3.5 / 3.6 | froggeric's Fixed Template | HuggingFace |
-| Gemma 4 | jscott3201's Gemma 4 Agentic Template | GitHub |
+| Qwen models | froggeric's Fixed Template v22 (`qwen3.8-froggeric-v22`) | HuggingFace, pinned to `9f14778c92c3b5ed3e0738085694c0d3452802dd` |
+| Gemma 4 | Google's official template | HuggingFace (`google/gemma-4-31B-it`) |
 
-The Gemma 4 recommendation improves thinking defaults, tool argument formatting,
-null handling, and multi-turn agentic histories. It is only offered when Gemma 4
-is detected; older Gemma families keep their embedded template.
+Google's official template is the priority default for Gemma 4 — it improves thinking
+defaults, tool argument formatting, null handling, and multi-turn agentic histories.
+jscott3201's community fork (GitHub) is kept as a fallback entry, offered only if the
+official template regresses tool-calling support in the future. It is only offered when
+Gemma 4 is detected; older Gemma families keep their embedded template.
 
 ---
 
-### Step 3 — Hardware & memory
+### Step 1: Hardware — Tuning & memory
 
-![Step 3 — VRAM breakdown and hardware tuning](../screenshots/spawn-wizard-step3-vram.png)
+![Step 3 — VRAM breakdown and hardware tuning](../screenshots/spawn-wizard--llamacpp-local--hardware-vram.png)
 
 The core tuning step. Populated using `POST /api/vram/auto-size` after model selection.
 
@@ -208,11 +264,12 @@ This guidance is also shown in the preset editor.
 
 ---
 
-### Step 4 — Settings
+### Step 1: Hardware — Review & settings
 
-![Step 4 — Parameters](../screenshots/spawn-wizard-step4-parameters.png)
+![Hardware parameters](../screenshots/spawn-wizard--llamacpp-local--hardware-parameters.png)
 
-Shows a human-readable review of all selected parameters. Health checks:
+Merged into the Hardware step alongside the tuning controls above. Shows a human-readable
+review of all selected parameters. Health checks:
 - VRAM fit status
 - Context fit relative to training context (`n_ctx_train`); the hardware step highlights whether the current value is within model max, at model max, or extended beyond it, and warns when n_ctx > n_ctx_train with a YaRN suggestion
 - MoE CPU offload impact on generation speed
@@ -230,33 +287,45 @@ This step also includes:
 
 ---
 
-### Step 5 — Review settings
+### Step 2: Launch — Save as preset and Full config
 
-![Step 5 — Summary](../screenshots/spawn-wizard-step5-summary.png)
+![Launch Full config](../screenshots/spawn-wizard--llamacpp-local--launch-summary.png)
 
-Displays every flag that will be saved with the preset in a table format. The user can save the configuration as a named preset from this step before proceeding.
+Also part of the merged Hardware step. Displays every flag that will be saved with the preset
+in a table format. The user can save the configuration as a named preset before proceeding
+to Launch.
 
 - **Save as Preset** — stores all parameters for quick reuse from the setup screen
 - Presets can be saved for different models or configurations
 - Saving is optional — click Next to go straight to launch
+- Rapid-MLX presets retain shared sampling and non-secret access values, including host,
+  port, temperature, top-p/top-k/min-p, penalties, max tokens, and seed. An API key is
+  preserved while switching engines and stored only in the preset's protected top-level
+  secret field; API responses redact it and it is never nested in `rapid_mlx`.
+  Backend-owned configuration remains exclusive: Rapid-MLX presets do not gain
+  llama.cpp launch fields, and llama.cpp presets do not gain a `rapid_mlx` object.
 
 ---
 
-### Step 6 — Start server
+### Step 3: Launch — Start server
 
-One-click launch. Shows live status (starting → waiting for endpoint → running / error). On success the wizard closes and the new model profile appears in the list.
+One-click launch. Shows engine-aware live status (starting → waiting for endpoint →
+running / error). On success the wizard closes and the new model profile appears in the
+list.
 
-![Step 6 — Spawn](../screenshots/spawn-wizard-step6-spawn.png)
+![Step 6 — Spawn](../screenshots/spawn-wizard--llamacpp-local--launch-spawn.png)
 
 
-- The launched `llama-server` process is started with `--no-warmup`.
+- A launched `llama-server` process is started with `--no-warmup`.
+- Rapid-MLX launches use the selected typed model source and compatible discovered
+  runtime without carrying llama.cpp-only flags.
 - Readiness is confirmed by a backend probe against the active session, so launches with a server API key still report status correctly.
 
 ---
 
 ## Structured Output (Grammar / JSON Schema)
 
-Available in Review settings of the setup wizard and the preset editor.
+Available in the Hardware step's review section of the setup wizard, and in the preset editor.
 
 Structured output forces the model to produce output matching a specific format instead of free-form text. The model cannot generate tokens that violate the rules — it's mechanically enforced at inference time, not just instructed via the prompt. This is useful for agent pipelines, data extraction, or any app that needs a guaranteed response shape.
 
@@ -315,7 +384,7 @@ Only one should be set at a time. If both are configured, the output mode settin
 
 ### Search and Browse
 
-![HuggingFace community picks](../screenshots/spawn-wizard-step2-community-picks.png)
+![HuggingFace community picks](../screenshots/spawn-wizard--llamacpp-local--model-community-picks.png)
 
 - Public repos can be searched and browsed without an HF token (no HuggingFace login needed).
 - All /api/hf/... calls require llama-monitor's own api-token via Authorization header.
@@ -324,7 +393,7 @@ Only one should be set at a time. If both are configured, the output mode settin
   - Curated community picks (including MoE models).
   - “Trending” and model-specific views (e.g., Qwen3).
   - Quantizer-focused listings (e.g., Bartowski) for easier selection.
-- The Step 2 wizard helper links directly to the Hugging Face token settings page and explains the `New token` → `Read` flow.
+- The Model-step wizard helper links directly to the Hugging Face token settings page and explains the `New token` → `Read` flow.
 
 #### POST /api/hf/search
 Search the HuggingFace Hub for GGUF model repos.
@@ -428,7 +497,7 @@ Every GGUF file listed by `/api/hf/files` includes a `quant_type` field indicati
 
 Detection is done from filename patterns: `i1-` prefixes for imatrix, `-ud-` or `UD-` for Unsloth Dynamic, everything else defaults to standard.
 
-![Quantizer types — bartowski standard quants](../screenshots/spawn-wizard-step2-quantizer-bartowski.png)
+![Quantizer types — bartowski standard quants](../screenshots/spawn-wizard--llamacpp-local--model-quantizer-bartowski.png)
 
 ### Community Picks / Quick Picks
 
@@ -458,7 +527,7 @@ The quantizer author list is loaded from `GET /api/hf/quantizers` and can be cus
 
 - `is_custom`: true when the list was overridden by the user via `PUT`, false when using built-in defaults.
 
-![Community picks — MoE models](../screenshots/spawn-wizard-step2-community-picks-moe.png)
+![Community picks — MoE models](../screenshots/spawn-wizard--llamacpp-local--model-community-picks-moe.png)
 
 ### Sort/Filter Controls
 
@@ -525,13 +594,13 @@ Returns the effective models directory.
 
 When the download starts, the model card displays an indeterminate progress bar and download status. On completion, the card shows the final download rate and a green check mark.
 
-![HuggingFace Download Idle](../screenshots/spawn-wizard-hf-download-idle.png)
-![HuggingFace Download Progress](../screenshots/spawn-wizard-hf-download-progress.png)
+![HuggingFace Download Idle](../screenshots/spawn-wizard-hf-download--llamacpp-local--idle.png)
+![HuggingFace Download Progress](../screenshots/spawn-wizard-hf-download--llamacpp-local--progress.png)
 
 ### MTP and IQ Quant Detection
 
 The model browser and library recognize and label:
-- MTP (Multi-Token Prediction) / draft models: detected via filename patterns including `-mtp.gguf` (Unsloth convention). These models are shown with an MTP badge (indigo pill) in the model cards.
+- MTP (Multi-Token Prediction) / draft models: model cards may show a provisional `-mtp.gguf` or repository hint (Unsloth convention). Separate draft/head files frequently expose little introspectable metadata, so these hints remain useful for candidate discovery but are labeled inferred and never treated as confirmed MTP depth. Confirmed GGUF/HF metadata wins for primary-model controls and launch policy.
 - IQ quantizations: filenames with `-IQ` or `_IQ` (e.g., `IQ2_XXS`, `IQ3_M`, `IQ4_XL`) are correctly parsed, including the full `IQ` prefix in the quant label.
 
 ### Model Card
@@ -552,7 +621,7 @@ Remove the stored token. Requires `api-token`.
 
 ### Wizard-to-Settings Flow
 
-- The Hugging Face helper in Step 2 can open **Settings → Models** without closing the wizard.
+- The Hugging Face helper in the Model step can open **Settings → Models** without closing the wizard.
 - The binary prerequisite banner can open **Settings → Model profile** without discarding wizard progress.
 - After saving settings, the wizard refreshes its token/binary state in place.
 
@@ -799,7 +868,7 @@ After the binary is installed, the nav bar shows a version pill (e.g. "llama.cpp
 
 When you install a new build while a llama-server is already running, llama-monitor automatically restarts the server with the new binary using its existing configuration. The preset, model path, and tuning settings are preserved; only the binary is swapped.
 
-![Llama.cpp Version Modal](../screenshots/llama-updater-version-modal.png)
+![Llama.cpp Version Modal](../screenshots/llama-updater--llamacpp-local--version-modal.png)
 
 #### GET /api/llama-binary/platform-info
 Returns instant (no network) platform and backend metadata.
@@ -983,7 +1052,7 @@ Compute optimal settings for a model + hardware combination.
 #### POST /api/vram/quant-compare
 Pre-download quant comparison table for a model. Shown in the wizard as the **Quant Advisor** panel.
 
-![Quant Advisor — pre-download VRAM comparison](../screenshots/spawn-wizard-step2-quant-advisor.png)
+![Quant Advisor — pre-download VRAM comparison](../screenshots/spawn-wizard--llamacpp-local--model-quant-advisor.png)
 
 ```json
 // Request
@@ -999,7 +1068,7 @@ Pre-download quant comparison table for a model. Shown in the wizard as the **Qu
 ```
 
 #### POST /api/model-defaults
-Returns model-family sampling recommendations for the Step 4 wizard review form and the preset editor.
+Returns model-family sampling recommendations for the Hardware-step review form and the preset editor.
 
 ```json
 // Request
@@ -1062,6 +1131,6 @@ Returns model-family sampling recommendations for the Step 4 wizard review form 
 | `src/web/api/vram.rs` | VRAM estimation route handlers |
 | `src/web/api/models.rs` | Model library and GGUF metadata routes |
 | `src/web/api/mod.rs` | API module registry (31 route modules) |
-| `static/js/features/spawn-wizard.js` | Wizard frontend (all 5 steps) |
+| `static/js/features/spawn-wizard.js` + `spawn-wizard-*.js` | Wizard frontend, split into a shell plus ~18 focused feature modules — see [Frontend module map](spawn-wizard.md#frontend-module-map) in spawn-wizard.md |
 | `static/css/spawn-wizard.css` | Wizard styles |
 | `docs/reference/vram-estimator.md` | VRAM estimation formulas and heuristics reference |

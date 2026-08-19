@@ -2,10 +2,13 @@
 // View transitions, animations, quick stats, and view state initialization.
 
 import { setupViewState, chat, sessionState } from '../core/app-state.js';
+import { getPlatformInfo } from '../core/platform-info.js';
 import { doAttachFromSetup } from './attach-detach.js';
+import { presetModelSource } from './presets.js';
 import { escapeHtml } from '../core/format.js';
-import { showToast, showConfirmDialog } from './toast.js';
+import { showToast, showConfirmDialog, showPromptDialog } from './toast.js';
 import Router from './router.js';
+import { buildEstimateBody, rapidEstimatePolicyFromConfig } from './vram-estimate.js';
 
 // ── Model / preset classification (from GGUF-derived metadata) ────────────────
 // No name-based guessing: labels come from preset.family and preset.size_class
@@ -35,6 +38,15 @@ const FAMILY_LABEL_MAP = {
     granite: 'Granite',
     starcoder: 'StarCoder',
 };
+
+export function confirmFreeCacheCleanup(reclaimableBytes) {
+    const reclaimableGb = (reclaimableBytes / (1024 ** 3)).toFixed(1);
+    return showConfirmDialog(
+        'Free system cache',
+        `macOS can reclaim about ${reclaimableGb} GB of cached data. Running apps are not closed, but files and apps may load a little more slowly until the cache is rebuilt.`,
+        'Free cache'
+    );
+}
 
 function classifyPreset(preset) {
     const family = preset.family || null;
@@ -145,7 +157,8 @@ const launchFilters = {
     size: null,
     tags: [],
     collection: null,
-    groupByFamily: false
+    groupByFamily: false,
+    sortBy: 'last_launched',
 };
 // ── Memory bar (segmented, platform-aware) ─────────────────────────────────────
 // Unified (macOS): single pool, Metal cap, reclaimable cache.
@@ -262,10 +275,10 @@ export async function fetchAndRenderMemoryBar() {
 
     try {
         const headers = window.authHeaders ? window.authHeaders() : {};
-        const [sysResp, gpuResp, platResp, limResp] = await Promise.all([
+        const [sysResp, gpuResp, platformInfo, limResp] = await Promise.all([
             fetch('/metrics/system', { headers }),
             fetch('/metrics/gpu', { headers }),
-            fetch('/api/llama-binary/platform-info', { headers }),
+            getPlatformInfo().catch(() => null),
             fetch('/api/system/metal-gpu-limit', { headers }),
         ]);
 
@@ -304,9 +317,8 @@ export async function fetchAndRenderMemoryBar() {
 
         // Fallback: if GPU metrics haven't populated yet (mactop race on startup),
         // detect unified memory from platform-info (independent of mactop).
-        if (!isUnified && platResp.ok) {
-            const plat = await platResp.json();
-            if (plat.auto_backend === 'metal') {
+        if (!isUnified && platformInfo) {
+            if (platformInfo.auto_backend === 'metal') {
                 isUnified = true;
                 if (!metalGpuLimitMb && limResp.ok) {
                     const lim = await limResp.json();
@@ -358,7 +370,22 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
     // take a fraction (60%) as "likely reclaimable under pressure".
     const likelyReclaimable = reclaimableWithinCap * 0.6;
     const safeLimit = Math.min(cap, ramTotalBytes - osReserve);
-    const availNow = Math.max(0, Math.min(safeLimit, freeNow + likelyReclaimable - _MEM_SAFETY_MARGIN));
+    let availNow = Math.max(0, Math.min(safeLimit, freeNow + likelyReclaimable - _MEM_SAFETY_MARGIN));
+
+    // Phase 5b Part C: prefer the backend's MemoryAvailabilitySnapshot for
+    // current_safe_availability_bytes — the single source of truth.
+    try {
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const resp = await fetch('/api/memory-availability', { headers });
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data.ok && data.snapshot && data.snapshot.current_safe_availability_bytes > 0) {
+                availNow = data.snapshot.current_safe_availability_bytes;
+            }
+        }
+    } catch {
+        // fall back to local calculation
+    }
 
     // If user purges: all reclaimable becomes free; new "available" =:
     const totalAfterPurge = cap - inUseBytes; // only GPU-usable matters
@@ -411,13 +438,103 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
     }
     bar.style.display = '';
 
+    // Metal limit teaching: if current cap is below recommended, show increase button next to Metal GPU cap text
+    const recommendedMb = Math.round(ramTotalBytes / (1024 * 1024)) - 8192; // total_MB - 8GB
+    if (metalGpuLimitMb > 0 && metalGpuLimitMb < recommendedMb) {
+        const currentGb = Math.round(metalGpuLimitMb / 1024);
+        const recGb = Math.round(recommendedMb / 1024);
+        const totalGb = Math.round(ramTotalBytes / (1024 ** 3));
+        // Create inline row below VRAM bar for welcome screen
+        const existingRow = document.getElementById('setup-metal-limit-row');
+        if (!existingRow) {
+            const row = document.createElement('div');
+            row.id = 'setup-metal-limit-row';
+            row.className = 'metal-limit-row';
+            row.style.cssText = 'margin-top:8px;display:flex;align-items:center;gap:6px;font-size:13px;color:#cbd5e1;width:fit-content;';
+            const labelSpan = document.createElement('span');
+            labelSpan.className = 'metal-limit-text';
+            labelSpan.style.color = '#cbd5e1';
+            labelSpan.textContent = 'Metal GPU cap: ' + currentGb + ' GB (of ' + totalGb + ' GB total)';
+            row.appendChild(labelSpan);
+            const btn = document.createElement('button');
+            btn.id = 'setup-metal-limit-btn';
+            btn.type = 'button';
+            btn.className = 'btn-metal-increase';
+            btn.style.cssText = 'background:none;border:1px solid #475569;color:#cbd5e1;padding:3px 10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;transition:all 0.15s ease;';
+            btn.textContent = 'Increase to ' + recGb + ' GB';
+            row.appendChild(btn);
+            bar.parentNode.insertBefore(row, bar.nextSibling);
+        }
+        const btn = document.getElementById('setup-metal-limit-btn');
+        if (btn && !btn.dataset.wired) {
+            btn.dataset.wired = '1';
+            const row = btn.parentElement;
+            btn.addEventListener('click', async () => {
+                btn.disabled = true;
+                btn.textContent = 'Updating…';
+                try {
+                    // Fetch db-admin-token (required for system-level changes)
+                    const tokenHeaders = window.authHeaders ? window.authHeaders() : {};
+                    const tokenResp = await fetch('/api/db/admin-token', { headers: tokenHeaders });
+                    let adminToken = '';
+                    if (tokenResp.ok) {
+                        const data = await tokenResp.json().catch(() => ({}));
+                        adminToken = data.token || '';
+                    }
+                    const headers = {
+                        'Content-Type': 'application/json',
+                        ...(adminToken ? { 'Authorization': `Bearer ${adminToken}` } : {}),
+                    };
+                    const resp = await fetch('/api/system/set-metal-gpu-limit', {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({ limit_mb: recommendedMb, confirm: 'set-metal-gpu-limit' }),
+                    });
+                    if (!resp.ok) {
+                        const data = await resp.json().catch(() => ({}));
+                        showToast('Authentication required: ' + (data.error?.reason || 'db-admin-token needed'), 'error');
+                        btn.disabled = false;
+                        btn.textContent = 'Increase to ' + recGb + ' GB';
+                        return;
+                    }
+                    const data = await resp.json();
+                    if (data.ok) {
+                        showToast('Metal GPU cap updated to ' + Math.round(data.limit_mb / 1024) + ' GB — persists across reboots', 'success');
+                        row?.remove();
+                    } else {
+                        showToast('Failed: ' + (data.error || 'unknown'), 'error');
+                        btn.disabled = false;
+                        btn.textContent = 'Increase to ' + recGb + ' GB';
+                    }
+                } catch {
+                    showToast('Error updating Metal GPU cap', 'error');
+                    btn.disabled = false;
+                    btn.textContent = 'Increase to ' + recGb + ' GB';
+                }
+            });
+        }
+    }
+
     // Wire "Free cache" button (macOS only)
     if (purgeBtn && reclaimableBytes >= 3 * 1024 ** 3) {
         purgeBtn.onclick = async () => {
-            if (!confirm('Flush system caches to free memory?\nThis will not affect running apps, but some data may reload slightly slower.')) return;
+            const confirmed = await confirmFreeCacheCleanup(reclaimableBytes);
+            if (!confirmed) return;
+
+            const originalLabel = purgeBtn.textContent;
+            purgeBtn.disabled = true;
+            purgeBtn.setAttribute('aria-busy', 'true');
+            purgeBtn.textContent = 'Freeing…';
             try {
                 const token = await _fetchDbAdminTokenForSystemAction();
-                if (!token) { showToast('Unable to authorize memory purge.'); return; }
+                if (!token) {
+                    showToast(
+                        'Could not authorize cache cleanup',
+                        'error',
+                        'Open Configuration and confirm the administrator token is available.'
+                    );
+                    return;
+                }
                 const resp = await fetch('/system/purge', {
                     method: 'POST',
                     headers: {
@@ -428,14 +545,22 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
                 });
                 const out = await resp.json().catch(() => null);
                 if (!resp.ok || out?.error) {
-                    showToast(out?.error || 'Memory purge failed.');
+                    showToast('Cache cleanup failed', 'error', out?.error || 'macOS could not free the cache.');
                 } else {
-                    showToast('System caches flushed.');
+                    showToast(
+                        'Cache cleanup complete',
+                        'success',
+                        'Memory availability is being refreshed.'
+                    );
                     // Re-render bar + cards to reflect new free memory.
                     setTimeout(fetchAndRenderMemoryBar, 600);
                 }
             } catch {
-                showToast('Error while attempting to flush caches.');
+                showToast('Cache cleanup failed', 'error', 'The system action could not be completed.');
+            } finally {
+                purgeBtn.disabled = false;
+                purgeBtn.removeAttribute('aria-busy');
+                purgeBtn.textContent = originalLabel;
             }
         };
     }
@@ -722,12 +847,16 @@ export function renderLaunchGrid() {
     const allPresets = sessionState.presets || [];
     const userPresets = allPresets.filter(p => !p.id.startsWith('default-'));
     const hasUserPresets = userPresets.length > 0;
+    const filterBar = document.getElementById('setup-filter-bar');
+    if (filterBar && filterBar.dataset.initialized !== '1') initLaunchFilters();
     let presets = _visiblePresetsLocal(allPresets);
     const activePresetId = sessionState.activeSessionPresetId || '';
     const showNewConfigCard = presets.length <= 2;
 
-    // Apply filters
+    // Apply filters and the user-selected ordering. Sorting is intentionally
+    // done after filtering so the visible list remains stable while browsing.
     presets = _filterPresets(presets);
+    presets = _sortPresets(presets);
 
     // Optional grouped view
     if (launchFilters.groupByFamily && presets.length > 4) {
@@ -745,6 +874,35 @@ export function renderLaunchGrid() {
         if (dz) dz._dzInited = true;
     }
     fetchAndRenderMemoryBar();
+}
+
+function _sortPresets(presets) {
+    const sorted = [...presets];
+    const name = p => String(p.name || p.model_path || p.hf_repo || '').toLocaleLowerCase();
+    const size = p => Number(
+        p.model_size_bytes || p.file_size_bytes || p.size_bytes || p.model_size || 0,
+    );
+    const lastLaunched = p => _spawnLastLaunched.get(p.id) || Number(p.last_launched_at || 0);
+    sorted.sort((a, b) => {
+        let delta;
+        switch (launchFilters.sortBy) {
+            case 'name':
+                delta = name(a).localeCompare(name(b));
+                break;
+            case 'size':
+                delta = size(b) - size(a);
+                break;
+            case 'backend':
+                delta = String(a.backend || '').localeCompare(String(b.backend || '')) || name(a).localeCompare(name(b));
+                break;
+            case 'last_launched':
+            default:
+                delta = lastLaunched(b) - lastLaunched(a);
+                break;
+        }
+        return delta || name(a).localeCompare(name(b));
+    });
+    return sorted;
 }
 
 function _filterPresets(presets) {
@@ -847,14 +1005,37 @@ function _buildLaunchCard(preset, activePresetId) {
     const isRunning = !isExample && sessionState.serverRunning && preset.id === activePresetId && activePresetId;
     if (isRunning) card.classList.add('launch-card--running');
 
+    const rapidMlx = preset.rapid_mlx;
+    const modelSource = preset.backend === 'rapid_mlx'
+        ? (rapidMlx?.model_source_view?.canonical_identity
+            || rapidMlx?.model_source_view?.display_name || '')
+        : (preset.model_path || preset.hf_repo || '');
     const modelFile = (preset.model_path || '').split(/[/\\]/).pop() ||
+                      (preset.backend === 'rapid_mlx' ? modelSource.split(/[/\\]/).pop() : '') ||
                       (preset.hf_repo ? preset.hf_repo.split('/').slice(-1)[0] : '');
     const hasModel = !!modelFile;
+    const backendLabel = preset.backend === 'rapid_mlx' ? 'Rapid-MLX' : 'llama-server';
 
     const ctxK = preset.context_size ? Math.round(preset.context_size / 1024) : 128;
     const ctxDisplay = ctxK >= 1000 ? `${(ctxK / 1024).toFixed(1)}M context` : `${ctxK}k context`;
-    const ctkDisplay = (preset.ctk || 'q8_0') + '/' + (preset.ctv || 'f16');
+    const isRapidMlx = preset.backend === 'rapid_mlx';
+    let ctkDisplay;
+    if (isRapidMlx) {
+        const rapidKv = (rapidMlx && rapidMlx.kv_cache_dtype) || 'int4';
+        const reasoningOn = rapidMlx && (rapidMlx.reasoning_mode === true || rapidMlx.reasoning_mode === 'on');
+        if (reasoningOn && rapidKv !== 'int8') {
+            ctkDisplay = `${rapidKv.toUpperCase()} → INT8`;
+        } else {
+            ctkDisplay = rapidKv.toUpperCase();
+        }
+    } else {
+        ctkDisplay = (preset.ctk || 'q8_0') + '/' + (preset.ctv || 'f16');
+    }
     const quantTag = extractQuantFromFilename(modelFile);
+    const rapidCacheMib = preset.backend === 'rapid_mlx' && rapidMlx?.prefix_cache_enabled !== false
+        ? (rapidMlx?.retained_cache_mib ?? 8192) : 0;
+    const rapidCacheChip = rapidCacheMib > 0
+        ? `<span class="launch-chip launch-chip--accent" title="Optional Rapid retained prefix-cache memory">${rapidCacheMib / 1024} GiB cache</span>` : '';
 
     if (isExample) {
         // Example card: dimmed, no edit button, use-wizard CTA only
@@ -868,6 +1049,7 @@ function _buildLaunchCard(preset, activePresetId) {
             <div class="launch-card-chips">
                 <span class="launch-chip">${ctxDisplay}</span>
                 <span class="launch-chip">${ctkDisplay}</span>
+                ${preset.backend === 'rapid_mlx' ? '<span class="launch-chip launch-chip--accent">Rapid-MLX</span>' : ''}
             </div>
             <div class="launch-card-actions">
                 <button class="launch-card-btn-start launch-card-btn-start--configure" type="button"
@@ -916,6 +1098,7 @@ function _buildLaunchCard(preset, activePresetId) {
                 <span class="launch-chip">${ctxDisplay}</span>
                 <span class="launch-chip">${ctkDisplay}</span>
                 ${quantTag ? `<span class="launch-chip launch-chip--quant" title="File quantization: ${escapeHtml(quantTag)}">${escapeHtml(quantTag)}</span>` : ''}
+                ${rapidCacheChip}
                 ${preset.ngram_spec ? '<span class="launch-chip launch-chip--accent">n-gram</span>' : ''}
             </div>
             ${tagPills}
@@ -923,7 +1106,7 @@ function _buildLaunchCard(preset, activePresetId) {
             <div class="launch-card-actions">
                 <button class="launch-card-btn-edit" type="button">Edit</button>
                 <button class="launch-card-btn-start ${hasModel ? '' : 'launch-card-btn-start--configure'}" type="button"
-                    title="${hasModel ? 'Start the llama-server with this preset' : 'Open the setup wizard to set up a model for this preset'}">
+                    title="${hasModel ? `Start ${backendLabel} with this preset` : 'Open the setup wizard to set up a model for this preset'}">
                     ${hasModel ? '▶ Start' : 'Set up model →'}
                 </button>
                 <button class="launch-card-btn-trash" type="button" title="Delete preset">
@@ -1003,34 +1186,53 @@ async function _fetchCardVramEstimates(availBytes, availRamBytes, isUnified, bud
 
     await Promise.all([...cards].map(async (card) => {
         const preset = presets.find(p => p.id === card.dataset.presetId);
-        if (!preset?.model_path) return;
+        const modelPath = presetModelSource(preset);
+        if (!modelPath) return;
+        const isRapidMlx = preset?.backend === 'rapid_mlx';
         const vramEl = card.querySelector('.launch-card-vram');
         if (!vramEl) return;
 
         try {
+            // Builder item 6: canonical body builder for cross-surface equality.
+            const body = buildEstimateBody({
+                backend: isRapidMlx ? 'rapid_mlx' : 'llama_cpp',
+                model_path: modelPath,
+                n_ctx: preset.context_size || 131072,
+                parallel_slots: preset.parallel_slots || 1,
+                ubatch_size: preset.ubatch_size || 1024,
+                ctk: isRapidMlx ? undefined : (preset.ctk || 'q8_0'),
+                ctv: isRapidMlx ? undefined : (preset.ctv || 'q8_0'),
+                n_cpu_moe: preset.n_cpu_moe || 0,
+                gpu_layers: preset.gpu_layers ?? -1,
+                available_vram_bytes: availBytes,
+                available_ram_bytes: availRamBytes,
+                is_unified_memory: isUnified,
+                ...(isRapidMlx ? rapidEstimatePolicyFromConfig(preset.rapid_mlx) : {}),
+            });
             const headers = window.authHeaders ? window.authHeaders() : {};
             const resp = await fetch('/api/vram-estimate', {
                 method: 'POST',
                 headers: { ...headers, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model_path: preset.model_path,
-                    n_ctx: preset.context_size || 131072,
-                    ctk: preset.ctk || 'q8_0',
-                    ctv: preset.ctv || 'q8_0',
-                    parallel_slots: preset.parallel_slots || 1,
-                    ubatch_size: preset.ubatch_size || 1024,
-                    n_cpu_moe: preset.n_cpu_moe || 0,
-                    gpu_layers: preset.gpu_layers ?? -1,
-                    available_vram_bytes: availBytes,
-                    available_ram_bytes: availRamBytes,
-                    is_unified_memory: isUnified,
-                }),
+                body: JSON.stringify(body),
             });
             if (!resp.ok) return;
             const data = await resp.json();
             if (!data.ok) return;
             // Guard: card may have been re-rendered while awaiting
             if (!document.contains(vramEl)) return;
+            if (isRapidMlx && data.effective_kv_dtype) {
+                const kvChip = card.querySelector('.launch-card-chips .launch-chip:nth-child(2)');
+                if (kvChip && data.execution_policy && data.execution_policy.kv_cache_dtype) {
+                    const requested = data.execution_policy.kv_cache_dtype || 'int4';
+                    const effective = data.effective_kv_dtype;
+                    const reasoningOn = data.execution_policy.reasoning_mode === true;
+                    if (reasoningOn && requested !== effective) {
+                        kvChip.textContent = `${requested.toUpperCase()} → INT8 (reasoning)`;
+                    } else {
+                        kvChip.textContent = effective.toUpperCase();
+                    }
+                }
+            }
             _renderCardVram(vramEl, data, availBytes, availRamBytes, isUnified, budgetIfPurgedBytes);
         } catch {
             // silently skip — VRAM row stays in loading state
@@ -1253,18 +1455,14 @@ export function renderRecentEndpoints(sessions, activeId) {
     if (!list || !container) return;
 
     const allSessions = Array.isArray(sessions) ? sessions : [];
-    // Only attach sessions appear in the recent list — spawn sessions can't be
-    // "resumed" (you'd need to re-spawn), so they are only used to stamp last-launch
-    // timestamps on preset cards.
+    // Only remote attach sessions belong in this reconnect list. Local presets
+    // already have first-class cards in the right pane and should not be
+    // duplicated as stale "recent servers" here.
     const attachSessions = allSessions.filter(session => !!session.mode?.Attach);
 
-    if (!allSessions.length) {
-        container.style.display = 'none';
-        setAttachButtonLabel(attachBtn, 'Attach');
-        return;
-    }
-
-    container.style.display = attachSessions.length ? '' : 'none';
+    const hasAttachSessions = attachSessions.length > 0;
+    container.style.display = hasAttachSessions ? '' : 'none';
+    if (!hasAttachSessions) setAttachButtonLabel(attachBtn, 'Attach');
     list.innerHTML = '';
 
     // Stamp preset cards with the last time they were spawned (for "last launched" display).
@@ -1277,9 +1475,13 @@ export function renderRecentEndpoints(sessions, activeId) {
         }
     }
     _applyLastLaunchedToCards();
+    // Refresh the right-pane order now that session-backed launch timestamps
+    // are available for the default "Last launched" sort.
+    renderLaunchGrid();
 
-    // buildCard is only called for Attach sessions — Spawn sessions cannot be
-    // "resumed" from here (you'd need to re-spawn via a preset card).
+    if (!hasAttachSessions) return;
+
+    // Attach and Spawn cards use distinct reconnect/restore paths below.
     const buildCard = (session) => {
         const card = document.createElement('div');
         card.className = 'setup-endpoint-card';
@@ -1313,7 +1515,7 @@ export function renderRecentEndpoints(sessions, activeId) {
 
         const metaEl = document.createElement('div');
         metaEl.className = 'setup-endpoint-meta';
-        const metaParts = [];
+        const metaParts = [session.backend === 'rapid_mlx' ? 'Rapid-MLX' : 'llama.cpp'];
         if (activeId && session.id === activeId) metaParts.push('Active workspace');
         else if (session.status === 'Running') metaParts.push('Last seen running');
         else if (session.status === 'Disconnected') metaParts.push('Ready to reconnect');
@@ -1334,21 +1536,74 @@ export function renderRecentEndpoints(sessions, activeId) {
         const connectBtn = document.createElement('button');
         connectBtn.className = 'setup-endpoint-connect';
 
-        const doConnect = () => {
+        const doConnect = async () => {
+            let reconnectApiKey = apiKey;
+            if (session.launch_requires_api_key && !reconnectApiKey) {
+                reconnectApiKey = await showPromptDialog(
+                    'Reconnect to protected endpoint',
+                    'Enter the API key for this endpoint. It is used only for this connection and is not saved.',
+                    '',
+                    { type: 'password', confirmLabel: 'Reconnect' },
+                );
+                if (reconnectApiKey == null) return;
+            }
             const urlInput = document.getElementById('setup-endpoint-url');
             if (urlInput) urlInput.value = endpoint;
             const apiKeyInput = document.getElementById('setup-endpoint-api-key');
-            if (apiKeyInput) apiKeyInput.value = apiKey;
-            doAttachFromSetup();
+            if (apiKeyInput) apiKeyInput.value = reconnectApiKey;
+            const backendInput = document.getElementById('setup-endpoint-backend');
+            if (backendInput) {
+                backendInput.value = session.backend === 'rapid_mlx' ? 'rapid_mlx' : 'llama_cpp';
+                backendInput.dispatchEvent(new Event('change'));
+            }
+            const modelInput = document.getElementById('setup-endpoint-model');
+            if (modelInput) modelInput.value = session.model_identity || '';
+            await doAttachFromSetup();
         };
 
         connectBtn.textContent = activeId && session.id === activeId
             ? 'Resume'
             : (session.last_connected_at ? 'Reconnect' : 'Connect');
 
+        const dismissBtn = document.createElement('button');
+        dismissBtn.type = 'button';
+        dismissBtn.className = 'setup-endpoint-dismiss';
+        dismissBtn.textContent = '×';
+        dismissBtn.title = 'Dismiss saved endpoint';
+        dismissBtn.setAttribute('aria-label', `Dismiss saved endpoint ${session.name || endpoint || ''}`.trim());
+        dismissBtn.addEventListener('click', async (event) => {
+            event.stopPropagation();
+            dismissBtn.disabled = true;
+            try {
+                const baseHeaders = window.authHeaders ? window.authHeaders() : {};
+                const tokenResponse = await fetch('/api/db/admin-token', { headers: baseHeaders });
+                const tokenData = tokenResponse.ok ? await tokenResponse.json().catch(() => ({})) : {};
+                const headers = tokenData.token
+                    ? { Authorization: `Bearer ${tokenData.token}` }
+                    : baseHeaders;
+                const response = await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, {
+                    method: 'DELETE',
+                    headers,
+                });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    throw new Error(data.error || `HTTP ${response.status}`);
+                }
+                card.remove();
+                if (!list.children.length) {
+                    container.style.display = 'none';
+                    setAttachButtonLabel(attachBtn, 'Attach');
+                }
+                showToast('Saved endpoint dismissed', 'success');
+            } catch (error) {
+                dismissBtn.disabled = false;
+                showToast(`Could not dismiss endpoint: ${error.message}`, 'error');
+            }
+        });
         card.appendChild(statusDot);
         card.appendChild(infoWrap);
         card.appendChild(connectBtn);
+        card.appendChild(dismissBtn);
 
         connectBtn.addEventListener('click', (e) => { e.stopPropagation(); doConnect(); });
         card.addEventListener('click', doConnect);
@@ -1357,7 +1612,6 @@ export function renderRecentEndpoints(sessions, activeId) {
     };
 
     attachSessions.forEach(session => list.appendChild(buildCard(session)));
-
     // Live health-check attach sessions that aren't already confirmed Running
     attachSessions.forEach((session, i) => {
         if (session.status === 'Running') return;
@@ -1526,10 +1780,12 @@ export async function initLaunchFilters() {
     const bar = document.getElementById('setup-filter-bar');
     if (!bar) return;
 
-    // Only populate if we have multiple presets (avoid clutter with 0-2)
+    // Keep the sort control available as soon as there is a user preset. The
+    // right pane is the canonical local-preset list, even when there are only
+    // one or two cards; hiding the entire toolbar made ordering undiscoverable.
     const presets = sessionState.presets || [];
     const userPresets = presets.filter(p => !p.id.startsWith('default-'));
-    if (userPresets.length < 3) {
+    if (userPresets.length === 0) {
         bar.style.display = 'none';
         return;
     }
@@ -1666,6 +1922,20 @@ export async function initLaunchFilters() {
             renderLaunchGrid();
         });
     }
+    const sortSelect = document.getElementById('setup-filter-sort');
+    if (sortSelect) {
+        const savedSort = localStorage.getItem('llama-monitor-preset-sort');
+        if (savedSort && ['last_launched', 'name', 'size', 'backend'].includes(savedSort)) {
+            launchFilters.sortBy = savedSort;
+            sortSelect.value = savedSort;
+        }
+        sortSelect.addEventListener('change', () => {
+            launchFilters.sortBy = sortSelect.value;
+            localStorage.setItem('llama-monitor-preset-sort', launchFilters.sortBy);
+            renderLaunchGrid();
+        });
+    }
+    bar.dataset.initialized = '1';
 }
 
 function updateFilterPillActive(container, activeId) {

@@ -1414,6 +1414,8 @@ function setupTagCloudUI() {
     }
 
     document.querySelectorAll('.category-group-header').forEach(header => {
+        if (header.dataset.tagCloudBound === '1') return;
+        header.dataset.tagCloudBound = '1';
         header.addEventListener('click', () => {
             const expanded = header.getAttribute('aria-expanded') === 'true';
             header.setAttribute('aria-expanded', String(!expanded));

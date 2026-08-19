@@ -1,4 +1,8 @@
-# TLS / ACME / mTLS Architecture
+# Local LLM Foundry TLS / ACME / mTLS Architecture
+
+Foundry 2.0 retains existing TLS/mTLS trust material. The stable legacy CA
+subject `llama-monitor CA` is intentionally preserved so upgraded agents do
+not lose trust; only the application-facing identity is canonicalized.
 
 This document describes how TLS, ACME (Let’s Encrypt), and mTLS work in llama-monitor.
 It is intended for:
@@ -20,7 +24,7 @@ High-level principles:
 
 ## TLS Modes
 
-![Security & Certificates settings panel](../screenshots/tls-certificates-tab.png)
+![Security & Certificates settings panel](../screenshots/tls--neutral--certificates-tab.png)
 
 llama-monitor supports four TLS modes, configured via:
 - CLI flags.
@@ -137,7 +141,7 @@ Notes:
 
 ### 4) Let’s Encrypt (ACME)
 
-![ACME / Let’s Encrypt configuration](../screenshots/tls-mode-acme-full.png)
+![ACME / Let’s Encrypt configuration](../screenshots/tls--neutral--mode-acme-full.png)
 
 Behavior:
 - llama-monitor uses the ACME protocol to obtain and renew TLS certificates from Let’s Encrypt.
@@ -307,7 +311,7 @@ These operations require:
 - Proper authentication (api-token and/or db-admin-token).
 - Confirmation for destructive actions to prevent accidental use.
 
-![DB Admin Section](../screenshots/tls-db-admin-section.png)
+![DB Admin Section](../screenshots/tls--neutral--db-admin-section.png)
 
 For deeper technical details and code references, see:
 - docs/archive/security/20260516-tls_acme_implementation.md
