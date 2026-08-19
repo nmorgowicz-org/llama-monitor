@@ -83,6 +83,10 @@ jobs:
               # release tree or the shared target tree. Search the complete target root
               # so packaging does not depend on Cargo's internal artifact layout.
               webview2_dll=$(find target -type f -path '*webview2-com-sys*/out/x64/WebView2Loader.dll' -print -quit)
+              if [ -z "$webview2_dll" ]; then
+                cargo_registry="${CARGO_HOME:-$HOME/.cargo}/registry/src"
+                webview2_dll=$(find "$cargo_registry" -type f -path '*webview2-com-sys-*/x64/WebView2Loader.dll' -print -quit)
+              fi
               if [ -z "$webview2_dll" ]; then echo "ERROR: WebView2Loader.dll not found in build output" >&2; exit 1; fi
               cp "$webview2_dll" windows-bundle-canonical/WebView2Loader.dll
               cp "$webview2_dll" windows-bundle-legacy/WebView2Loader.dll
