@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0](https://github.com/nmorgowicz-org/local-llm-foundry/compare/v1.8.1...v2.0.0) (2026-08-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* launch Local LLM Foundry 2.0 identity and Token Ingot brand
+
+### Features
+
+* **agent:** preserve mixed-version updater, remote install, task, and process compatibility ([e0ea7b8](https://github.com/nmorgowicz-org/local-llm-foundry/commit/e0ea7b81ea03e0c9c8915eab11b5894a7ca1af78))
+* **binary:** add canonical package and thin legacy CLI compatibility entrypoint ([e0ea7b8](https://github.com/nmorgowicz-org/local-llm-foundry/commit/e0ea7b81ea03e0c9c8915eab11b5894a7ca1af78))
+* **hf:** add backend-aware Hugging Face discovery and model lineage ([e0ea7b8](https://github.com/nmorgowicz-org/local-llm-foundry/commit/e0ea7b81ea03e0c9c8915eab11b5894a7ca1af78))
+* launch Local LLM Foundry 2.0 identity and Token Ingot brand ([e0ea7b8](https://github.com/nmorgowicz-org/local-llm-foundry/commit/e0ea7b81ea03e0c9c8915eab11b5894a7ca1af78))
+* **migration:** add copy-first resumable application-home migration ([e0ea7b8](https://github.com/nmorgowicz-org/local-llm-foundry/commit/e0ea7b81ea03e0c9c8915eab11b5894a7ca1af78))
+* **models:** add explicit receipt-backed managed model relocation ([e0ea7b8](https://github.com/nmorgowicz-org/local-llm-foundry/commit/e0ea7b81ea03e0c9c8915eab11b5894a7ca1af78))
+* **rapid-mlx:** add first-class MLX runtime, capabilities, and profiles ([e0ea7b8](https://github.com/nmorgowicz-org/local-llm-foundry/commit/e0ea7b81ea03e0c9c8915eab11b5894a7ca1af78))
+* **rapid-mlx:** make inference orchestration backend-neutral ([e0ea7b8](https://github.com/nmorgowicz-org/local-llm-foundry/commit/e0ea7b81ea03e0c9c8915eab11b5894a7ca1af78))
+* **rapid-mlx:** unify presets, spawn wizard, chat, and launch contracts ([e0ea7b8](https://github.com/nmorgowicz-org/local-llm-foundry/commit/e0ea7b81ea03e0c9c8915eab11b5894a7ca1af78))
+* **release:** publish canonical and legacy 2.0.x assets with exact checksums ([e0ea7b8](https://github.com/nmorgowicz-org/local-llm-foundry/commit/e0ea7b81ea03e0c9c8915eab11b5894a7ca1af78))
+* **ui:** align wizard, preset editor, chat, dashboard, and model surfaces ([e0ea7b8](https://github.com/nmorgowicz-org/local-llm-foundry/commit/e0ea7b81ea03e0c9c8915eab11b5894a7ca1af78))
+* **ui:** ship Token Ingot shell, manifests, themes, and migration UX ([e0ea7b8](https://github.com/nmorgowicz-org/local-llm-foundry/commit/e0ea7b81ea03e0c9c8915eab11b5894a7ca1af78))
+* **vram:** extend estimator and metadata introspection across backends ([e0ea7b8](https://github.com/nmorgowicz-org/local-llm-foundry/commit/e0ea7b81ea03e0c9c8915eab11b5894a7ca1af78))
+
+
+### Bug Fixes
+
+* **deps:** update rust crate base64 to 0.23 ([#326](https://github.com/nmorgowicz-org/local-llm-foundry/issues/326)) ([efbe35e](https://github.com/nmorgowicz-org/local-llm-foundry/commit/efbe35e5e5e7aaf357b42598ea05a3d0570e84fa))
+* **deps:** update rust crate hf-hub to v1 ([#307](https://github.com/nmorgowicz-org/local-llm-foundry/issues/307)) ([451ce28](https://github.com/nmorgowicz-org/local-llm-foundry/commit/451ce280040f0747684c15eda4fb79a815bdd489))
+* **deps:** update rust crate wry to 0.56 ([#333](https://github.com/nmorgowicz-org/local-llm-foundry/issues/333)) ([57f8c09](https://github.com/nmorgowicz-org/local-llm-foundry/commit/57f8c093539ff55583d46e789458dba53b8997f8))
+* **security:** preserve CA/encryption identity and harden temporary token entropy ([e0ea7b8](https://github.com/nmorgowicz-org/local-llm-foundry/commit/e0ea7b81ea03e0c9c8915eab11b5894a7ca1af78))
+
 ## [1.8.1](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.8.0...v1.8.1) (2026-07-07)
 
 
