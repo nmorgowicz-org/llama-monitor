@@ -1865,10 +1865,16 @@ mod tests {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         configure_process_group(&mut command);
-        let error = run_bounded_command_inner(command, Duration::from_millis(75), Some(&pid_path))
+        // Give the shell enough time to start under a loaded CI runner; the
+        // fixture itself sleeps for 60 seconds, so this remains a strict
+        // timeout test without relying on a sub-100ms scheduler window.
+        let error = run_bounded_command_inner(command, Duration::from_millis(500), Some(&pid_path))
             .await
             .unwrap_err();
-        assert!(error.to_string().contains("timed out"));
+        assert!(
+            error.to_string().contains("timed out"),
+            "unexpected timeout result: {error:#}"
+        );
         assert_fixture_descendant_reaped(&pid_path).await;
     }
 

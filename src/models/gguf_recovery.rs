@@ -1127,6 +1127,7 @@ mod unix_process {
             let _ = kill(-(pid as i32), signal);
         }
     }
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     pub fn process_exists(pid: u32) -> bool {
         let result = unsafe { kill(pid as i32, 0) };
         result == 0 || std::io::Error::last_os_error().raw_os_error() != Some(3)
@@ -2051,8 +2052,10 @@ impl Drop for CleanupDir {
 mod tests {
     use super::*;
 
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     static WORKER_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     fn test_python_path() -> PathBuf {
         if let Some(path) = std::env::var_os("PYTHON") {
             let path = PathBuf::from(path);
