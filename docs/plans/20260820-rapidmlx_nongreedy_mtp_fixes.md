@@ -1051,10 +1051,14 @@ head-only fixture was adopted into an external `mtp.safetensors` and passed the
 MLX norm validation; the cached Shiftedx `mtp.safetensors` relocation payload
 also passed validation. The cached nightmedia config-lie fixture remains
 `kind: none` despite `model_type: qwen3_5_moe` and
-`mtp_num_hidden_layers: 1`. A complete BF16 extraction positive control is not
-available locally: the cached Qwen3.8 BF16 source contains metadata only, so
-that gate remains an explicitly unexecuted external-fixture check. The
-dedicated repair UI/requalification flow remains in Phases 5–6.
+`mtp_num_hidden_layers: 1`. When a BF16 snapshot is incomplete, the supported
+fallback is the explicit parent-assisted path: a compatible published head or
+the recorded nested NuSLERP recipe. The sibling tooling's 7-test suite covers
+that reconstruction, including lineage, dtype, and replacement validation. A
+complete BF16 extraction positive control is not available locally because the
+cached Qwen3.8 BF16 source contains metadata only; that is an evidence gap for
+the extraction branch, not a repair blocker. The dedicated repair
+UI/requalification flow remains in Phases 5–6.
 ### Phase 4 validation lifecycle
 
 The app now exposes a read-only `validate --sidecar` command through the
