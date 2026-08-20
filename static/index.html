@@ -3440,7 +3440,7 @@
                                 <div class="pe-field">
                                     <label class="pe-label pe-toggle-label" for="modal-rapid-speculative-enabled">Experimental MTP speculation</label>
                                     <div class="pe-toggle"><input type="checkbox" class="pe-toggle-input" id="modal-rapid-speculative-enabled"><span class="pe-toggle-slider"></span></div>
-                                    <div class="pe-field-hint">Off by default and not recommended for normal chat/coding. Rapid 0.11.1 only engages for greedy, unconstrained requests; sampled and constrained-tool requests fall through.</div>
+                                    <div class="pe-field-hint">Works with sampling (temperature, top-p). Constrained decoding and tool-call grammars still bypass speculation.</div>
                                 </div>
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-rapid-speculative-source">MTP source</label>
@@ -3453,7 +3453,7 @@
                                 <div class="pe-field" id="modal-rapid-speculative-model-wrap">
                                     <label class="pe-label" for="modal-rapid-speculative-model">Resolved sidecar</label>
                                     <input class="pe-input" id="modal-rapid-speculative-model" placeholder="/absolute/local-sidecar-path">
-                                    <div class="pe-field-hint">Remote Hugging Face sidecars can be preflighted, but Rapid 0.11.1 cannot launch them at a pinned revision. Use an immutable local sidecar.</div>
+                                <div class="pe-field-hint">Remote Hugging Face sidecars can be preflighted but cannot be launched at a pinned revision. Use an immutable local sidecar.</div>
                                 </div>
                                 <div class="pe-field" id="modal-rapid-speculative-pin-status-wrap" style="display:none;">
                                     <div class="pe-field-hint" id="modal-rapid-speculative-pin-status" style="display:flex; align-items:center; gap:6px; font-size:12px;"></div>
@@ -3473,6 +3473,7 @@
                                 <div class="pe-field">
                                     <label class="pe-label pe-toggle-label" for="modal-rapid-speculative-disable-auto-k">Disable automatic K selection</label>
                                     <div class="pe-toggle"><input type="checkbox" class="pe-toggle-input" id="modal-rapid-speculative-disable-auto-k"><span class="pe-toggle-slider"></span></div>
+                                    <div class="pe-field-hint">Raising the token count alone usually does not increase depth: the adaptive controller re-picks K each round from measured acceptance. This pins depth at the chosen value for A/B benchmarking, but can reduce throughput when acceptance is low.</div>
                                 </div>
                                 <div class="pe-field">
                                     <label class="pe-label pe-toggle-label" for="modal-rapid-auto-tool-choice">Automatic tool choice</label>
@@ -4143,7 +4144,7 @@
                                          <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
                                          <span class="kv-unified-text">Experimental MTP speculation</span>
                                      </label>
-                                     <div class="field-hint">Not recommended for normal chat or coding: Rapid 0.11.1 only engages on greedy, unconstrained requests. Sampling and constrained tool calls silently fall through.</div>
+                                     <div class="field-hint">Works with sampling (temperature, top-p). Constrained decoding and tool-call grammars still bypass speculation.</div>
                                  </div>
                                  <div class="hardware-field" id="spawn-rapid-speculative-mode-wrap" style="display:none;">
                                      <label for="spawn-rapid-speculative-source">MTP source</label>
@@ -4151,7 +4152,7 @@
                                          <option value="embedded" selected>Embedded prediction heads</option>
                                          <option value="external">External local sidecar</option>
                                      </select>
-                                      <div class="field-hint">Use an immutable local sidecar. Remote Hugging Face sidecars can be preflighted but Rapid 0.11.1 cannot launch them at a pinned revision.</div>
+                                       <div class="field-hint">Use an immutable local sidecar. Remote Hugging Face sidecars can be preflighted but cannot be launched at a pinned revision.</div>
                                   </div>
                                     <div class="hardware-field" id="spawn-rapid-speculative-sidecars-wrap" style="display:none;">
                                         <label>Available sidecars</label>
@@ -4186,6 +4187,7 @@
                                          <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
                                          <span class="kv-unified-text">Disable automatic K selection</span>
                                      </label>
+                                     <div class="field-hint">Raising the token count alone usually does not increase depth: the adaptive controller re-picks K each round from measured acceptance. This pins depth at the chosen value for A/B benchmarking, but can reduce throughput when acceptance is low.</div>
                                  </div>
                                  <div class="hardware-field">
                                      <label class="kv-unified-toggle" for="spawn-rapid-auto-tool-choice">
