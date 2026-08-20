@@ -10,6 +10,7 @@ pub mod model_resolver;
 pub mod poller;
 pub mod runtime;
 pub mod settings;
+pub(crate) mod sidecar_hygiene;
 pub mod sidecar_inventory;
 pub mod spec_decode_store;
 // The managed-updater module is complete and unit-tested but has no caller in the

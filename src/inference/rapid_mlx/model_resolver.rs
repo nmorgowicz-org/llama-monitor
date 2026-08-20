@@ -619,9 +619,9 @@ pub async fn resolve(
                 let canonical = canonical_model_directory(&path, &local_model_allowed_root(&path))?;
                 reject_app_staging_directory(&canonical, &validation_context.models_dir)?;
                 validate_if_app_conversion(&canonical, &validation_context.models_dir)?;
-                // Applies to directories the app never created: the sidecar may have
-                // been written by upstream's extractor long before this launch.
-                reject_in_trunk_mtp_sidecar(&canonical)?;
+                crate::inference::rapid_mlx::sidecar_hygiene::inspect_and_repair_snapshot(
+                    &canonical,
+                )?;
                 Ok(canonical)
             })
             .await?,
@@ -663,6 +663,7 @@ pub async fn resolve(
         RapidMlxModelSource::HuggingFaceRepo { repo_id, revision } => {
             let snapshot =
                 resolve_hf_snapshot(repo_id, revision, &source, context, &environment).await?;
+            crate::inference::rapid_mlx::sidecar_hygiene::inspect_and_repair_snapshot(&snapshot)?;
             let validation_path = snapshot.clone();
             let validation_root = context.models_dir.clone();
             run_resolver_blocking(move || {

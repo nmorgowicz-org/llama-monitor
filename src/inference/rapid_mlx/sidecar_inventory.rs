@@ -82,6 +82,37 @@ fn sidecar_root() -> PathBuf {
         .unwrap_or_else(|| crate::paths::AppPaths::default_active_root().join(SIDECAR_SUBDIR))
 }
 
+/// Return the managed sidecar directory for a trunk model path.
+pub fn sidecar_dir_for_trunk(trunk: &Path) -> PathBuf {
+    sidecar_root().join(slugify_trunk_name(trunk))
+}
+
+fn slugify_trunk_name(trunk: &Path) -> String {
+    let name = trunk
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("trunk")
+        .to_ascii_lowercase();
+    let mut slug = String::new();
+    let mut pending_separator = false;
+    for ch in name.chars() {
+        if ch.is_ascii_lowercase() || ch.is_ascii_digit() {
+            if pending_separator && !slug.is_empty() {
+                slug.push('-');
+            }
+            pending_separator = false;
+            slug.push(ch);
+        } else {
+            pending_separator = true;
+        }
+    }
+    if slug.is_empty() {
+        "trunk".to_string()
+    } else {
+        slug
+    }
+}
+
 /// Discover all sidecars under the managed root. Returns an empty list if the
 /// root does not exist (no sidecars built yet).
 pub fn discover_sidecars() -> Result<Vec<SidecarEntry>> {
