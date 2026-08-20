@@ -109,6 +109,7 @@ def inspect(root: Path) -> dict[str, Any]:
         "mtp_keys": names,
         "missing_required": missing,
         "mtp_num_hidden_layers": config_value(cfg, "mtp_num_hidden_layers"),
+        "quantization": cfg.get("quantization"),
         "namespace": "mtp." if any(key.startswith("mtp.") for key in mtp) else "",
     }
 
@@ -260,8 +261,13 @@ def repair(args: argparse.Namespace) -> dict[str, Any]:
             raise RepairError("one of --source or --recipe is required")
         source_root = Path(args.source).expanduser().resolve()
         source = inspect(source_root)
-        if source["kind"] not in {"complete", "fused"}:
+        if source["kind"] not in {"complete", "fused", "head_only"}:
             raise RepairError(f"source is not a complete MTP head: {source['kind']}")
+        if source["missing_required"]:
+            raise RepairError(
+                "source is an incomplete MTP head: "
+                + ", ".join(source["missing_required"])
+            )
         check_compatibility(target_root, source_root)
         source_weights = load_weights(source_root, source)
         if args.source_format == "hf":
@@ -269,25 +275,42 @@ def repair(args: argparse.Namespace) -> dict[str, Any]:
         merged = dict(target_weights)
         merged.update({key: value for key, value in source_weights.items() if key not in merged})
         source_info = source
-        mode = "direct_parent"
+        mode = "head_only_adoption" if source["kind"] == "head_only" else "direct_parent"
     validation = validate_weights(merged)
     output = Path(args.output).expanduser().resolve()
     if output == target_root or target_root in output.parents:
         raise RepairError("refusing to write a sidecar inside the target trunk")
+    if output.exists() or output.with_name("provenance.json").exists():
+        raise RepairError(
+            f"refusing to overwrite existing sidecar at {output.parent}; "
+            "remove or explicitly supersede the existing candidate first"
+        )
     output.parent.mkdir(parents=True, exist_ok=True)
     prefix = target["namespace"] or (source_info or {}).get("namespace", "")
     mx.save_safetensors(str(output), {f"{prefix}{key}": value for key, value in merged.items()})
+    created_at = datetime.now(timezone.utc).isoformat()
+    quantization = target.get("quantization")
+    if isinstance(quantization, dict):
+        bits = quantization.get("bits")
+        quantization = f"{bits}-bit" if bits is not None else None
     provenance = {
         "schema_version": 2,
         "status": "candidate",
         "repair_mode": mode,
+        "trunk": target["snapshot"],
+        "bf16_source": (source_info or {}).get("snapshot") if source_info else "recipe-lineage",
+        "built_at": created_at,
+        "norm_check_passed": validation["all_positive"],
+        "estimated_memory_bytes": output.stat().st_size,
+        "quantization": quantization,
+        "mtp_depth_max": target.get("mtp_num_hidden_layers"),
         "target": target,
         "source": source_info,
         "recipe": recipe_meta,
         "validation": validation,
         "output": str(output),
         "sha256": sha256(output),
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": created_at,
     }
     output.with_name("provenance.json").write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
     return provenance

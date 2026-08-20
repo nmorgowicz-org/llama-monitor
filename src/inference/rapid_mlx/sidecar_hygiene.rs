@@ -8,6 +8,7 @@
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -231,6 +232,65 @@ fn relocate_sidecar(snapshot: &Path, source: &Path, test_root: Option<&Path>) ->
             snapshot.display()
         )
     })?;
+    if let Err(error) =
+        write_relocation_provenance(snapshot, source, &destination_dir, &destination)
+    {
+        let _ = fs::rename(&destination, source);
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn write_relocation_provenance(
+    snapshot: &Path,
+    source: &Path,
+    destination_dir: &Path,
+    destination: &Path,
+) -> Result<()> {
+    let mut file = fs::File::open(destination)?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0u8; 1024 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    let sha256 = digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let estimated_memory_bytes = fs::metadata(destination)?.len();
+    let provenance = serde_json::json!({
+        "schema_version": 2,
+        "status": "candidate",
+        "repair_mode": "relocation",
+        "trunk": snapshot.to_string_lossy(),
+        "bf16_source": source.to_string_lossy(),
+        "built_at": format!(
+            "{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+        ),
+        "sha256": sha256,
+        "norm_check_passed": false,
+        "estimated_memory_bytes": estimated_memory_bytes,
+        "quantization": serde_json::Value::Null,
+        "mtp_depth_max": serde_json::Value::Null,
+        "validation": {
+            "all_positive": false,
+            "status": "pending",
+            "reason": "Relocated heads require MLX pre_fc_norm validation before adoption."
+        },
+        "source": {"relocated_from": source.to_string_lossy()},
+    });
+    let temporary = destination_dir.join("provenance.json.pending");
+    fs::write(&temporary, serde_json::to_vec_pretty(&provenance)?)?;
+    fs::rename(&temporary, destination_dir.join("provenance.json"))?;
     Ok(())
 }
 
@@ -323,6 +383,12 @@ mod tests {
                 .join("test-sidecar/mtp.safetensors")
                 .exists()
         );
+        let provenance: Value = serde_json::from_reader(
+            fs::File::open(sidecar_root.path().join("test-sidecar/provenance.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(provenance["repair_mode"], "relocation");
+        assert_eq!(provenance["validation"]["status"], "pending");
         assert_eq!(
             serde_json::from_reader::<_, Value>(
                 fs::File::open(root.path().join("config.json")).unwrap()

@@ -32,6 +32,11 @@ pub struct RepairRequest {
     pub source_format: String,
     #[serde(default)]
     pub recipe: Option<String>,
+    /// BF16/HF source for the guarded `build-mtp-head.py` extraction path.
+    #[serde(default)]
+    pub bf16_source: Option<String>,
+    #[serde(default)]
+    pub bf16_revision: Option<String>,
     #[serde(default)]
     pub python: Option<String>,
 }
@@ -68,11 +73,33 @@ pub fn start_job(request: RepairRequest, scripts_dir: &Path) -> Result<RepairJob
         .as_deref()
         .map(|value| existing_file(value, "recipe"))
         .transpose()?;
-    if source.is_none() && recipe.is_none() {
-        bail!("one of source or recipe is required");
+    let bf16_source = request
+        .bf16_source
+        .as_deref()
+        .map(validate_bf16_source)
+        .transpose()?;
+    let bf16_revision = request
+        .bf16_revision
+        .as_deref()
+        .map(validate_revision)
+        .transpose()?;
+    if source.is_none() && recipe.is_none() && bf16_source.is_none() {
+        bail!("one of source, recipe, or bf16Source is required");
     }
-    if source.is_some() && recipe.is_some() {
-        bail!("source and recipe are mutually exclusive");
+    if [source.is_some(), recipe.is_some(), bf16_source.is_some()]
+        .into_iter()
+        .filter(|present| *present)
+        .count()
+        > 1
+    {
+        bail!("source, recipe, and bf16Source are mutually exclusive");
+    }
+    if bf16_source
+        .as_deref()
+        .is_some_and(|value| !Path::new(value).is_absolute())
+        && bf16_revision.is_none()
+    {
+        bail!("bf16Revision is required for a Hugging Face BF16 source");
     }
     let source_format = if request.source_format.trim().is_empty() {
         "mlx".to_string()
@@ -82,10 +109,18 @@ pub fn start_job(request: RepairRequest, scripts_dir: &Path) -> Result<RepairJob
     if source_format != "mlx" && source_format != "hf" {
         bail!("sourceFormat must be mlx or hf");
     }
-    let script = resolve_script(scripts_dir)?;
+    let script = resolve_script(
+        scripts_dir,
+        if bf16_source.is_some() {
+            "build-mtp-head.py"
+        } else {
+            SCRIPT_NAME
+        },
+    )?;
     let python = request.python.unwrap_or_else(|| "python3".to_string());
     validate_executable_name(&python)?;
-    let output = sidecar_dir_for_trunk(&target).join("mtp.safetensors");
+    let output_dir = sidecar_dir_for_trunk(&target);
+    let output = output_dir.join("mtp.safetensors");
     let job_id = format!("mtp-repair-{:032x}", rand::random::<u128>());
     let snapshot = Arc::new(Mutex::new(RepairJobSnapshot {
         job_id: job_id.clone(),
@@ -136,30 +171,57 @@ pub fn start_job(request: RepairRequest, scripts_dir: &Path) -> Result<RepairJob
             }
         };
         set_running(&task_snapshot, "inspecting", "Reading MTP tensor headers");
-        let mut command = Command::new(python);
-        command
-            .arg(script)
-            .arg("repair")
-            .arg("--target")
-            .arg(&target);
-        if let Some(source) = source {
-            command.arg("--source").arg(source);
-            command.arg("--source-format").arg(&source_format);
+        let mut command = Command::new(&python);
+        if let Some(bf16_source) = bf16_source {
+            command
+                .arg(script)
+                .arg("--bf16-source")
+                .arg(bf16_source)
+                .arg("--mlx-model")
+                .arg(&target)
+                .arg("--out")
+                .arg(&output_dir)
+                .arg("--python")
+                .arg(&python);
+            if let Some(revision) = bf16_revision {
+                command.arg("--revision").arg(revision);
+            }
+        } else {
+            command
+                .arg(script)
+                .arg("repair")
+                .arg("--target")
+                .arg(&target);
+            if let Some(source) = source {
+                command.arg("--source").arg(source);
+                command.arg("--source-format").arg(&source_format);
+            }
+            if let Some(recipe) = recipe {
+                command.arg("--recipe").arg(recipe);
+            }
+            command.arg("--output").arg(&output);
         }
-        if let Some(recipe) = recipe {
-            command.arg("--recipe").arg(recipe);
-        }
-        command.arg("--output").arg(&output);
         let result = run_bounded(command, cancel.clone()).await;
         drop(permit);
         match result {
-            Ok(stdout) => match serde_json::from_str::<serde_json::Value>(&stdout) {
-                Ok(value) => set_completed(&task_snapshot, value),
-                Err(error) => set_failed(
-                    &task_snapshot,
-                    format!("repair returned invalid JSON: {error}"),
-                ),
-            },
+            Ok(stdout) => {
+                let report = if stdout.trim().is_empty() {
+                    std::fs::read_to_string(output_dir.join("provenance.json"))
+                        .map_err(|error| error.to_string())
+                } else {
+                    Ok(stdout)
+                };
+                match report.and_then(|value| {
+                    serde_json::from_str::<serde_json::Value>(&value)
+                        .map_err(|error| error.to_string())
+                }) {
+                    Ok(value) => set_completed(&task_snapshot, value),
+                    Err(error) => set_failed(
+                        &task_snapshot,
+                        format!("repair returned invalid JSON: {error}"),
+                    ),
+                }
+            }
             Err(RunError::Cancelled) => set_cancelled(&task_snapshot),
             Err(RunError::Failed(error)) => set_failed(&task_snapshot, error),
         }
@@ -213,14 +275,14 @@ pub fn list_sidecars() -> Result<Vec<SidecarEntry>> {
     discover_sidecars()
 }
 
-fn resolve_script(scripts_dir: &Path) -> Result<PathBuf> {
-    let configured = scripts_dir.join(SCRIPT_NAME);
+fn resolve_script(scripts_dir: &Path, name: &str) -> Result<PathBuf> {
+    let configured = scripts_dir.join(name);
     if configured.is_file() {
         return Ok(configured);
     }
     let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("scripts")
-        .join(SCRIPT_NAME);
+        .join(name);
     if repository.is_file() {
         return Ok(repository);
     }
@@ -228,6 +290,33 @@ fn resolve_script(scripts_dir: &Path) -> Result<PathBuf> {
         "Rapid-MLX repair script not installed: {}",
         configured.display()
     )
+}
+
+fn validate_bf16_source(raw: &str) -> Result<String> {
+    if raw.trim().is_empty() || raw.chars().any(char::is_control) {
+        bail!("bf16Source is invalid");
+    }
+    if Path::new(raw).is_absolute() {
+        return Ok(existing_directory(raw, "bf16Source")?
+            .to_string_lossy()
+            .into_owned());
+    }
+    if !crate::hf::validate_hf_repo_id(raw.trim()) {
+        bail!("bf16Source must be an absolute local directory or owner/repo");
+    }
+    Ok(raw.trim().to_string())
+}
+
+fn validate_revision(raw: &str) -> Result<String> {
+    let value = raw.trim();
+    if !(7..=128).contains(&value.len())
+        || !value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    {
+        bail!("revision must be a stable 7-128 character identifier");
+    }
+    Ok(value.to_string())
 }
 
 fn existing_directory(raw: &str, label: &str) -> Result<PathBuf> {
@@ -391,7 +480,7 @@ fn unix_now() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_executable_name, validate_path};
+    use super::{validate_bf16_source, validate_executable_name, validate_path, validate_revision};
 
     #[test]
     fn repair_paths_are_absolute_and_non_control() {
@@ -404,5 +493,13 @@ mod tests {
     fn repair_python_override_rejects_control_input() {
         assert!(validate_executable_name("python3\n").is_err());
         assert!(validate_executable_name("python3").is_ok());
+    }
+
+    #[test]
+    fn bf16_hf_sources_require_valid_repo_and_revision_shape() {
+        assert!(validate_bf16_source("nightmedia/brainwaves").is_ok());
+        assert!(validate_bf16_source("not-a-repo").is_err());
+        assert!(validate_revision("0123456789abcdef").is_ok());
+        assert!(validate_revision("main").is_err());
     }
 }

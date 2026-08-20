@@ -373,9 +373,14 @@ pub fn estimate_local_companion_vram(companion_path: &Path) -> Option<u64> {
 #[allow(dead_code)]
 pub fn find_sidecar_for_path(companion_path: &Path) -> Option<SidecarEntry> {
     discover_sidecars().ok().and_then(|entries| {
-        entries
-            .into_iter()
-            .find(|e| e.path == companion_path.to_string_lossy())
+        entries.into_iter().find(|e| {
+            e.path == companion_path.to_string_lossy()
+                && e.has_weights
+                && e.has_provenance
+                && e.provenance
+                    .as_ref()
+                    .is_some_and(|provenance| provenance.norm_check_passed)
+        })
     })
 }
 

@@ -45,6 +45,11 @@ def main():
         "--hf-model", required=True, help="HuggingFace model ID (e.g. Qwen/Qwen3.5-27B)"
     )
     parser.add_argument(
+        "--revision",
+        default=None,
+        help="Immutable Hugging Face commit/revision for every source fetch.",
+    )
+    parser.add_argument(
         "--mlx-model", required=True, help="Path to quantized MLX model directory"
     )
     parser.add_argument(
@@ -80,7 +85,9 @@ def main():
     from huggingface_hub import hf_hub_download
 
     logger.info(f"Downloading weight index from {args.hf_model}...")
-    idx_path = hf_hub_download(args.hf_model, "model.safetensors.index.json")
+    idx_path = hf_hub_download(
+        args.hf_model, "model.safetensors.index.json", revision=args.revision
+    )
     with open(idx_path) as f:
         idx = json.load(f)
 
@@ -101,7 +108,7 @@ def main():
     all_mtp_weights = {}
     for shard_file in shard_files:
         logger.info(f"Downloading {shard_file}...")
-        shard_path = hf_hub_download(args.hf_model, shard_file)
+        shard_path = hf_hub_download(args.hf_model, shard_file, revision=args.revision)
         shard_weights = mx.load(shard_path)
         for k in mtp_keys:
             if mtp_keys[k] == shard_file and k in shard_weights:
@@ -196,7 +203,9 @@ def main():
     text_config = config.get("text_config", config)
     if text_config.get("mtp_num_hidden_layers") is None:
         # Read from HF config
-        hf_cfg_path = hf_hub_download(args.hf_model, "config.json")
+        hf_cfg_path = hf_hub_download(
+            args.hf_model, "config.json", revision=args.revision
+        )
         with open(hf_cfg_path) as f:
             hf_cfg = json.load(f)
         hf_tc = hf_cfg.get("text_config", hf_cfg)

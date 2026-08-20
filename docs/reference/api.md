@@ -56,7 +56,10 @@ caller responsibilities.
 
 - `POST /api/rapid-mlx/mtp-repair` starts one bounded repair job. The body is
   `{ "target": "/path/to/trunk", "source": "/path/to/parent", "sourceFormat": "mlx" }`
-  or `{ "target": "/path/to/trunk", "recipe": "/path/to/recipe.json" }`.
+  `{ "target": "/path/to/trunk", "recipe": "/path/to/recipe.json" }`, or
+  `{ "target": "/path/to/trunk", "bf16Source": "owner/repo", "bf16Revision": "<commit>" }`.
+  BF16 extraction uses the guarded `build-mtp-head.py` wrapper and requires a
+  pinned revision for HF sources.
 - `GET /api/rapid-mlx/mtp-repair/:jobId` polls progress and returns the
   candidate provenance or a fail-closed error.
 - `POST /api/rapid-mlx/mtp-repair/:jobId/cancel` cancels a queued/running job.

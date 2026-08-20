@@ -234,6 +234,11 @@ def main() -> int:
         help="Quantized MLX trunk directory. Supplies the quantization config; is NOT modified.",
     )
     parser.add_argument(
+        "--revision",
+        default=None,
+        help="Immutable Hugging Face commit/revision for the BF16 source.",
+    )
+    parser.add_argument(
         "--out",
         default=None,
         help=f"Sidecar output directory. Default: {DEFAULT_SIDECAR_ROOT}/<trunk-slug>/",
@@ -307,6 +312,8 @@ def main() -> int:
         "--mlx-model",
         str(trunk),
     ]
+    if args.revision:
+        command += ["--revision", args.revision]
     if args.bits is not None:
         command += ["--bits", str(args.bits)]
     if args.group_size is not None:
@@ -359,6 +366,7 @@ def main() -> int:
         "sha256": sha256_of(sidecar_path),
         "source": {
             "bf16_source": args.bf16_source,
+            "revision": args.revision,
             "trunk": str(trunk),
             "extracted_with": f"vendored {extractor.name}",
             "extractor_sha256": sha256_of(extractor),

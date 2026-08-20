@@ -1030,3 +1030,21 @@ This slice intentionally does not infer HF parents, download recipe sources, or
 mark a sidecar qualified. Requalification and HF/model-card discovery remain
 the next phases; a successful repair is surfaced as a candidate requiring
 served evidence.
+
+### Phase 4 progress update
+
+The Phase 4 implementation slice now includes:
+
+- immutable BF16-source revision threading through `build-mtp-head.py` and the
+  vendored extractor, with the Rust job manager invoking the guarded wrapper;
+- direct-parent, recipe, head-only-adoption, and BF16-extraction job modes;
+- schema-v2 top-level provenance fields for sidecar origin, digest, validation,
+  memory estimate, quantization, and depth;
+- relocation provenance marked explicitly as `candidate`/`pending`, with
+  automatic sidecar selection refusing unvalidated entries;
+- overwrite refusal for existing repair candidates and rollback if relocation
+  provenance cannot be written.
+
+Phase 4 is not gated complete yet: real HF fixtures still need positive-control
+MLX norm validation for extraction, relocation, and head-only adoption, and the
+dedicated repair UI/requalification flow remains in Phases 5–6.
