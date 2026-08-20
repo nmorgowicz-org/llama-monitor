@@ -25,6 +25,19 @@ enum SnapshotKind {
     OtherTrunk,
 }
 
+enum MtpFileKind {
+    None,
+    Partial(Vec<&'static str>),
+    Standalone,
+    Fused,
+}
+
+const REQUIRED_MTP_KEYS: &[&str] = &[
+    "fc.weight",
+    "pre_fc_norm_embedding.weight",
+    "pre_fc_norm_hidden.weight",
+];
+
 /// Inspect a downloaded or pre-existing snapshot and relocate any MTP head
 /// that could be ingested by the trunk loader.
 pub(crate) fn inspect_and_repair_snapshot(snapshot: &Path) -> Result<()> {
@@ -45,12 +58,42 @@ fn inspect_and_repair_snapshot_with_root(snapshot: &Path, test_root: Option<&Pat
 
     let candidates = root_safetensors_candidates(snapshot)?;
     let mut mtp_heads = Vec::new();
+    let mut fused_files = Vec::new();
     for path in candidates {
         let keys = safetensors_tensor_names(&path)
             .with_context(|| format!("Inspecting safetensors header {}", path.display()))?;
-        if keys.iter().any(|key| is_mtp_tensor_key(key)) {
-            mtp_heads.push(path);
+        match classify_mtp_file(&keys) {
+            MtpFileKind::None => {}
+            MtpFileKind::Partial(missing) => {
+                bail!(
+                    "Rapid-MLX snapshot {} contains incomplete MTP tensor namespace in {}; missing {}",
+                    snapshot.display(),
+                    path.display(),
+                    missing.join(", ")
+                );
+            }
+            MtpFileKind::Standalone => mtp_heads.push(path),
+            MtpFileKind::Fused => fused_files.push(path),
         }
+    }
+
+    if !fused_files.is_empty() && !mtp_heads.is_empty() {
+        bail!(
+            "Rapid-MLX snapshot {} contains both embedded and standalone MTP heads; refusing ambiguous sidecar relocation",
+            snapshot.display()
+        );
+    }
+    // A complete fused head is already part of the trunk and must remain in
+    // place. Only standalone heads are moved out of the model*.safetensors set.
+    if !fused_files.is_empty() {
+        return Ok(());
+    }
+    if mtp_heads.is_empty() {
+        // Some published finetunes advertise MTP in config.json but ship no
+        // MTP tensors at all. Clear the stale capability marker so the
+        // runtime does not attempt to load a non-existent head.
+        remove_mtp_layer_count(snapshot)?;
+        return Ok(());
     }
 
     if mtp_heads.len() > 1 {
@@ -105,8 +148,39 @@ fn root_safetensors_candidates(snapshot: &Path) -> Result<Vec<PathBuf>> {
     Ok(candidates)
 }
 
-fn is_mtp_tensor_key(key: &str) -> bool {
-    key.split('.').any(|part| part.starts_with("pre_fc_norm"))
+fn normalized_mtp_key(key: &str) -> Option<&str> {
+    if let Some(key) = key.strip_prefix("mtp.") {
+        return Some(key);
+    }
+    if key == "fc.weight" || key.starts_with("layers.") || key.starts_with("pre_fc_norm") {
+        return Some(key);
+    }
+    None
+}
+
+fn classify_mtp_file(keys: &[String]) -> MtpFileKind {
+    let mtp_keys: Vec<&str> = keys
+        .iter()
+        .filter_map(|key| normalized_mtp_key(key))
+        .collect();
+    if mtp_keys.is_empty() {
+        return MtpFileKind::None;
+    }
+
+    let missing: Vec<&'static str> = REQUIRED_MTP_KEYS
+        .iter()
+        .copied()
+        .filter(|required| !mtp_keys.contains(required))
+        .collect();
+    if !missing.is_empty() {
+        return MtpFileKind::Partial(missing);
+    }
+
+    if keys.iter().any(|key| normalized_mtp_key(key).is_none()) {
+        MtpFileKind::Fused
+    } else {
+        MtpFileKind::Standalone
+    }
 }
 
 fn safetensors_tensor_names(path: &Path) -> Result<Vec<String>> {
@@ -220,7 +294,11 @@ mod tests {
         config(root.path(), "qwen3_5", true);
         write_safetensors(
             &root.path().join("model-mtp.safetensors"),
-            &["mtp.fc.weight", "mtp.pre_fc_norm_embedding.weight"],
+            &[
+                "mtp.fc.weight",
+                "mtp.pre_fc_norm_embedding.weight",
+                "mtp.pre_fc_norm_hidden.weight",
+            ],
         );
         write_safetensors(
             &root.path().join("model-00001-of-00001.safetensors"),
@@ -256,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn config_lie_without_mtp_keys_is_left_untouched() {
+    fn config_lie_without_mtp_keys_is_disabled() {
         let root = tempdir().unwrap();
         config(root.path(), "qwen3_5_moe", true);
         write_safetensors(
@@ -269,6 +347,58 @@ mod tests {
                 .join("model-00001-of-00001.safetensors")
                 .exists()
         );
+        assert_eq!(
+            serde_json::from_reader::<_, Value>(
+                fs::File::open(root.path().join("config.json")).unwrap()
+            )
+            .unwrap()
+            .get("mtp_num_hidden_layers"),
+            None
+        );
+    }
+
+    #[test]
+    fn relocates_bare_mtp_namespace_from_mtp_named_file() {
+        let root = tempdir().unwrap();
+        config(root.path(), "qwen3_5", false);
+        let source = root.path().join("mtp.safetensors");
+        write_safetensors(
+            &source,
+            &[
+                "fc.weight",
+                "pre_fc_norm_embedding.weight",
+                "pre_fc_norm_hidden.weight",
+            ],
+        );
+        let sidecar_root = tempdir().unwrap();
+
+        inspect_and_repair_snapshot_with_root(root.path(), Some(sidecar_root.path())).unwrap();
+        assert!(!source.exists());
+        assert!(
+            sidecar_root
+                .path()
+                .join("test-sidecar/mtp.safetensors")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn leaves_complete_fused_head_in_trunk() {
+        let root = tempdir().unwrap();
+        config(root.path(), "qwen3_5", true);
+        let source = root.path().join("model-00001-of-00001.safetensors");
+        write_safetensors(
+            &source,
+            &[
+                "model.layers.0.weight",
+                "mtp.fc.weight",
+                "mtp.pre_fc_norm_embedding.weight",
+                "mtp.pre_fc_norm_hidden.weight",
+            ],
+        );
+
+        inspect_and_repair_snapshot(root.path()).unwrap();
+        assert!(source.exists());
         assert!(
             serde_json::from_reader::<_, Value>(
                 fs::File::open(root.path().join("config.json")).unwrap()
@@ -280,21 +410,45 @@ mod tests {
     }
 
     #[test]
-    fn relocates_bare_mtp_namespace_from_mtp_named_file() {
+    fn rejects_partial_standalone_head_before_relocation() {
         let root = tempdir().unwrap();
-        config(root.path(), "qwen3_5", false);
+        config(root.path(), "qwen3_5", true);
         let source = root.path().join("mtp.safetensors");
-        write_safetensors(&source, &["fc.weight", "pre_fc_norm_hidden.weight"]);
-        let sidecar_root = tempdir().unwrap();
-
-        inspect_and_repair_snapshot_with_root(root.path(), Some(sidecar_root.path())).unwrap();
-        assert!(!source.exists());
-        assert!(
-            sidecar_root
-                .path()
-                .join("test-sidecar/mtp.safetensors")
-                .exists()
+        write_safetensors(
+            &source,
+            &[
+                "fc.weight",
+                "pre_fc_norm_embedding.weight",
+                // Deliberately omit pre_fc_norm_hidden.weight.
+            ],
         );
+
+        let error = inspect_and_repair_snapshot(root.path()).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("incomplete MTP tensor namespace")
+        );
+        assert!(source.exists());
+    }
+
+    #[test]
+    fn rejects_brainwaves_style_head_missing_fc_weight() {
+        let root = tempdir().unwrap();
+        config(root.path(), "qwen3_5_moe", true);
+        let source = root.path().join("model-00004-of-00004.safetensors");
+        write_safetensors(
+            &source,
+            &[
+                "mtp.pre_fc_norm_embedding.weight",
+                "mtp.pre_fc_norm_hidden.weight",
+                "mtp.layers.0.self_attn.q_proj.weight",
+            ],
+        );
+
+        let error = inspect_and_repair_snapshot(root.path()).unwrap_err();
+        assert!(error.to_string().contains("fc.weight"));
+        assert!(source.exists());
     }
 
     #[test]
