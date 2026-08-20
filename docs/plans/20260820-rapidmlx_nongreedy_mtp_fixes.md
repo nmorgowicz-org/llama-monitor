@@ -978,3 +978,31 @@ source, validates both `pre_fc_norm` tensors and architecture fields, writes an
 external sidecar, and records JSON provenance. It is intentionally a
 local-source CLI for now; HF download/authentication remains the caller's
 responsibility.
+
+## Recipe-aware finetune repair requirement
+
+For a finetune or merge, a matching base-model MTP head is only a fallback.
+When recipe data is available, repair must reconstruct the missing MTP tensors
+using the same parent model revisions, tensor weights, merge ordering, dtype,
+and NuSLERP/mergekit semantics used to produce the trunk. This is especially
+important for a dropped tensor such as `mtp.fc.weight`: copying one parent's
+weight can leave the draft distribution mismatched to the merged trunk even
+when every shape check passes.
+
+The repair pipeline must therefore:
+
+- discover recipe evidence from immutable local/HF metadata, model-card
+  artifacts, or an explicitly supplied merge recipe;
+- validate every referenced parent and revision before loading tensors;
+- apply the recipe to the MTP namespace independently when the trunk merge
+  omitted that namespace;
+- record the recipe digest, method, parent revisions, coefficients, tensor
+  lineage, and precision in `provenance.json`;
+- label recipe reconstruction separately from direct-parent grafting in the UI;
+- fall back to a direct compatible parent only with an explicit lower-confidence
+  warning when no recipe is available.
+
+Structural validation remains necessary but is not sufficient. Recipe-derived
+heads must proceed through served requalification using the same sampling
+settings as the target finetune, with acceptance rate and throughput recorded
+before the app presents the sidecar as ready.
