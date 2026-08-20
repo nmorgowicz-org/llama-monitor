@@ -2002,20 +2002,23 @@ async function _fetchSidecarsForPreset() {
         // Build sidecar list
         let html = '';
         data.sidecars.forEach((s, i) => {
-            const vram = s.estimatedMemoryBytes != null
-                ? '~' + (s.estimatedMemoryBytes >= 1073741824
-                    ? (s.estimatedMemoryBytes / 1073741824).toFixed(1) + ' GB'
-                    : Math.round(s.estimatedMemoryBytes / 1048576) + ' MB')
+            const p = s.provenance || s;
+            const vram = p.estimatedMemoryBytes != null
+                ? '~' + (p.estimatedMemoryBytes >= 1073741824
+                    ? (p.estimatedMemoryBytes / 1073741824).toFixed(1) + ' GB'
+                    : Math.round(p.estimatedMemoryBytes / 1048576) + ' MB')
                 : '? VRAM';
 
-            const trunkShort = s.trunk ? s.trunk.split('/').pop() : '?';
+            const trunkShort = p.trunk ? p.trunk.split('/').pop() : '?';
 
             html += '<button type="button" class="pe-action-btn" data-sidecar-index="' + i + '" style="display:block; width:100%; text-align:left; padding:6px 8px; margin-bottom:4px; font-size:11px; background:var(--color-surface,#1a1d24); border:1px solid var(--color-border,#2a2d34); border-radius:4px; cursor:pointer;">';
             html += '<strong>' + DOMPurify.sanitize(s.slug) + '</strong> ';
             html += '<span style="color:var(--text-muted,#888);">' + vram + '</span>';
-            if (s.trunk) html += ' <span style="color:var(--text-muted,#888);">for ' + DOMPurify.sanitize(trunkShort) + '</span>';
-            if (s.builtAt) html += ' <span style="color:var(--text-muted,#888);">(' + (function(dt) { if (!dt) return ''; const d = new Date(dt); const diff = (Date.now() - d.getTime()) / 1000; if (diff < 60) return 'just now'; if (diff < 3600) return Math.floor(diff / 60) + 'm ago'; if (diff < 86400) return Math.floor(diff / 3600) + 'h ago'; return Math.floor(diff / 86400) + 'd ago'; })(s.builtAt) + ')</span>';
-            if (!s.normCheckPassed) html += ' <span style="color:var(--err,#e65c5c);">⚠ norm check failed</span>';
+            if (p.trunk) html += ' <span style="color:var(--text-muted,#888);">for ' + DOMPurify.sanitize(trunkShort) + '</span>';
+            if (p.repairMode === 'recipe_reconstruction') html += ' <span style="color:var(--accent,#8cc8ff);">' + (p.requalificationStatus === 'passed' ? 'Recipe reconstructed · qualified' : 'Recipe reconstructed · awaiting requalification') + '</span>';
+            else if (p.repairMode === 'direct_parent') html += ' <span style="color:var(--text-muted,#888);">Direct parent</span>';
+            if (p.builtAt) html += ' <span style="color:var(--text-muted,#888);">(' + (function(dt) { if (!dt) return ''; const d = new Date(dt); const diff = (Date.now() - d.getTime()) / 1000; if (diff < 60) return 'just now'; if (diff < 3600) return Math.floor(diff / 60) + 'm ago'; if (diff < 86400) return Math.floor(diff / 3600) + 'h ago'; return Math.floor(diff / 86400) + 'd ago'; })(p.builtAt) + ')</span>';
+            if (!p.normCheckPassed) html += ' <span style="color:var(--err,#e65c5c);">⚠ norm check failed</span>';
             html += '</button>';
         });
 
@@ -2027,6 +2030,7 @@ async function _fetchSidecarsForPreset() {
             btn.addEventListener('click', async () => {
                 const idx = parseInt(btn.getAttribute('data-sidecar-index'));
                 const sidecar = data.sidecars[idx];
+                const p = sidecar.provenance || sidecar;
 
                 // Set the companion model path
                 if (modelInput) {
@@ -2035,10 +2039,10 @@ async function _fetchSidecarsForPreset() {
 
                 // Update trust state for pin status display
                 _speculativeTrustState.repoId = sidecar.slug;
-                _speculativeTrustState.revision = sidecar.sha256 ? sidecar.sha256.substring(0, 12) : '';
+                _speculativeTrustState.revision = p.sha256 ? p.sha256.substring(0, 12) : '';
                 _speculativeTrustState.trustRequired = false;
-                _speculativeTrustState.estimatedMemoryBytes = sidecar.estimatedMemoryBytes;
-                _speculativeTrustState.resolvedAt = sidecar.builtAt;
+                _speculativeTrustState.estimatedMemoryBytes = p.estimatedMemoryBytes;
+                _speculativeTrustState.resolvedAt = p.builtAt;
                 _speculativeTrustState.stale = false;
                 _renderSpeculativePinStatus();
             });

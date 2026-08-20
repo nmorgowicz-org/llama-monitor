@@ -47,6 +47,27 @@ pub struct SidecarProvenance {
     /// Maximum MTP depth if known.
     #[serde(default)]
     pub mtp_depth_max: Option<i64>,
+    /// Provenance schema version emitted by the builder.
+    #[serde(default)]
+    pub schema_version: Option<u32>,
+    /// How the head was produced: recipe reconstruction or direct parent graft.
+    #[serde(default)]
+    pub repair_mode: Option<String>,
+    /// SHA-256 of the exact merge recipe, when recipe reconstruction was used.
+    #[serde(default)]
+    pub recipe_digest: Option<String>,
+    /// Merge method used for recipe reconstruction (currently `nuslerp`).
+    #[serde(default)]
+    pub recipe_method: Option<String>,
+    /// Number of leaf parent sources in the recipe.
+    #[serde(default)]
+    pub recipe_parent_count: Option<usize>,
+    /// Arithmetic precision used while reconstructing the recipe head.
+    #[serde(default)]
+    pub recipe_precision: Option<String>,
+    /// Served requalification status, if the sidecar has been tested after repair.
+    #[serde(default)]
+    pub requalification_status: Option<String>,
 }
 
 /// One discovered local sidecar.
@@ -201,6 +222,12 @@ fn parse_provenance(
         .get("source")
         .and_then(|s| s.get("trunk"))
         .and_then(|v| v.as_str())
+        .or_else(|| {
+            provenance
+                .get("target")
+                .and_then(|target| target.get("snapshot"))
+                .and_then(|v| v.as_str())
+        })
         .unwrap_or("")
         .to_string();
 
@@ -208,18 +235,31 @@ fn parse_provenance(
         .get("source")
         .and_then(|s| s.get("bf16_source"))
         .and_then(|v| v.as_str())
+        .or_else(|| {
+            provenance
+                .get("source")
+                .and_then(|source| source.get("snapshot"))
+                .and_then(|v| v.as_str())
+        })
         .unwrap_or("")
         .to_string();
 
     let built_at = provenance
         .get("built_at")
         .and_then(|v| v.as_str())
+        .or_else(|| provenance.get("created_at").and_then(|v| v.as_str()))
         .unwrap_or("")
         .to_string();
 
     let sha256 = provenance
         .get("sha256")
         .and_then(|v| v.as_str())
+        .or_else(|| {
+            provenance
+                .get("validation")
+                .and_then(|validation| validation.get("sha256"))
+                .and_then(|v| v.as_str())
+        })
         .unwrap_or("")
         .to_string();
 
@@ -228,7 +268,27 @@ fn parse_provenance(
         .get("validation")
         .and_then(|v| v.get("all_positive"))
         .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+        .unwrap_or_else(|| {
+            provenance
+                .get("validation")
+                .and_then(|v| v.get("pre_fc_norm_means"))
+                .and_then(|v| v.as_object())
+                .map(|means| {
+                    !means.is_empty()
+                        && means.values().all(|value| {
+                            value
+                                .as_f64()
+                                .is_some_and(|mean| mean.is_finite() && mean > 0.0)
+                        })
+                })
+                .unwrap_or(false)
+        });
+
+    let recipe = provenance.get("recipe");
+    let recipe_parent_count = recipe
+        .and_then(|value| value.get("parents"))
+        .and_then(|value| value.as_array())
+        .map(Vec::len);
 
     // Quantization hint: if the slug or bf16_source contains quant info
     let quantization = {
@@ -267,6 +327,32 @@ fn parse_provenance(
             estimated_memory_bytes,
             quantization,
             mtp_depth_max: None,
+            schema_version: provenance
+                .get("schema_version")
+                .and_then(|value| value.as_u64())
+                .and_then(|value| u32::try_from(value).ok()),
+            repair_mode: provenance
+                .get("repair_mode")
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned),
+            recipe_digest: recipe
+                .and_then(|value| value.get("digest"))
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned),
+            recipe_method: recipe
+                .and_then(|value| value.get("method"))
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned),
+            recipe_parent_count,
+            recipe_precision: recipe
+                .and_then(|value| value.get("compute_dtype"))
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned),
+            requalification_status: provenance
+                .get("requalification")
+                .and_then(|value| value.get("status"))
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned),
         }),
     })
 }
@@ -314,8 +400,43 @@ mod tests {
 
     #[test]
     fn provenance_parsed_correctly() {
-        // This tests parse_provenance with a realistic provenance.json
-        // (skipped for now since it requires a temp dir setup; the real
-        // integration test is the API endpoint)
+        let dir = tempfile::tempdir().unwrap();
+        let weights = dir.path().join(SIDECAR_WEIGHTS);
+        let provenance_path = dir.path().join(PROVENANCE_FILE);
+        std::fs::write(&weights, b"fixture").unwrap();
+        std::fs::write(
+            &provenance_path,
+            serde_json::json!({
+                "schema_version": 2,
+                "status": "repaired",
+                "repair_mode": "recipe_reconstruction",
+                "target": {"snapshot": "/models/brainwaves"},
+                "created_at": "2026-08-20T12:00:00Z",
+                "validation": {"pre_fc_norm_means": {
+                    "pre_fc_norm_embedding.weight": 1.0,
+                    "pre_fc_norm_hidden.weight": 1.0
+                }},
+                "recipe": {
+                    "digest": "abc123",
+                    "method": "nuslerp",
+                    "compute_dtype": "bfloat16",
+                    "parents": [{"repo_id": "parent/a"}, {"repo_id": "parent/b"}]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let entry =
+            parse_provenance("brainwaves-recipe", dir.path(), &weights, &provenance_path).unwrap();
+        let provenance = entry.provenance.unwrap();
+        assert_eq!(
+            provenance.repair_mode.as_deref(),
+            Some("recipe_reconstruction")
+        );
+        assert_eq!(provenance.recipe_method.as_deref(), Some("nuslerp"));
+        assert_eq!(provenance.recipe_parent_count, Some(2));
+        assert_eq!(provenance.recipe_precision.as_deref(), Some("bfloat16"));
+        assert!(provenance.norm_check_passed);
     }
 }

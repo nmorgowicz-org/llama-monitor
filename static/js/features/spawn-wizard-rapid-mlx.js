@@ -329,20 +329,23 @@ async function _fetchSpawnSidecars() {
     // Build sidecar list
     let html = '';
     data.sidecars.forEach((s, i) => {
-      const vram = s.estimatedMemoryBytes != null
-        ? '~' + (s.estimatedMemoryBytes >= 1073741824
-            ? (s.estimatedMemoryBytes / 1073741824).toFixed(1) + ' GB'
-            : Math.round(s.estimatedMemoryBytes / 1048576) + ' MB')
+      const p = s.provenance || s;
+      const vram = p.estimatedMemoryBytes != null
+          ? '~' + (p.estimatedMemoryBytes >= 1073741824
+            ? (p.estimatedMemoryBytes / 1073741824).toFixed(1) + ' GB'
+            : Math.round(p.estimatedMemoryBytes / 1048576) + ' MB')
         : '? VRAM';
 
-      const trunkShort = s.trunk ? s.trunk.split('/').pop() : '?';
+      const trunkShort = p.trunk ? p.trunk.split('/').pop() : '?';
 
       html += '<button type="button" class="hw-action-btn" data-sidecar-index="' + i + '" style="display:block; width:100%; text-align:left; padding:6px 8px; margin-bottom:4px; font-size:11px; background:var(--color-surface,#1a1d24); border:1px solid var(--color-border,#2a2d34); border-radius:4px; cursor:pointer;">';
       html += '<strong>' + DOMPurify.sanitize(s.slug) + '</strong> ';
       html += '<span style="color:var(--text-muted,#888);">' + vram + '</span>';
-      if (s.trunk) html += ' <span style="color:var(--text-muted,#888);">for ' + DOMPurify.sanitize(trunkShort) + '</span>';
-      if (s.builtAt) html += ' <span style="color:var(--text-muted,#888);">(' + _timeAgoSpawn(s.builtAt) + ')</span>';
-      if (!s.normCheckPassed) html += ' <span style="color:var(--err,#e65c5c);">⚠ norm check failed</span>';
+      if (p.trunk) html += ' <span style="color:var(--text-muted,#888);">for ' + DOMPurify.sanitize(trunkShort) + '</span>';
+      if (p.repairMode === 'recipe_reconstruction') html += ' <span style="color:var(--accent,#8cc8ff);">' + (p.requalificationStatus === 'passed' ? 'Recipe reconstructed · qualified' : 'Recipe reconstructed · awaiting requalification') + '</span>';
+      else if (p.repairMode === 'direct_parent') html += ' <span style="color:var(--text-muted,#888);">Direct parent</span>';
+      if (p.builtAt) html += ' <span style="color:var(--text-muted,#888);">(' + _timeAgoSpawn(p.builtAt) + ')</span>';
+      if (!p.normCheckPassed) html += ' <span style="color:var(--err,#e65c5c);">⚠ norm check failed</span>';
       html += '</button>';
     });
 
@@ -354,6 +357,7 @@ async function _fetchSpawnSidecars() {
       btn.addEventListener('click', async () => {
         const idx = parseInt(btn.getAttribute('data-sidecar-index'));
         const sidecar = data.sidecars[idx];
+        const p = sidecar.provenance || sidecar;
 
         // Set the companion model path
         if (modelInput) {
@@ -363,10 +367,10 @@ async function _fetchSpawnSidecars() {
 
         // Populate pin status from sidecar data
         h.speculativeTrustRepoId = sidecar.slug;
-        h.speculativeTrustRevision = sidecar.sha256 ? sidecar.sha256.substring(0, 12) : '';
+        h.speculativeTrustRevision = p.sha256 ? p.sha256.substring(0, 12) : '';
         h.speculativeTrustRequired = false; // local sidecars don't need trust
-        h.speculativeTrustEstimatedMemoryBytes = sidecar.estimatedMemoryBytes;
-        h.speculativeTrustResolvedAt = sidecar.builtAt;
+        h.speculativeTrustEstimatedMemoryBytes = p.estimatedMemoryBytes;
+        h.speculativeTrustResolvedAt = p.builtAt;
         h.speculativeTrustStale = false;
         _renderSpawnPinStatus();
         _updateSpawnTrustUI(h, !!h.speculativeEnabled);

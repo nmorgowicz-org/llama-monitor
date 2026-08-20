@@ -971,7 +971,7 @@ knowing early.
 ## Private tooling implementation note
 
 The MLX mirror now exists on private branch `fix/mlx-mtp-repair-tooling` at
-commit `22d661b` as `converter/repair_mtp_mlx.py`, with focused tests and
+commit `c4cfe32` as `converter/repair_mtp_mlx.py`, with focused tests and
 operator documentation. It performs header-first inspection, accepts both
 namespace conventions, assembles missing tensors from an explicitly chosen
 source, validates both `pre_fc_norm` tensors and architecture fields, writes an
@@ -1006,3 +1006,8 @@ Structural validation remains necessary but is not sufficient. Recipe-derived
 heads must proceed through served requalification using the same sampling
 settings as the target finetune, with acceptance rate and throughput recorded
 before the app presents the sidecar as ready.
+### Partial-parent qualification policy
+
+Parent coverage is allowed to be incomplete for a user-requested candidate, but the app must never present a renormalized or guessed tree as an exact recipe reconstruction. A missing parent is recorded explicitly with its tree position and coefficient; only zero-weight branches may be omitted without changing the result. Direct-parent substitution remains a lower-confidence fallback.
+
+The acceptance gate is evidence-based rather than an absolute promise: use a fixed, reproducible prompt set and sampling configuration, compare against the target's no-MTP and direct-parent controls, and record acceptance rate plus throughput. A 50% acceptance result may be usable when it beats the control and does not reduce throughput, but it is not sufficient by itself to mark a partial-parent candidate as ready. UI states remain `candidate`, `awaiting_requalification`, `qualified`, or `validation_failed`.
