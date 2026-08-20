@@ -407,20 +407,43 @@ fn api_vram_estimate_breakdown(
                         CompanionMemoryEvidence, CompanionType, ExternalCompanion, MtpConfig,
                         MtpMode,
                     };
-                    match config.model {
-                        Some(model) => MtpConfig {
+                match config.model {
+                    Some(model) => {
+                        // A managed local sidecar is a separate resident weight file. Use
+                        // its actual normalized `mtp.safetensors` size when available;
+                        // arbitrary or remote companion references remain unknown rather
+                        // than being presented as free memory.
+                        let local_bytes = model
+                            .starts_with('/')
+                            .then(|| {
+                                crate::inference::rapid_mlx::sidecar_inventory::estimate_local_companion_vram(
+                                    std::path::Path::new(&model),
+                                )
+                            })
+                            .flatten();
+                        let (total_bytes, weights_bytes, memory_evidence) =
+                            match local_bytes {
+                                Some(bytes) => (
+                                    bytes,
+                                    bytes,
+                                    CompanionMemoryEvidence::Approximate,
+                                ),
+                                None => (0, 0, CompanionMemoryEvidence::Unknown),
+                            };
+                        MtpConfig {
                             mode: MtpMode::External,
                             embedded_depth: 0,
                             external_drafter: Some(ExternalCompanion {
                                 label: "Rapid-MLX MTP sidecar".into(),
                                 companion_type: CompanionType::Drafter,
-                                total_bytes: 0,
-                                weights_bytes: 0,
+                                total_bytes,
+                                weights_bytes,
                                 kv_cache_bytes: 0,
                                 source: model,
-                                memory_evidence: CompanionMemoryEvidence::Unknown,
+                                memory_evidence,
                             }),
-                        },
+                        }
+                    }
                         None => MtpConfig {
                             mode: MtpMode::Embedded,
                             embedded_depth: arch.mtp_depth,

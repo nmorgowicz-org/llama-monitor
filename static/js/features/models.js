@@ -6,7 +6,7 @@ import { escapeHtml } from '../core/format.js';
 import { getPlatformInfo } from '../core/platform-info.js';
 import { resolveNotification, showToast, showToastWithActions } from './toast.js';
 import Router from './router.js';
-import { _showConfirm } from './presets.js';
+import { _showConfirm, openPresetMtpRepairForModel } from './presets.js';
 import { openCardPanel, openSpawnWizard } from './spawn-wizard.js';
 import { buildEstimateBody } from './vram-estimate.js';
 import {
@@ -919,6 +919,23 @@ function buildModelCard(m) {
             explainBtn.disabled = false;
         });
         actions.appendChild(explainBtn);
+    }
+
+    if (!companion
+        && inventory.format === 'mlx'
+        && inventory.lifecycle === 'ready'
+        && inventory.supportedBackends.includes('rapid_mlx')
+        && (m.path || '').startsWith('/')) {
+        const repairBtn = document.createElement('button');
+        repairBtn.type = 'button';
+        repairBtn.className = 'mm-action-btn mm-action-btn--switch';
+        repairBtn.textContent = 'Repair MTP sidecar';
+        repairBtn.title = 'Build, reassemble, or validate a managed MTP sidecar for this MLX trunk';
+        repairBtn.addEventListener('click', () => {
+            closeModelsModal();
+            openPresetMtpRepairForModel(m.path, name);
+        });
+        actions.appendChild(repairBtn);
     }
 
     if (m.resume_download) {

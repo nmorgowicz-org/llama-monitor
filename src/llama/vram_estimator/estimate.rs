@@ -714,6 +714,12 @@ pub fn full_estimate(
         Some(cfg) => cfg.primary_breakdown_mtp_bytes(model_size_bytes),
         None => mtp_overhead_bytes(model_size_bytes, arch.mtp_depth),
     };
+    let external_companion_bytes = mtp_config
+        .as_ref()
+        .filter(|cfg| cfg.mode == super::workload_scenarios::MtpMode::External)
+        .and_then(|cfg| cfg.external_drafter.as_ref())
+        .map(|companion| companion.total_bytes)
+        .unwrap_or(0);
     // Platform-specific overhead, both calibrated against real VRAM/footprint measurements:
     // discrete GPUs → RTX-5090 model (scratch + MoE/Gemma base + context-scaling attention
     // buffers); unified memory → Apple M5 Max model (per-layer base + ~6.5% of KV).
@@ -734,6 +740,7 @@ pub fn full_estimate(
         + linear_state
         + mmproj
         + mtp
+        + external_companion_bytes
         + turboquant_transient_peak
         + overhead
         + mlx_cache;

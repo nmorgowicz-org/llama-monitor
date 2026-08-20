@@ -1,8 +1,8 @@
 # 2026-08-20 — Rapid-MLX non-greedy MTP + sidecar assembly
 
 Branch: `fix/rapid-mlx-nongreedy-mtp`
-Status: IN PROGRESS — Phases 3–4 implementation complete; final fixture evidence
-is recorded below.
+Status: IN PROGRESS — Phases 3–5 implementation complete; final Phase 5
+validation evidence is recorded below.
 
 ## 2026-08-20 execution findings and tooling boundary
 
@@ -739,6 +739,30 @@ and `--mlx-model` typed by hand, and nothing in the app invokes or offers it.
       the actual emitted argv, not the UI state.
 
 ---
+
+### Phase 5 implementation evidence — 2026-08-20
+
+- `effective_speculative_config()` now auto-selects only a validated managed
+  sidecar for an absolute, allowlisted Rapid-MLX trunk. An explicit manual
+  sidecar remains intact for model aliases and local trunks.
+- The wizard matches sidecars by provenance trunk, clears a stale
+  auto-selected path after a model change, keeps typed/list-selected paths as
+  manual overrides, and displays the degraded reason when no usable sidecar
+  matches.
+- Local `mtp.safetensors` bytes are carried as an approximate external
+  companion in the canonical VRAM estimate and included in `total_bytes`.
+- Rust tests cover eligible/non-eligible inventory selection, manual override
+  preservation, external companion accounting, and exact emitted
+  `--speculative-config` JSON. The Rapid-MLX wizard capture was rerun outside
+  the sandbox on the existing `spawn-wizard-rapid-guided-baseline` scenario;
+  its receipt is under `docs/screenshots/artifacts/wizard-rapidmlx/`.
+- Validation: `cargo clippy -- -D warnings`, `cargo test` (1336 passed, 14
+  ignored), `npm run validate-js`, `npm run lint`, `cargo build --release`,
+  `cargo fmt -- --check`, and `git diff --check` pass.
+
+### Phase 5 UI completion note
+
+The preset editor now exposes first-class build/repair and validate actions for the selected local MLX trunk, accepting a direct MLX source, NuSLERP recipe, or pinned BF16 source. Repair and validation buttons remain disabled for the full managed job lifecycle, including status-fetch errors, so concurrent jobs cannot be launched. Models Library local MLX cards open this same shared repair surface with the trunk preselected.
 
 ## Phase 6 — Requalification and verdict recording
 

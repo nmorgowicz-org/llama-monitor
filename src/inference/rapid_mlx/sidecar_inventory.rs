@@ -23,6 +23,7 @@ const SIDECAR_WEIGHTS: &str = "mtp.safetensors";
 
 /// The file produced by the build script with provenance metadata.
 const PROVENANCE_FILE: &str = "provenance.json";
+const MTP_TRUNK_MODEL_TYPES: &[&str] = &["qwen3_5", "qwen3_5_moe", "hy_v3"];
 
 /// Provenance data for a locally-built MTP sidecar.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,8 +141,10 @@ fn slugify_trunk_name(trunk: &Path) -> String {
 /// Discover all sidecars under the managed root. Returns an empty list if the
 /// root does not exist (no sidecars built yet).
 pub fn discover_sidecars() -> Result<Vec<SidecarEntry>> {
-    let root = sidecar_root();
+    discover_sidecars_at(&sidecar_root())
+}
 
+fn discover_sidecars_at(root: &Path) -> Result<Vec<SidecarEntry>> {
     // No root = no sidecars. Not an error.
     if !root.exists() {
         return Ok(Vec::new());
@@ -149,7 +152,7 @@ pub fn discover_sidecars() -> Result<Vec<SidecarEntry>> {
 
     let mut entries = Vec::new();
 
-    for entry in std::fs::read_dir(&root).context("Failed to read sidecar root directory")? {
+    for entry in std::fs::read_dir(root).context("Failed to read sidecar root directory")? {
         let entry = entry.context("Failed to read sidecar directory entry")?;
         let dir_path = entry.path();
 
@@ -402,14 +405,50 @@ pub fn estimate_local_companion_vram(companion_path: &Path) -> Option<u64> {
         .map(|m| m.len())
 }
 
-/// Check if a companion path belongs to a known sidecar in the inventory.
-/// Returns the sidecar entry if found, `None` otherwise.
-#[allow(dead_code)]
-pub fn find_sidecar_for_path(companion_path: &Path) -> Option<SidecarEntry> {
-    discover_sidecars().ok().and_then(|entries| {
-        entries
-            .into_iter()
-            .find(|entry| entry.path == companion_path.to_string_lossy() && is_usable(entry))
+/// Check if a trunk is an MTP-eligible Rapid-MLX architecture.
+///
+/// This mirrors Rapid-MLX's model-type gate. Tensor metadata or a sidecar
+/// alone must never make an unrelated MLX model eligible for speculation.
+pub fn is_mtp_eligible_trunk(trunk: &Path) -> bool {
+    let Ok(raw) = std::fs::read_to_string(trunk.join("config.json")) else {
+        return false;
+    };
+    let Ok(config) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return false;
+    };
+    let model_type = config
+        .get("model_type")
+        .or_else(|| config.get("text_config").and_then(|v| v.get("model_type")))
+        .and_then(|v| v.as_str());
+    model_type.is_some_and(|value| MTP_TRUNK_MODEL_TYPES.contains(&value))
+}
+
+fn paths_match(left: &str, right: &Path) -> bool {
+    left == right.to_string_lossy()
+        || std::fs::canonicalize(left)
+            .ok()
+            .zip(std::fs::canonicalize(right).ok())
+            .is_some_and(|(left, right)| left == right)
+}
+
+/// Find the validated managed sidecar for a trunk, or accept a managed
+/// sidecar directory for compatibility with callers that already have one.
+pub fn find_sidecar_for_path(trunk_or_sidecar: &Path) -> Option<SidecarEntry> {
+    find_sidecar_for_root(&sidecar_root(), trunk_or_sidecar)
+}
+
+fn find_sidecar_for_root(root: &Path, trunk_or_sidecar: &Path) -> Option<SidecarEntry> {
+    discover_sidecars_at(root).ok().and_then(|entries| {
+        entries.into_iter().find(|entry| {
+            let Some(provenance) = entry.provenance.as_ref() else {
+                return false;
+            };
+            let matches_trunk = paths_match(&provenance.trunk, trunk_or_sidecar);
+            let matches_sidecar = paths_match(&entry.path, trunk_or_sidecar);
+            (matches_trunk || matches_sidecar)
+                && is_usable(entry)
+                && is_mtp_eligible_trunk(Path::new(&provenance.trunk))
+        })
     })
 }
 
@@ -428,20 +467,75 @@ fn is_usable(entry: &SidecarEntry) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn test_sidecar_root(dir: &Path) {
-        let _ = SIDECAR_ROOT.set(dir.join(SIDECAR_SUBDIR));
-    }
 
     #[test]
     fn empty_root_returns_no_entries() {
         let dir = tempfile::tempdir().unwrap();
-        test_sidecar_root(dir.path());
+        let root = dir.path().join(SIDECAR_SUBDIR);
+        assert!(discover_sidecars_at(&root).unwrap().is_empty());
+    }
 
-        // Note: SIDECAR_ROOT is a OnceLock, so after set() it's immutable.
-        // For this test we just check that a non-existent root returns empty.
-        // In practice, the root would be set once at startup.
-        let root = sidecar_root();
-        assert!(!root.exists());
+    #[test]
+    fn eligible_trunk_selects_usable_matching_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let trunk = dir.path().join("qwen-trunk");
+        let root = dir.path().join("sidecars");
+        let sidecar = root.join("qwen-trunk");
+        std::fs::create_dir_all(&trunk).unwrap();
+        std::fs::create_dir_all(&sidecar).unwrap();
+        std::fs::write(
+            trunk.join("config.json"),
+            serde_json::json!({"model_type": "qwen3_5"}).to_string(),
+        )
+        .unwrap();
+        std::fs::write(sidecar.join(SIDECAR_WEIGHTS), b"weights").unwrap();
+        std::fs::write(
+            sidecar.join(PROVENANCE_FILE),
+            serde_json::json!({
+                "status": "candidate",
+                "trunk": trunk,
+                "bf16_source": "parent/qwen",
+                "built_at": "2026-08-20T00:00:00Z",
+                "sha256": "digest",
+                "norm_check_passed": true
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let entry = find_sidecar_for_root(&root, &trunk).expect("matching sidecar");
+        assert_eq!(entry.slug, "qwen-trunk");
+    }
+
+    #[test]
+    fn non_allowlisted_trunk_cannot_adopt_a_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let trunk = dir.path().join("llama-trunk");
+        let root = dir.path().join("sidecars");
+        let sidecar = root.join("llama-trunk");
+        std::fs::create_dir_all(&trunk).unwrap();
+        std::fs::create_dir_all(&sidecar).unwrap();
+        std::fs::write(
+            trunk.join("config.json"),
+            serde_json::json!({"model_type": "llama"}).to_string(),
+        )
+        .unwrap();
+        std::fs::write(sidecar.join(SIDECAR_WEIGHTS), b"weights").unwrap();
+        std::fs::write(
+            sidecar.join(PROVENANCE_FILE),
+            serde_json::json!({
+                "status": "qualified",
+                "trunk": trunk,
+                "bf16_source": "parent/llama",
+                "built_at": "2026-08-20T00:00:00Z",
+                "sha256": "digest",
+                "norm_check_passed": true
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        assert!(find_sidecar_for_root(&root, &trunk).is_none());
     }
 
     #[test]

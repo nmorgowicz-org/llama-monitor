@@ -20,6 +20,7 @@ import {
   applyRapidMlxDefaults,
   renderRapidExclusionWarnings,
   scheduleRapidMlxProfileFetch,
+  refreshRapidMlxSidecars,
 } from './spawn-wizard-rapid-mlx.js';
 import {
   kvBpe,
@@ -718,7 +719,8 @@ export const wizardState = {
     speculativeEnabled: false,
     speculativeSource: 'embedded',
     speculativeModel: '',
-    speculativeTokens: 2,
+    speculativeModelAutoSelected: false,
+    speculativeTokens: 3,
     speculativeDisableAutoK: false,
     speculativeTrustRequired: false,
     speculativeTrustConsent: false,
@@ -1108,7 +1110,8 @@ function resetWizardState() {
   wizardState.hardware.speculativeEnabled = false;
   wizardState.hardware.speculativeSource = 'embedded';
   wizardState.hardware.speculativeModel = '';
-  wizardState.hardware.speculativeTokens = 2;
+  wizardState.hardware.speculativeModelAutoSelected = false;
+  wizardState.hardware.speculativeTokens = 3;
   wizardState.hardware.speculativeDisableAutoK = false;
   wizardState.hardware.autoToolChoice = false;
   wizardState.hardware.workloadScenario = 'interactive_coding_agent';
@@ -3083,6 +3086,7 @@ export function onModelPathChanged() {
     // model directory (see build_launch_argv / create_template_overlay in
     // src/inference/rapid_mlx/mod.rs), same field name as llama.cpp.
     autoInstallChatTemplate();
+    refreshRapidMlxSidecars();
     refreshStepGuardrails();
     return;
   }

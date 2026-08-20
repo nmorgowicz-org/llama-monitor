@@ -1271,6 +1271,7 @@ async function autoTunePreset() {
 }
 
 export function openPresetModal(mode, section, seedPreset = null) {
+    _speculativeSidecarAutoSelected = false;
     const modal = document.getElementById('preset-modal');
     const title = document.getElementById('modal-title');
     const subtitle = document.getElementById('preset-editor-subtitle');
@@ -1866,6 +1867,39 @@ function _ensureUbatchForImageTokens(imageMaxTokens) {
     }
 }
 
+export function openPresetMtpRepairForModel(modelPath, modelName = 'MLX model') {
+    const target = (modelPath || '').trim();
+    if (!target.startsWith('/')) {
+        showToast('MTP sidecar repair requires a local MLX model directory.', 'warn');
+        return;
+    }
+
+    openPresetModal('new', 'advanced', {
+        backend: 'rapid_mlx',
+        name: `${modelName} · MTP sidecar repair`,
+        model_path: '',
+        rapid_mlx: {
+            model_source: { kind: 'mlx_directory', path: target },
+        },
+    });
+    _configureBackendPresetEditor(newPresetSeed);
+    setVal('modal-port', '');
+
+    const enabled = document.getElementById('modal-rapid-speculative-enabled');
+    const source = document.getElementById('modal-rapid-speculative-source');
+    if (enabled) enabled.checked = true;
+    if (source) source.value = 'external';
+    enabled?.dispatchEvent(new Event('change', { bubbles: true }));
+    source?.dispatchEvent(new Event('change', { bubbles: true }));
+    _syncRapidSpeculativeEditor();
+    document.getElementById('modal-rapid-speculative-sidecars-wrap')?.style.setProperty('display', 'block', 'important');
+
+    const repairToggle = document.getElementById('modal-rapid-speculative-repair-toggle');
+    const repairForm = document.getElementById('modal-rapid-speculative-repair-form');
+    repairToggle?.closest('details')?.setAttribute('open', '');
+    if (repairToggle && repairForm?.style.display === 'none') repairToggle.click();
+}
+
 function _toggleSpecFields(specType) {
     const hasNgram = specType.includes('ngram');
     const hasMtp   = specType.includes('draft-mtp');
@@ -1982,6 +2016,8 @@ function _configureBackendPresetEditor(preset) {
     configureMlxPresetEditor(modal, isRapid);
 }
 
+let _speculativeSidecarAutoSelected = false;
+
 async function _fetchSidecarsForPreset() {
     const listEl = document.getElementById('modal-rapid-speculative-sidecars-list');
     if (!listEl) return;
@@ -1998,9 +2034,51 @@ async function _fetchSidecarsForPreset() {
         }
 
         const modelInput = document.getElementById('modal-rapid-speculative-model');
+        const trunkInput = document.getElementById('modal-model-path');
+        const selectedTrunk = (trunkInput?.value || '').trim();
+        const normalizePath = value => String(value || '').replace(/[\\/]+$/, '');
+        const usableSidecar = (sidecar) => {
+            const provenance = sidecar.provenance || sidecar;
+            return sidecar.hasWeights !== false
+                && sidecar.hasProvenance !== false
+                && provenance.normCheckPassed !== false
+                && ['candidate', 'qualified', 'built_unvalidated_online'].includes(provenance.status);
+        };
+        const matchingSidecar = selectedTrunk.startsWith('/')
+            ? data.sidecars.find((sidecar) => {
+                if (!usableSidecar(sidecar)) return false;
+                const provenance = sidecar.provenance || sidecar;
+                return normalizePath(provenance.trunk) === normalizePath(selectedTrunk);
+            })
+            : null;
+
+        // A duplicated/saved preset keeps an explicitly persisted sidecar. When
+        // the external field is empty, select the validated sidecar registered
+        // for the preset's local MLX trunk and keep that path editable.
+        if (matchingSidecar && (!modelInput?.value.trim() || _speculativeSidecarAutoSelected)) {
+            if (modelInput) modelInput.value = matchingSidecar.path;
+            _speculativeSidecarAutoSelected = true;
+            updatePresetVram();
+        } else if (!matchingSidecar && _speculativeSidecarAutoSelected) {
+            if (modelInput) modelInput.value = '';
+            _speculativeSidecarAutoSelected = false;
+            updatePresetVram();
+        }
 
         // Build sidecar list
         let html = '';
+        if (matchingSidecar && _speculativeSidecarAutoSelected) {
+            html += '<div class="pe-field-hint" style="color:var(--success,#5ce68a); margin-bottom:5px;">Auto-selected validated sidecar for this trunk. The path remains editable below.</div>';
+        } else if (!matchingSidecar) {
+            const reason = selectedTrunk.startsWith('/')
+                ? (modelInput?.value.trim()
+                    ? 'No managed sidecar matches this trunk; the existing manual path is preserved—verify the pairing before launch.'
+                    : 'No validated sidecar is registered for this trunk; speculation will stay off until one is selected.')
+                : (modelInput?.value.trim()
+                    ? 'Managed auto-selection is unavailable for this model reference; the explicit sidecar path is preserved.'
+                    : 'Select a local MLX trunk or enter an explicit local sidecar.');
+            html += '<div class="pe-field-hint" style="color:var(--warn,#e6a41c); margin-bottom:5px;">' + reason + '</div>';
+        }
         data.sidecars.forEach((s, i) => {
             const p = s.provenance || s;
             const vram = p.estimatedMemoryBytes != null
@@ -2035,6 +2113,8 @@ async function _fetchSidecarsForPreset() {
                 // Set the companion model path
                 if (modelInput) {
                     modelInput.value = sidecar.path;
+                    _speculativeSidecarAutoSelected = false;
+                    updatePresetVram();
                 }
 
                 // Update trust state for pin status display
@@ -2077,6 +2157,138 @@ function _syncRapidSpeculativeEditor() {
         }
     }
 }
+
+function _syncPresetMtpRepairKind() {
+    const kind = document.getElementById('modal-rapid-speculative-repair-kind')?.value || 'source';
+    const revisionLabel = document.getElementById('modal-rapid-speculative-repair-revision-label');
+    const revisionInput = document.getElementById('modal-rapid-speculative-repair-revision');
+    const isBf16 = kind === 'bf16';
+    if (revisionLabel) revisionLabel.style.display = isBf16 ? '' : 'none';
+    if (revisionInput) revisionInput.style.display = isBf16 ? '' : 'none';
+}
+
+function _setPresetMtpRepairStatus(message, tone = 'muted') {
+    const status = document.getElementById('modal-rapid-speculative-repair-status');
+    if (!status) return;
+    status.textContent = message;
+    status.style.display = message ? '' : 'none';
+    status.style.color = tone === 'error'
+        ? 'var(--err,#e65c5c)'
+        : tone === 'success' ? 'var(--success,#5ce68a)' : 'var(--text-muted,#888)';
+}
+
+let _presetMtpRepairJobId = null;
+
+function _setPresetMtpRepairButtonsDisabled(disabled) {
+    const startButton = document.getElementById('modal-rapid-speculative-repair-start');
+    const validateButton = document.getElementById('modal-rapid-speculative-repair-validate');
+    if (startButton) startButton.disabled = disabled;
+    if (validateButton) validateButton.disabled = disabled;
+}
+
+function _finishPresetMtpRepair(jobId) {
+    if (_presetMtpRepairJobId !== jobId) return;
+    _presetMtpRepairJobId = null;
+    _setPresetMtpRepairButtonsDisabled(false);
+}
+
+async function _pollPresetMtpRepair(jobId) {
+    try {
+        const response = await fetch('/api/rapid-mlx/mtp-repair/' + encodeURIComponent(jobId), {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        const data = await response.json().catch(() => ({}));
+        const job = data.job;
+        if (!response.ok || !job) throw new Error(data.error || 'repair job status unavailable');
+        _setPresetMtpRepairStatus(job.message || `${job.phase || 'working'}…`);
+        if (job.status === 'completed') {
+            _setPresetMtpRepairStatus('Sidecar candidate registered. Served requalification is still required.', 'success');
+            await _fetchSidecarsForPreset();
+            _syncRapidSpeculativeEditor();
+            updatePresetVram();
+            _finishPresetMtpRepair(jobId);
+            return;
+        }
+        if (job.status === 'failed' || job.status === 'cancelled') {
+            _setPresetMtpRepairStatus(job.error || job.message || 'Sidecar repair did not complete.', 'error');
+            _finishPresetMtpRepair(jobId);
+            return;
+        }
+        window.setTimeout(() => _pollPresetMtpRepair(jobId), 1000);
+    } catch (error) {
+        _setPresetMtpRepairStatus('Repair status failed: ' + error.message, 'error');
+        _finishPresetMtpRepair(jobId);
+    }
+}
+
+async function _startPresetMtpRepair(operation = 'repair') {
+    if (_presetMtpRepairJobId) {
+        _setPresetMtpRepairStatus('A sidecar job is already running. Wait for it to finish.', 'error');
+        return;
+    }
+    const target = document.getElementById('modal-model-path')?.value.trim() || '';
+    if (!target.startsWith('/')) {
+        _setPresetMtpRepairStatus('Choose a local MLX trunk before starting a managed sidecar job.', 'error');
+        return;
+    }
+    const payload = { target, operation };
+    if (operation === 'repair') {
+        const kind = document.getElementById('modal-rapid-speculative-repair-kind')?.value || 'source';
+        const source = document.getElementById('modal-rapid-speculative-repair-source')?.value.trim() || '';
+        if (!source) {
+            _setPresetMtpRepairStatus('Enter a source directory, recipe path, or BF16 repository.', 'error');
+            return;
+        }
+        if (kind === 'recipe') {
+            payload.recipe = source;
+        } else if (kind === 'bf16') {
+            payload.bf16Source = source;
+            payload.bf16Revision = document.getElementById('modal-rapid-speculative-repair-revision')?.value.trim() || '';
+        } else {
+            payload.source = source;
+            payload.sourceFormat = 'mlx';
+        }
+    }
+
+    _setPresetMtpRepairButtonsDisabled(true);
+    _setPresetMtpRepairStatus(operation === 'validate' ? 'Starting sidecar validation…' : 'Starting sidecar repair…');
+    try {
+        const response = await fetch('/api/rapid-mlx/mtp-repair', {
+            method: 'POST',
+            headers: {
+                ...(window.authHeaders ? window.authHeaders() : {}),
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.job?.jobId) throw new Error(data.error || 'could not start repair');
+        _presetMtpRepairJobId = data.job.jobId;
+        _pollPresetMtpRepair(data.job.jobId);
+    } catch (error) {
+        _setPresetMtpRepairStatus('Could not start sidecar job: ' + error.message, 'error');
+        _setPresetMtpRepairButtonsDisabled(false);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const toggle = document.getElementById('modal-rapid-speculative-repair-toggle');
+    const form = document.getElementById('modal-rapid-speculative-repair-form');
+    toggle?.addEventListener('click', () => {
+        if (!form) return;
+        const open = form.style.display !== 'none';
+        form.style.display = open ? 'none' : '';
+        toggle.textContent = open ? 'Build / repair sidecar' : 'Hide sidecar builder';
+        if (!open) _syncPresetMtpRepairKind();
+    });
+    document.getElementById('modal-rapid-speculative-repair-kind')
+        ?.addEventListener('change', _syncPresetMtpRepairKind);
+    document.getElementById('modal-rapid-speculative-repair-start')
+        ?.addEventListener('click', () => _startPresetMtpRepair('repair'));
+    document.getElementById('modal-rapid-speculative-repair-validate')
+        ?.addEventListener('click', () => _startPresetMtpRepair('validate'));
+    _syncPresetMtpRepairKind();
+});
 
 document.addEventListener('change', (event) => {
     if (event.target?.id === 'modal-rapid-speculative-enabled' || event.target?.id === 'modal-rapid-speculative-source') {
@@ -2282,6 +2494,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!modelInput) return;
 
     modelInput.addEventListener('input', () => {
+        _speculativeSidecarAutoSelected = false;
         const value = (modelInput.value || '').trim();
         if (_speculativeTrustState.timeout) clearTimeout(_speculativeTrustState.timeout);
         if (!value || _speculativeTrustState.loading) return;
@@ -3220,6 +3433,10 @@ document.getElementById('modal-model-path')?.addEventListener('input', () => {
         _presetRapidMlxPrefillExplicit = true;
     });
     _schedulePresetRapidMlxProfile();
+    if (document.getElementById('modal-rapid-speculative-enabled')?.checked
+        && document.getElementById('modal-rapid-speculative-source')?.value === 'external') {
+        _fetchSidecarsForPreset();
+    }
 });
 
 // ── Rapid-MLX live model profile for preset editor ────────────────────────────

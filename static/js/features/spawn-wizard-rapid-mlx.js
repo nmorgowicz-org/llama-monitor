@@ -325,9 +325,54 @@ async function _fetchSpawnSidecars() {
 
     const h = wizardState.hardware;
     const modelInput = document.getElementById('spawn-rapid-speculative-model');
+    const selectedTrunk = (wizardState.model.path || '').trim();
+    const normalizePath = value => String(value || '').replace(/[\\/]+$/, '');
+    const usableSidecar = (sidecar) => {
+      const provenance = sidecar.provenance || sidecar;
+      return sidecar.hasWeights !== false
+        && sidecar.hasProvenance !== false
+        && provenance.normCheckPassed !== false
+        && ['candidate', 'qualified', 'built_unvalidated_online'].includes(provenance.status);
+    };
+    const matchingSidecar = selectedTrunk.startsWith('/')
+      ? data.sidecars.find((sidecar) => {
+        if (!usableSidecar(sidecar)) return false;
+        const provenance = sidecar.provenance || sidecar;
+        return normalizePath(provenance.trunk) === normalizePath(selectedTrunk);
+      })
+      : null;
+
+    // Auto-selection is deliberately one-way: only an empty field or a value we
+    // previously selected automatically may be replaced. A typed path or a
+    // sidecar chosen from the list is the user's override and must survive a
+    // refresh or model-path change.
+    if (matchingSidecar && (!h.speculativeModel || h.speculativeModelAutoSelected)) {
+      h.speculativeModel = matchingSidecar.path;
+      h.speculativeModelAutoSelected = true;
+      if (modelInput) modelInput.value = matchingSidecar.path;
+      window.scheduleVramUpdate?.();
+    } else if (!matchingSidecar && h.speculativeModelAutoSelected) {
+      h.speculativeModel = '';
+      h.speculativeModelAutoSelected = false;
+      if (modelInput) modelInput.value = '';
+      _hideSpawnTrust();
+      window.scheduleVramUpdate?.();
+    }
 
     // Build sidecar list
     let html = '';
+    if (matchingSidecar && h.speculativeModelAutoSelected) {
+      html += '<div class="field-hint" style="color:var(--success,#5ce68a); margin-bottom:5px;">Auto-selected validated sidecar for this trunk. The path remains editable below.</div>';
+    } else if (!matchingSidecar) {
+      const reason = selectedTrunk.startsWith('/')
+        ? (h.speculativeModel
+          ? 'No managed sidecar matches this trunk; the existing manual path is preserved—verify the pairing before launch.'
+          : 'No validated sidecar is registered for this trunk; speculation will stay off until one is selected.')
+        : (h.speculativeModel
+          ? 'Managed auto-selection is unavailable for this model reference; the explicit sidecar path is preserved.'
+          : 'Select a local trunk or enter an explicit local sidecar; managed auto-selection is unavailable for this model reference.');
+      html += '<div class="field-hint" style="color:var(--warn,#e6a41c); margin-bottom:5px;">' + reason + '</div>';
+    }
     data.sidecars.forEach((s, i) => {
       const p = s.provenance || s;
       const vram = p.estimatedMemoryBytes != null
@@ -363,6 +408,8 @@ async function _fetchSpawnSidecars() {
         if (modelInput) {
           modelInput.value = sidecar.path;
           h.speculativeModel = sidecar.path;
+          h.speculativeModelAutoSelected = false;
+          window.scheduleVramUpdate?.();
         }
 
         // Populate pin status from sidecar data
@@ -382,6 +429,13 @@ async function _fetchSpawnSidecars() {
   }
 }
 
+export function refreshRapidMlxSidecars() {
+  const h = wizardState.hardware;
+  if (h.speculativeEnabled && h.speculativeSource === 'external') {
+    _fetchSpawnSidecars();
+  }
+}
+
 export function syncRapidSpeculativeFields() {
   const h = wizardState.hardware;
   if (dom.speculativeEnabledCheck) dom.speculativeEnabledCheck.checked = !!h.speculativeEnabled;
@@ -397,9 +451,9 @@ export function syncRapidSpeculativeFields() {
   if (modelWrap) modelWrap.style.display = enabled && h.speculativeSource === 'external' ? '' : 'none';
   const sidecarsWrap = document.getElementById('spawn-rapid-speculative-sidecars-wrap');
   if (sidecarsWrap) {
-    if (enabled && h.speculativeSource === 'external') {
-      sidecarsWrap.style.display = '';
-      _fetchSpawnSidecars();
+      if (enabled && h.speculativeSource === 'external') {
+        sidecarsWrap.style.display = '';
+        _fetchSpawnSidecars();
     } else {
       sidecarsWrap.style.display = 'none';
     }
@@ -507,7 +561,13 @@ export function bindRapidMlxAdvancedControls() {
        scheduleVramUpdate();
      });
    };
-    bindInput(dom.speculativeModelInput, 'speculativeModel');
+bindInput(dom.speculativeModelInput, 'speculativeModel');
+if (dom.speculativeModelInput && !dom.speculativeModelInput.dataset.sidecarOverrideBound) {
+      dom.speculativeModelInput.dataset.sidecarOverrideBound = '1';
+      dom.speculativeModelInput.addEventListener('input', () => {
+        wizardState.hardware.speculativeModelAutoSelected = false;
+      });
+    }
     if (dom.speculativeModelInput && !dom.speculativeModelInput.dataset.trustBound) {
       dom.speculativeModelInput.dataset.trustBound = '1';
       (function() {

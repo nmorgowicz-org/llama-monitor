@@ -1,5 +1,81 @@
 use super::*;
 
+#[test]
+fn external_mtp_sidecar_bytes_are_in_total_estimate() {
+    let arch = ModelArch {
+        n_layers: 32,
+        n_kv_heads: 8,
+        head_dim: 128,
+        ..Default::default()
+    };
+    let companion_bytes = 275_000_000;
+    let baseline = full_estimate(
+        2_000_000_000,
+        &arch,
+        4096,
+        "q8_0",
+        "q8_0",
+        1,
+        512,
+        0,
+        -1,
+        32 * 1024 * 1024 * 1024,
+        0,
+        true,
+        EstimatorOptions {
+            backend: Backend::RapidMlx,
+            evidence: EstimateEvidence::Approximate,
+            ..Default::default()
+        },
+    );
+    let with_sidecar = full_estimate(
+        2_000_000_000,
+        &arch,
+        4096,
+        "q8_0",
+        "q8_0",
+        1,
+        512,
+        0,
+        -1,
+        32 * 1024 * 1024 * 1024,
+        0,
+        true,
+        EstimatorOptions {
+            backend: Backend::RapidMlx,
+            evidence: EstimateEvidence::Approximate,
+            mtp_config: Some(workload_scenarios::MtpConfig {
+                mode: workload_scenarios::MtpMode::External,
+                embedded_depth: 0,
+                external_drafter: Some(workload_scenarios::ExternalCompanion {
+                    label: "Rapid-MLX MTP sidecar".into(),
+                    companion_type: workload_scenarios::CompanionType::Drafter,
+                    total_bytes: companion_bytes,
+                    weights_bytes: companion_bytes,
+                    kv_cache_bytes: 0,
+                    source: "/models/mtp-sidecar".into(),
+                    memory_evidence: workload_scenarios::CompanionMemoryEvidence::Approximate,
+                }),
+            }),
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(with_sidecar.mtp_bytes, 0);
+    assert_eq!(
+        with_sidecar
+            .external_companion
+            .as_ref()
+            .unwrap()
+            .total_bytes,
+        companion_bytes
+    );
+    assert_eq!(
+        with_sidecar.total_bytes - baseline.total_bytes,
+        companion_bytes
+    );
+}
+
 // Calibration: RTX 5090 32GB, Qwen3.6-27B Q4_K_M, 8 KV heads, 32 layers,
 // head_dim=128, mmproj=0.8GB, MTP depth 1, fit=1024 → ~212K context @ q8_0 KV
 fn qwen3_27b_arch() -> ModelArch {

@@ -3449,6 +3449,27 @@
                                 <div class="pe-field" id="modal-rapid-speculative-sidecars-wrap" style="display:none;">
                                     <label class="pe-label">Available sidecars</label>
                                     <div id="modal-rapid-speculative-sidecars-list" class="pe-field-hint" style="font-size:12px;"></div>
+                                    <div id="modal-rapid-speculative-repair-wrap" style="margin-top:8px;">
+                                        <button type="button" class="pe-action-btn" id="modal-rapid-speculative-repair-toggle">Build / repair sidecar</button>
+                                        <div id="modal-rapid-speculative-repair-form" style="display:none; margin-top:8px;">
+                                            <div class="pe-field-hint" style="margin-bottom:6px;">Uses the guarded local repair worker. The selected MLX/BF16 source or recipe is validated before a managed sidecar is registered.</div>
+                                            <label class="pe-label" for="modal-rapid-speculative-repair-kind">Repair source</label>
+                                            <select class="pe-select" id="modal-rapid-speculative-repair-kind">
+                                                <option value="source">MLX source directory</option>
+                                                <option value="recipe">NuSLERP recipe file</option>
+                                                <option value="bf16">BF16 parent / Hugging Face source</option>
+                                            </select>
+                                            <label class="pe-label" for="modal-rapid-speculative-repair-source" style="margin-top:6px;">Source or recipe path</label>
+                                            <input class="pe-input" id="modal-rapid-speculative-repair-source" placeholder="/path/to/source-or-recipe.json or owner/repo">
+                                            <label class="pe-label" for="modal-rapid-speculative-repair-revision" id="modal-rapid-speculative-repair-revision-label" style="display:none; margin-top:6px;">Pinned BF16 revision</label>
+                                            <input class="pe-input" id="modal-rapid-speculative-repair-revision" style="display:none;" placeholder="40-character commit SHA">
+                                            <div style="display:flex; gap:6px; margin-top:8px;">
+                                                <button type="button" class="pe-action-btn" id="modal-rapid-speculative-repair-start">Start repair</button>
+                                                <button type="button" class="pe-action-btn" id="modal-rapid-speculative-repair-validate">Validate current sidecar</button>
+                                            </div>
+                                            <div class="pe-field-hint" id="modal-rapid-speculative-repair-status" style="margin-top:6px; display:none;"></div>
+                                        </div>
+                                    </div>
                                 </div>
                                 <div class="pe-field" id="modal-rapid-speculative-model-wrap">
                                     <label class="pe-label" for="modal-rapid-speculative-model">Resolved sidecar</label>
