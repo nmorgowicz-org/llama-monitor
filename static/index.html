@@ -3453,7 +3453,7 @@
                                 <div class="pe-field" id="modal-rapid-speculative-model-wrap">
                                     <label class="pe-label" for="modal-rapid-speculative-model">Resolved sidecar</label>
                                     <input class="pe-input" id="modal-rapid-speculative-model" placeholder="/absolute/local-sidecar-path">
-                                <div class="pe-field-hint">Remote Hugging Face sidecars can be preflighted but cannot be launched at a pinned revision. Use an immutable local sidecar.</div>
+                                <div class="pe-field-hint">Remote Hugging Face sidecars can be preflighted, but launch requires an immutable local sidecar.</div>
                                 </div>
                                 <div class="pe-field" id="modal-rapid-speculative-pin-status-wrap" style="display:none;">
                                     <div class="pe-field-hint" id="modal-rapid-speculative-pin-status" style="display:flex; align-items:center; gap:6px; font-size:12px;"></div>
@@ -3468,7 +3468,7 @@
                                 </div>
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-rapid-speculative-tokens">Speculative tokens</label>
-                                    <select class="pe-select" id="modal-rapid-speculative-tokens"><option value="1">1</option><option value="2">2 — conservative</option><option value="3">3</option><option value="4">4</option><option value="6">6</option><option value="8">8 — maximum</option></select>
+                                    <select class="pe-select" id="modal-rapid-speculative-tokens"><option value="1">1</option><option value="2">2 — conservative</option><option value="3" selected>3</option><option value="4">4</option><option value="6">6</option><option value="8">8 — maximum</option></select>
                                 </div>
                                 <div class="pe-field">
                                     <label class="pe-label pe-toggle-label" for="modal-rapid-speculative-disable-auto-k">Disable automatic K selection</label>
@@ -4152,7 +4152,7 @@
                                          <option value="embedded" selected>Embedded prediction heads</option>
                                          <option value="external">External local sidecar</option>
                                      </select>
-                                       <div class="field-hint">Use an immutable local sidecar. Remote Hugging Face sidecars can be preflighted but cannot be launched at a pinned revision.</div>
+                                       <div class="field-hint">Use an immutable local sidecar. Remote Hugging Face sidecars can be preflighted, but launch requires an immutable local sidecar.</div>
                                   </div>
                                     <div class="hardware-field" id="spawn-rapid-speculative-sidecars-wrap" style="display:none;">
                                         <label>Available sidecars</label>
@@ -4179,7 +4179,7 @@
                                    </div>
                                  <div class="hardware-field" id="spawn-rapid-speculative-tokens-wrap" style="display:none;">
                                      <label for="spawn-rapid-speculative-tokens">Speculative tokens</label>
-                                     <select id="spawn-rapid-speculative-tokens"><option value="1">1</option><option value="2" selected>2 — conservative</option><option value="3">3</option><option value="4">4</option><option value="6">6</option><option value="8">8 — maximum</option></select>
+                                     <select id="spawn-rapid-speculative-tokens"><option value="1">1</option><option value="2">2 — conservative</option><option value="3" selected>3</option><option value="4">4</option><option value="6">6</option><option value="8">8 — maximum</option></select>
                                  </div>
                                  <div class="hardware-field" id="spawn-rapid-speculative-auto-k-wrap" style="display:none;">
                                      <label class="kv-unified-toggle" for="spawn-rapid-speculative-disable-auto-k">

@@ -43,7 +43,7 @@ fn default_pflash_policy() -> Option<String> {
 }
 
 fn default_num_speculative_tokens() -> u32 {
-    2
+    3
 }
 
 /// Rapid-MLX speculative decoding method.
@@ -1343,6 +1343,17 @@ mod tests {
         // absent, and must resolve to `Custom` — not `Auto` — so old presets keep their
         // exact stored prefix_cache_enabled/retained_cache_mib/hybrid_cache_entries values.
         assert_eq!(CacheMode::default(), CacheMode::Custom);
+    }
+
+    #[test]
+    fn speculative_config_defaults_to_three_tokens_without_overwriting_saved_values() {
+        let fresh: RapidMlxSpeculativeConfig = serde_json::from_str(r#"{"method":"mtp"}"#).unwrap();
+        assert_eq!(fresh.num_speculative_tokens, 3);
+        assert!(!fresh.disable_auto_k);
+
+        let saved: RapidMlxSpeculativeConfig =
+            serde_json::from_str(r#"{"method":"mtp","num_speculative_tokens":2}"#).unwrap();
+        assert_eq!(saved.num_speculative_tokens, 2);
     }
 
     #[test]

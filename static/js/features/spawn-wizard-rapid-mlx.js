@@ -383,7 +383,7 @@ export function syncRapidSpeculativeFields() {
   if (dom.speculativeEnabledCheck) dom.speculativeEnabledCheck.checked = !!h.speculativeEnabled;
   if (dom.speculativeSourceSelect) dom.speculativeSourceSelect.value = h.speculativeSource || 'embedded';
   if (dom.speculativeModelInput) dom.speculativeModelInput.value = h.speculativeModel || '';
-  if (dom.speculativeTokensSelect) dom.speculativeTokensSelect.value = String(h.speculativeTokens || 2);
+    if (dom.speculativeTokensSelect) dom.speculativeTokensSelect.value = String(h.speculativeTokens || 3);
   if (dom.speculativeDisableAutoKCheck) dom.speculativeDisableAutoKCheck.checked = !!h.speculativeDisableAutoK;
   if (dom.autoToolChoiceCheck) dom.autoToolChoiceCheck.checked = !!h.autoToolChoice;
   const enabled = !!h.speculativeEnabled;
@@ -900,7 +900,7 @@ export function buildRapidMlxConfig(h, m) {
       speculative_config: {
         method: 'mtp',
         ...(h.speculativeSource === 'external' && { model: h.speculativeModel.trim() }),
-        num_speculative_tokens: Number(h.speculativeTokens || 2),
+                        num_speculative_tokens: Number(h.speculativeTokens || 3),
         disable_auto_k: !!h.speculativeDisableAutoK,
       },
       ...(h.speculativeTrustRequired && h.speculativeTrustConsent &&
