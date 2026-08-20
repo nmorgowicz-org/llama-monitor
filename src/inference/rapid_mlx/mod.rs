@@ -8,6 +8,7 @@ pub mod info_query;
 pub mod mlx_meta;
 pub mod model_resolver;
 pub mod poller;
+pub mod repair;
 pub mod runtime;
 pub mod settings;
 pub(crate) mod sidecar_hygiene;

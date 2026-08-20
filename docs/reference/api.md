@@ -48,6 +48,24 @@ rules compared to previous monolithic `api.rs` implementations.
 http://localhost:7778
 ```
 
+### Rapid-MLX MTP repair
+
+All endpoints require `Authorization: Bearer <api-token>`. Repair accepts only
+absolute local paths; HF download and immutable parent selection remain explicit
+caller responsibilities.
+
+- `POST /api/rapid-mlx/mtp-repair` starts one bounded repair job. The body is
+  `{ "target": "/path/to/trunk", "source": "/path/to/parent", "sourceFormat": "mlx" }`
+  or `{ "target": "/path/to/trunk", "recipe": "/path/to/recipe.json" }`.
+- `GET /api/rapid-mlx/mtp-repair/:jobId` polls progress and returns the
+  candidate provenance or a fail-closed error.
+- `POST /api/rapid-mlx/mtp-repair/:jobId/cancel` cancels a queued/running job.
+- `GET /api/rapid-mlx/mtp-repair` lists retained jobs and registered sidecars.
+
+Successful repair creates a candidate sidecar under the managed Rapid-MLX
+sidecar directory. It is not considered qualified until served requalification
+records an acceptance/throughput verdict.
+
 ## SPA Fallback Routing
 
 The server includes an SPA fallback for unknown non-API paths to support client-side routing.

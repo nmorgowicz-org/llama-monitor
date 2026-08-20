@@ -1011,3 +1011,22 @@ before the app presents the sidecar as ready.
 Parent coverage is allowed to be incomplete for a user-requested candidate, but the app must never present a renormalized or guessed tree as an exact recipe reconstruction. A missing parent is recorded explicitly with its tree position and coefficient; only zero-weight branches may be omitted without changing the result. Direct-parent substitution remains a lower-confidence fallback.
 
 The acceptance gate is evidence-based rather than an absolute promise: use a fixed, reproducible prompt set and sampling configuration, compare against the target's no-MTP and direct-parent controls, and record acceptance rate plus throughput. A 50% acceptance result may be usable when it beats the control and does not reduce throughput, but it is not sufficient by itself to mark a partial-parent candidate as ready. UI states remain `candidate`, `awaiting_requalification`, `qualified`, or `validation_failed`.
+
+## 2026-08-20 implementation checkpoint
+
+The first app-driven slice is now implemented on `fix/rapid-mlx-nongreedy-mtp`:
+
+- `scripts/repair-mtp-mlx.py` is the public local-source repair contract. It
+  performs header-first classification, supports direct-parent and nested
+  NuSLERP reconstruction, validates `pre_fc_norm` signs, and writes schema-v2
+  candidate provenance without editing the trunk.
+- `src/inference/rapid_mlx/repair.rs` owns bounded execution, one-worker
+  concurrency, cancellation, path validation, output limits, and managed
+  sidecar placement.
+- Authenticated API lifecycle endpoints now start, poll, cancel, and list
+  repair jobs and sidecar provenance.
+
+This slice intentionally does not infer HF parents, download recipe sources, or
+mark a sidecar qualified. Requalification and HF/model-card discovery remain
+the next phases; a successful repair is surfaced as a candidate requiring
+served evidence.
