@@ -1,7 +1,8 @@
 # 2026-08-20 — Rapid-MLX non-greedy MTP + sidecar assembly
 
 Branch: `fix/rapid-mlx-nongreedy-mtp`
-Status: IN PROGRESS — Phase 3 hygiene implemented and under fixture validation.
+Status: IN PROGRESS — Phases 3–4 implementation complete; final fixture evidence
+is recorded below.
 
 ## 2026-08-20 execution findings and tooling boundary
 
@@ -1045,6 +1046,19 @@ The Phase 4 implementation slice now includes:
 - overwrite refusal for existing repair candidates and rollback if relocation
   provenance cannot be written.
 
-Phase 4 is not gated complete yet: real HF fixtures still need positive-control
-MLX norm validation for extraction, relocation, and head-only adoption, and the
+Phase 4 implementation is complete. The cached `mlx-community/Qwen3.6-27B-MTP-4bit`
+head-only fixture was adopted into an external `mtp.safetensors` and passed the
+MLX norm validation; the cached Shiftedx `mtp.safetensors` relocation payload
+also passed validation. The cached nightmedia config-lie fixture remains
+`kind: none` despite `model_type: qwen3_5_moe` and
+`mtp_num_hidden_layers: 1`. A complete BF16 extraction positive control is not
+available locally: the cached Qwen3.8 BF16 source contains metadata only, so
+that gate remains an explicitly unexecuted external-fixture check. The
 dedicated repair UI/requalification flow remains in Phases 5–6.
+### Phase 4 validation lifecycle
+
+The app now exposes a read-only `validate --sidecar` command through the
+authenticated repair lifecycle. It reads only MTP tensors, emits structured
+digest and `pre_fc_norm_*` evidence, and atomically promotes pending provenance
+to `candidate` only after the Rust boundary verifies the digest and positive
+normalization means. The existing `repair_mode` is preserved.

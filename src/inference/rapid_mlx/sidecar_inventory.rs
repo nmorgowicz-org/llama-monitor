@@ -28,6 +28,9 @@ const PROVENANCE_FILE: &str = "provenance.json";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SidecarProvenance {
+    /// Lifecycle state for this artifact (`candidate`, `qualified`, or pending).
+    #[serde(default)]
+    pub status: Option<String>,
     /// The trunk model directory this sidecar was built for.
     pub trunk: String,
     /// The BF16 source (HF repo id or local path) the MTP tensors were extracted from.
@@ -219,9 +222,14 @@ fn parse_provenance(
 
     // Extract fields from the provenance structure produced by build-mtp-head.py
     let trunk = provenance
-        .get("source")
-        .and_then(|s| s.get("trunk"))
+        .get("trunk")
         .and_then(|v| v.as_str())
+        .or_else(|| {
+            provenance
+                .get("source")
+                .and_then(|s| s.get("trunk"))
+                .and_then(|v| v.as_str())
+        })
         .or_else(|| {
             provenance
                 .get("target")
@@ -232,9 +240,14 @@ fn parse_provenance(
         .to_string();
 
     let bf16_source = provenance
-        .get("source")
-        .and_then(|s| s.get("bf16_source"))
+        .get("bf16_source")
         .and_then(|v| v.as_str())
+        .or_else(|| {
+            provenance
+                .get("source")
+                .and_then(|s| s.get("bf16_source"))
+                .and_then(|v| v.as_str())
+        })
         .or_else(|| {
             provenance
                 .get("source")
@@ -265,23 +278,28 @@ fn parse_provenance(
 
     // Norm check: all_positive field in validation
     let norm_check_passed = provenance
-        .get("validation")
-        .and_then(|v| v.get("all_positive"))
+        .get("norm_check_passed")
         .and_then(|v| v.as_bool())
         .unwrap_or_else(|| {
             provenance
                 .get("validation")
-                .and_then(|v| v.get("pre_fc_norm_means"))
-                .and_then(|v| v.as_object())
-                .map(|means| {
-                    !means.is_empty()
-                        && means.values().all(|value| {
-                            value
-                                .as_f64()
-                                .is_some_and(|mean| mean.is_finite() && mean > 0.0)
+                .and_then(|v| v.get("all_positive"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or_else(|| {
+                    provenance
+                        .get("validation")
+                        .and_then(|v| v.get("pre_fc_norm_means"))
+                        .and_then(|v| v.as_object())
+                        .map(|means| {
+                            !means.is_empty()
+                                && means.values().all(|value| {
+                                    value
+                                        .as_f64()
+                                        .is_some_and(|mean| mean.is_finite() && mean > 0.0)
+                                })
                         })
+                        .unwrap_or(false)
                 })
-                .unwrap_or(false)
         });
 
     let recipe = provenance.get("recipe");
@@ -291,27 +309,37 @@ fn parse_provenance(
         .map(Vec::len);
 
     // Quantization hint: if the slug or bf16_source contains quant info
-    let quantization = {
-        let slug_lower = slug.to_lowercase();
-        if slug_lower.contains("8bit") || slug_lower.contains("q8") || slug_lower.contains("mxfp8")
-        {
-            Some("8-bit".to_string())
-        } else if slug_lower.contains("4bit") || slug_lower.contains("q4") {
-            Some("4-bit".to_string())
-        } else {
-            None
-        }
-    };
+    let quantization = provenance
+        .get("quantization")
+        .and_then(|value| value.as_str())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            let slug_lower = slug.to_lowercase();
+            if slug_lower.contains("8bit")
+                || slug_lower.contains("q8")
+                || slug_lower.contains("mxfp8")
+            {
+                Some("8-bit".to_string())
+            } else if slug_lower.contains("4bit") || slug_lower.contains("q4") {
+                Some("4-bit".to_string())
+            } else {
+                None
+            }
+        });
 
     // File size estimate
-    let estimated_memory_bytes = weights_path.metadata().ok().map(|m| m.len()).or_else(|| {
-        // If the weights file doesn't exist yet, we can't estimate.
-        // But the provenance might have a size from the build time.
-        provenance
-            .get("validation")
-            .and_then(|v| v.get("estimated_memory_bytes"))
-            .and_then(|v| v.as_u64())
-    });
+    let estimated_memory_bytes = provenance
+        .get("estimated_memory_bytes")
+        .and_then(|value| value.as_u64())
+        .or_else(|| weights_path.metadata().ok().map(|m| m.len()))
+        .or_else(|| {
+            // If the weights file doesn't exist yet, we can't estimate.
+            // But the provenance might have a size from the build time.
+            provenance
+                .get("validation")
+                .and_then(|v| v.get("estimated_memory_bytes"))
+                .and_then(|v| v.as_u64())
+        });
 
     Ok(SidecarEntry {
         slug: slug.to_string(),
@@ -319,6 +347,10 @@ fn parse_provenance(
         has_weights: weights_path.is_file(),
         has_provenance: true,
         provenance: Some(SidecarProvenance {
+            status: provenance
+                .get("status")
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned),
             trunk,
             bf16_source,
             built_at,
@@ -326,7 +358,9 @@ fn parse_provenance(
             norm_check_passed,
             estimated_memory_bytes,
             quantization,
-            mtp_depth_max: None,
+            mtp_depth_max: provenance
+                .get("mtp_depth_max")
+                .and_then(|value| value.as_i64()),
             schema_version: provenance
                 .get("schema_version")
                 .and_then(|value| value.as_u64())
@@ -373,15 +407,22 @@ pub fn estimate_local_companion_vram(companion_path: &Path) -> Option<u64> {
 #[allow(dead_code)]
 pub fn find_sidecar_for_path(companion_path: &Path) -> Option<SidecarEntry> {
     discover_sidecars().ok().and_then(|entries| {
-        entries.into_iter().find(|e| {
-            e.path == companion_path.to_string_lossy()
-                && e.has_weights
-                && e.has_provenance
-                && e.provenance
-                    .as_ref()
-                    .is_some_and(|provenance| provenance.norm_check_passed)
-        })
+        entries
+            .into_iter()
+            .find(|entry| entry.path == companion_path.to_string_lossy() && is_usable(entry))
     })
+}
+
+fn is_usable(entry: &SidecarEntry) -> bool {
+    entry.has_weights
+        && entry.has_provenance
+        && entry.provenance.as_ref().is_some_and(|provenance| {
+            provenance.norm_check_passed
+                && matches!(
+                    provenance.status.as_deref(),
+                    Some("candidate") | Some("qualified") | Some("built_unvalidated_online")
+                )
+        })
 }
 
 #[cfg(test)]
@@ -435,6 +476,7 @@ mod tests {
         let entry =
             parse_provenance("brainwaves-recipe", dir.path(), &weights, &provenance_path).unwrap();
         let provenance = entry.provenance.unwrap();
+        assert_eq!(provenance.status.as_deref(), Some("repaired"));
         assert_eq!(
             provenance.repair_mode.as_deref(),
             Some("recipe_reconstruction")
@@ -443,5 +485,70 @@ mod tests {
         assert_eq!(provenance.recipe_parent_count, Some(2));
         assert_eq!(provenance.recipe_precision.as_deref(), Some("bfloat16"));
         assert!(provenance.norm_check_passed);
+    }
+
+    #[test]
+    fn top_level_schema_v2_provenance_is_parsed_correctly() {
+        let dir = tempfile::tempdir().unwrap();
+        let weights = dir.path().join(SIDECAR_WEIGHTS);
+        let provenance_path = dir.path().join(PROVENANCE_FILE);
+        std::fs::write(&weights, b"fixture").unwrap();
+        std::fs::write(
+            &provenance_path,
+            serde_json::json!({
+                "schema_version": 2,
+                "status": "candidate",
+                "repair_mode": "head_only_adoption",
+                "trunk": "/models/qwen35-9b",
+                "bf16_source": "/heads/qwen35-9b",
+                "built_at": "2026-08-20T12:00:00Z",
+                "sha256": "digest",
+                "norm_check_passed": true,
+                "estimated_memory_bytes": 123,
+                "quantization": "4-bit",
+                "mtp_depth_max": 1,
+                "validation": {"all_positive": true}
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let entry = parse_provenance("qwen35-9b", dir.path(), &weights, &provenance_path).unwrap();
+        let provenance = entry.provenance.unwrap();
+        assert_eq!(provenance.trunk, "/models/qwen35-9b");
+        assert_eq!(provenance.bf16_source, "/heads/qwen35-9b");
+        assert_eq!(provenance.quantization.as_deref(), Some("4-bit"));
+        assert_eq!(provenance.mtp_depth_max, Some(1));
+        assert_eq!(provenance.estimated_memory_bytes, Some(123));
+        assert!(provenance.norm_check_passed);
+    }
+
+    #[test]
+    fn pending_sidecar_is_not_usable() {
+        let entry = SidecarEntry {
+            slug: "pending".into(),
+            path: "/tmp/pending".into(),
+            has_weights: true,
+            has_provenance: true,
+            provenance: Some(SidecarProvenance {
+                status: Some("pending".into()),
+                trunk: "/tmp/trunk".into(),
+                bf16_source: "unknown".into(),
+                built_at: "2026-08-20T00:00:00Z".into(),
+                sha256: "abc".into(),
+                norm_check_passed: false,
+                estimated_memory_bytes: None,
+                quantization: None,
+                mtp_depth_max: None,
+                schema_version: Some(2),
+                repair_mode: Some("relocation".into()),
+                recipe_digest: None,
+                recipe_method: None,
+                recipe_parent_count: None,
+                recipe_precision: None,
+                requalification_status: None,
+            }),
+        };
+        assert!(!is_usable(&entry));
     }
 }

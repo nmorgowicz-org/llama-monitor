@@ -52,7 +52,9 @@ http://localhost:7778
 
 All endpoints require `Authorization: Bearer <api-token>`. Repair accepts only
 absolute local paths; HF download and immutable parent selection remain explicit
-caller responsibilities.
+caller responsibilities. When `python` is omitted, the job resolves the Python
+interpreter from the Rapid-MLX executable environment rather than assuming the
+system interpreter.
 
 - `POST /api/rapid-mlx/mtp-repair` starts one bounded repair job. The body is
   `{ "target": "/path/to/trunk", "source": "/path/to/parent", "sourceFormat": "mlx" }`
@@ -68,6 +70,12 @@ caller responsibilities.
 Successful repair creates a candidate sidecar under the managed Rapid-MLX
 sidecar directory. It is not considered qualified until served requalification
 records an acceptance/throughput verdict.
+
+To validate a relocated or otherwise pending managed sidecar, send
+`{ "operation": "validate", "target": "/path/to/trunk" }` to the start
+endpoint. The app derives the sidecar path and promotes provenance only after
+the MLX tensor and `pre_fc_norm_*` checks pass. Validation never overwrites
+qualified provenance.
 
 ## SPA Fallback Routing
 

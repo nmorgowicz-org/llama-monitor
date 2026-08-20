@@ -7,6 +7,8 @@
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -21,11 +23,18 @@ const MAX_JOBS: usize = 16;
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 const REPAIR_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
 const SCRIPT_NAME: &str = "repair-mtp-mlx.py";
+const VALIDATE_OPERATION: &str = "validate";
+
+fn default_operation() -> String {
+    "repair".to_string()
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepairRequest {
     pub target: String,
+    #[serde(default = "default_operation")]
+    pub operation: String,
     #[serde(default)]
     pub source: Option<String>,
     #[serde(default)]
@@ -63,6 +72,10 @@ static JOB_GATE: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Semaphore:
 
 pub fn start_job(request: RepairRequest, scripts_dir: &Path) -> Result<RepairJobSnapshot> {
     let target = existing_directory(&request.target, "target")?;
+    let operation = request.operation.trim().to_ascii_lowercase();
+    if operation != "repair" && operation != VALIDATE_OPERATION {
+        bail!("operation must be repair or validate");
+    }
     let source = request
         .source
         .as_deref()
@@ -83,20 +96,27 @@ pub fn start_job(request: RepairRequest, scripts_dir: &Path) -> Result<RepairJob
         .as_deref()
         .map(validate_revision)
         .transpose()?;
-    if source.is_none() && recipe.is_none() && bf16_source.is_none() {
+    if operation == VALIDATE_OPERATION {
+        if source.is_some() || recipe.is_some() || bf16_source.is_some() || bf16_revision.is_some()
+        {
+            bail!("validation accepts only target and operation");
+        }
+    } else if source.is_none() && recipe.is_none() && bf16_source.is_none() {
         bail!("one of source, recipe, or bf16Source is required");
     }
-    if [source.is_some(), recipe.is_some(), bf16_source.is_some()]
-        .into_iter()
-        .filter(|present| *present)
-        .count()
-        > 1
+    if operation == "repair"
+        && [source.is_some(), recipe.is_some(), bf16_source.is_some()]
+            .into_iter()
+            .filter(|present| *present)
+            .count()
+            > 1
     {
         bail!("source, recipe, and bf16Source are mutually exclusive");
     }
-    if bf16_source
-        .as_deref()
-        .is_some_and(|value| !Path::new(value).is_absolute())
+    if operation == "repair"
+        && bf16_source
+            .as_deref()
+            .is_some_and(|value| !Path::new(value).is_absolute())
         && bf16_revision.is_none()
     {
         bail!("bf16Revision is required for a Hugging Face BF16 source");
@@ -109,18 +129,21 @@ pub fn start_job(request: RepairRequest, scripts_dir: &Path) -> Result<RepairJob
     if source_format != "mlx" && source_format != "hf" {
         bail!("sourceFormat must be mlx or hf");
     }
-    let script = resolve_script(
-        scripts_dir,
-        if bf16_source.is_some() {
-            "build-mtp-head.py"
-        } else {
-            SCRIPT_NAME
-        },
-    )?;
-    let python = request.python.unwrap_or_else(|| "python3".to_string());
+    let script_name = if operation == VALIDATE_OPERATION {
+        SCRIPT_NAME
+    } else if bf16_source.is_some() {
+        "build-mtp-head.py"
+    } else {
+        SCRIPT_NAME
+    };
+    let script = resolve_script(scripts_dir, script_name)?;
+    let python = request.python.unwrap_or_else(default_python);
     validate_executable_name(&python)?;
     let output_dir = sidecar_dir_for_trunk(&target);
     let output = output_dir.join("mtp.safetensors");
+    if operation == VALIDATE_OPERATION {
+        ensure_validation_candidate(&output_dir, &output)?;
+    }
     let job_id = format!("mtp-repair-{:032x}", rand::random::<u128>());
     let snapshot = Arc::new(Mutex::new(RepairJobSnapshot {
         job_id: job_id.clone(),
@@ -159,6 +182,8 @@ pub fn start_job(request: RepairRequest, scripts_dir: &Path) -> Result<RepairJob
     }
 
     let task_snapshot = snapshot.clone();
+    let validation = operation == VALIDATE_OPERATION;
+    let operation_for_message = operation.clone();
     tokio::spawn(async move {
         let permit = match JOB_GATE.clone().acquire_owned().await {
             Ok(permit) => permit,
@@ -170,9 +195,23 @@ pub fn start_job(request: RepairRequest, scripts_dir: &Path) -> Result<RepairJob
                 return;
             }
         };
-        set_running(&task_snapshot, "inspecting", "Reading MTP tensor headers");
+        if validation {
+            set_running(
+                &task_snapshot,
+                "validating",
+                "Checking MTP tensors and pre_fc_norm means",
+            );
+        } else {
+            set_running(&task_snapshot, "inspecting", "Reading MTP tensor headers");
+        }
         let mut command = Command::new(&python);
-        if let Some(bf16_source) = bf16_source {
+        if validation {
+            command
+                .arg(script)
+                .arg("validate")
+                .arg("--sidecar")
+                .arg(&output);
+        } else if let Some(bf16_source) = bf16_source {
             command
                 .arg(script)
                 .arg("--bf16-source")
@@ -201,7 +240,7 @@ pub fn start_job(request: RepairRequest, scripts_dir: &Path) -> Result<RepairJob
             }
             command.arg("--output").arg(&output);
         }
-        let result = run_bounded(command, cancel.clone()).await;
+        let result = run_bounded(command, cancel.clone(), sensitive_environment_values()).await;
         drop(permit);
         match result {
             Ok(stdout) => {
@@ -215,10 +254,16 @@ pub fn start_job(request: RepairRequest, scripts_dir: &Path) -> Result<RepairJob
                     serde_json::from_str::<serde_json::Value>(&value)
                         .map_err(|error| error.to_string())
                 }) {
+                    Ok(value) if validation => {
+                        match promote_validated_sidecar(&output_dir, &output, value) {
+                            Ok(promoted) => set_completed(&task_snapshot, promoted),
+                            Err(error) => set_failed(&task_snapshot, error.to_string()),
+                        }
+                    }
                     Ok(value) => set_completed(&task_snapshot, value),
                     Err(error) => set_failed(
                         &task_snapshot,
-                        format!("repair returned invalid JSON: {error}"),
+                        format!("{operation_for_message} returned invalid JSON: {error}"),
                     ),
                 }
             }
@@ -292,6 +337,141 @@ fn resolve_script(scripts_dir: &Path, name: &str) -> Result<PathBuf> {
     )
 }
 
+fn ensure_validation_candidate(output_dir: &Path, output: &Path) -> Result<()> {
+    if !output.is_file() {
+        bail!(
+            "no managed MTP sidecar exists for this trunk: {}",
+            output.display()
+        );
+    }
+    let provenance_path = output_dir.join("provenance.json");
+    let raw = std::fs::read_to_string(&provenance_path).with_context(|| {
+        format!(
+            "managed MTP sidecar is missing provenance: {}",
+            provenance_path.display()
+        )
+    })?;
+    let provenance: Value = serde_json::from_str(&raw).with_context(|| {
+        format!(
+            "managed MTP sidecar provenance is invalid: {}",
+            provenance_path.display()
+        )
+    })?;
+    let top_status = provenance.get("status").and_then(Value::as_str);
+    let requalification_status = provenance
+        .get("requalification")
+        .and_then(|value| value.get("status"))
+        .and_then(Value::as_str);
+    if top_status == Some("qualified") || requalification_status == Some("qualified") {
+        bail!("refusing to overwrite qualified MTP provenance; requalification already passed");
+    }
+    Ok(())
+}
+
+fn sha256_file(path: &Path) -> Result<String> {
+    let mut file = std::fs::File::open(path)
+        .with_context(|| format!("cannot read sidecar digest: {}", path.display()))?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0u8; 1024 * 1024];
+    loop {
+        let count = std::io::Read::read(&mut file, &mut buffer)
+            .with_context(|| format!("cannot hash sidecar: {}", path.display()))?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    Ok(digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
+fn promote_validated_sidecar(output_dir: &Path, output: &Path, report: Value) -> Result<Value> {
+    if report.get("status").and_then(Value::as_str) != Some("validated") {
+        bail!("validator did not return a validated report");
+    }
+    let validation = report
+        .get("validation")
+        .cloned()
+        .ok_or_else(|| anyhow!("validator returned no validation report"))?;
+    let all_positive = validation
+        .get("all_positive")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let means = validation
+        .get("pre_fc_norm_means")
+        .and_then(Value::as_object)
+        .ok_or_else(|| anyhow!("validator returned no pre_fc_norm means"))?;
+    if !all_positive
+        || means.is_empty()
+        || means.values().any(|value| {
+            value
+                .as_f64()
+                .is_none_or(|mean| !mean.is_finite() || mean <= 0.0)
+        })
+    {
+        bail!("validator returned a failed pre_fc_norm sign check");
+    }
+    let digest = sha256_file(output)?;
+    if report.get("sha256").and_then(Value::as_str) != Some(digest.as_str()) {
+        bail!("sidecar changed while validation was running; refusing promotion");
+    }
+
+    let provenance_path = output_dir.join("provenance.json");
+    let raw = std::fs::read_to_string(&provenance_path).with_context(|| {
+        format!(
+            "cannot read sidecar provenance: {}",
+            provenance_path.display()
+        )
+    })?;
+    let mut provenance: Value = serde_json::from_str(&raw)
+        .with_context(|| format!("invalid sidecar provenance: {}", provenance_path.display()))?;
+    let object = provenance
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("sidecar provenance must be a JSON object"))?;
+    let requalification_status = object
+        .get("requalification")
+        .and_then(|value| value.get("status"))
+        .and_then(Value::as_str);
+    if object.get("status").and_then(Value::as_str) == Some("qualified")
+        || requalification_status == Some("qualified")
+    {
+        bail!("refusing to overwrite qualified MTP provenance");
+    }
+    object.insert("status".into(), Value::String("candidate".into()));
+    object.insert("norm_check_passed".into(), Value::Bool(true));
+    object.insert("sha256".into(), Value::String(digest));
+    object.insert(
+        "estimated_memory_bytes".into(),
+        Value::Number(
+            output
+                .metadata()
+                .with_context(|| format!("cannot stat sidecar: {}", output.display()))?
+                .len()
+                .into(),
+        ),
+    );
+    let mut validation = validation;
+    validation["status"] = Value::String("passed".into());
+    object.insert("validation".into(), validation);
+    object.insert("validated_at_unix".into(), Value::Number(unix_now().into()));
+
+    let temporary = output_dir.join("provenance.json.validation-tmp");
+    std::fs::write(&temporary, serde_json::to_vec_pretty(&provenance)?)?;
+    if let Err(error) = std::fs::rename(&temporary, &provenance_path) {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error).with_context(|| {
+            format!(
+                "cannot atomically promote sidecar provenance: {}",
+                provenance_path.display()
+            )
+        });
+    }
+    Ok(provenance)
+}
+
 fn validate_bf16_source(raw: &str) -> Result<String> {
     if raw.trim().is_empty() || raw.chars().any(char::is_control) {
         bail!("bf16Source is invalid");
@@ -356,6 +536,60 @@ fn validate_executable_name(value: &str) -> Result<()> {
     Ok(())
 }
 
+fn default_python() -> String {
+    for executable in ["rapid-mlx", "vllm-mlx"] {
+        if let Some(binary) = find_on_path(executable)
+            && let Some(python) = python_for_binary(&binary)
+        {
+            return python.to_string_lossy().into_owned();
+        }
+    }
+    "python3".to_string()
+}
+
+fn find_on_path(executable: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path).find_map(|dir| {
+        let candidate = dir.join(executable);
+        candidate.is_file().then_some(candidate)
+    })
+}
+
+fn python_for_binary(binary: &Path) -> Option<PathBuf> {
+    if let Ok(first_line) = std::fs::read_to_string(binary)
+        .map(|value| value.lines().next().unwrap_or_default().to_string())
+        && let Some(interpreter) = first_line.strip_prefix("#!")
+        && Path::new(interpreter.trim()).is_file()
+    {
+        return Some(PathBuf::from(interpreter.trim()));
+    }
+    let parent = binary.parent()?;
+    if let Some(candidate) = ["python3", "python"]
+        .iter()
+        .map(|name| parent.join(name))
+        .find(|candidate| candidate.is_file())
+    {
+        return Some(candidate);
+    }
+    parent.parent().and_then(|root| {
+        ["python3", "python"]
+            .iter()
+            .map(|name| root.join("bin").join(name))
+            .find(|candidate| candidate.is_file())
+    })
+}
+
+fn sensitive_environment_values() -> Vec<String> {
+    std::env::vars()
+        .filter_map(|(name, value)| {
+            let upper = name.to_ascii_uppercase();
+            (upper.contains("TOKEN") || upper.contains("KEY") || upper.contains("SECRET"))
+                .then_some(value)
+        })
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
 enum RunError {
     Cancelled,
     Failed(String),
@@ -378,6 +612,7 @@ async fn drain(mut reader: impl AsyncRead + Unpin) -> Vec<u8> {
 async fn run_bounded(
     mut command: Command,
     cancel: Arc<Notify>,
+    secrets: Vec<String>,
 ) -> std::result::Result<String, RunError> {
     command
         .stdout(std::process::Stdio::piped())
@@ -421,11 +656,11 @@ async fn run_bounded(
     let stdout = stdout_task.await.unwrap_or_default();
     let stderr = stderr_task.await.unwrap_or_default();
     if !status.success() {
-        let detail = String::from_utf8_lossy(&stderr)
-            .trim()
-            .chars()
-            .take(2000)
-            .collect::<String>();
+        let mut detail = String::from_utf8_lossy(&stderr).into_owned();
+        for secret in secrets.iter().filter(|secret| !secret.is_empty()) {
+            detail = detail.replace(secret, "[REDACTED]");
+        }
+        let detail = detail.trim().chars().take(2000).collect::<String>();
         return Err(RunError::Failed(if detail.is_empty() {
             format!("repair process exited with {status}")
         } else {
@@ -480,7 +715,11 @@ fn unix_now() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_bf16_source, validate_executable_name, validate_path, validate_revision};
+    use super::{
+        RepairRequest, promote_validated_sidecar, sha256_file, validate_bf16_source,
+        validate_executable_name, validate_path, validate_revision,
+    };
+    use serde_json::json;
 
     #[test]
     fn repair_paths_are_absolute_and_non_control() {
@@ -501,5 +740,92 @@ mod tests {
         assert!(validate_bf16_source("not-a-repo").is_err());
         assert!(validate_revision("0123456789abcdef").is_ok());
         assert!(validate_revision("main").is_err());
+    }
+
+    #[test]
+    fn repair_request_defaults_to_repair_and_accepts_validation() {
+        let repair: RepairRequest = serde_json::from_value(json!({"target":"/tmp/trunk"})).unwrap();
+        assert_eq!(repair.operation, "repair");
+
+        let validate: RepairRequest = serde_json::from_value(json!({
+            "target":"/tmp/trunk",
+            "operation":"validate"
+        }))
+        .unwrap();
+        assert_eq!(validate.operation, "validate");
+    }
+
+    #[test]
+    fn successful_validation_promotes_pending_provenance() {
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("mtp.safetensors");
+        std::fs::write(&output, b"sidecar fixture").unwrap();
+        let provenance = directory.path().join("provenance.json");
+        std::fs::write(
+            &provenance,
+            serde_json::to_vec(&json!({
+                "schema_version": 2,
+                "status": "candidate",
+                "repair_mode": "relocation",
+                "norm_check_passed": false
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let digest = sha256_file(&output).unwrap();
+        let promoted = promote_validated_sidecar(
+            directory.path(),
+            &output,
+            json!({
+                "status": "validated",
+                "sha256": digest,
+                "validation": {
+                    "all_positive": true,
+                    "pre_fc_norm_means": {
+                        "pre_fc_norm_embedding.weight": 0.5,
+                        "pre_fc_norm_hidden.weight": 0.6
+                    }
+                }
+            }),
+        )
+        .unwrap();
+        assert_eq!(promoted["status"], "candidate");
+        assert_eq!(promoted["repair_mode"], "relocation");
+        assert_eq!(promoted["norm_check_passed"], true);
+        assert_eq!(promoted["validation"]["status"], "passed");
+    }
+
+    #[test]
+    fn failed_validation_does_not_promote_provenance() {
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("mtp.safetensors");
+        std::fs::write(&output, b"corrupt sidecar fixture").unwrap();
+        let provenance = directory.path().join("provenance.json");
+        let original = json!({
+            "schema_version": 2,
+            "status": "pending",
+            "repair_mode": "relocation",
+            "norm_check_passed": false
+        });
+        std::fs::write(&provenance, serde_json::to_vec(&original).unwrap()).unwrap();
+        let result = promote_validated_sidecar(
+            directory.path(),
+            &output,
+            json!({
+                "status": "validated",
+                "sha256": sha256_file(&output).unwrap(),
+                "validation": {
+                    "all_positive": false,
+                    "pre_fc_norm_means": {
+                        "pre_fc_norm_embedding.weight": -0.4,
+                        "pre_fc_norm_hidden.weight": -0.4
+                    }
+                }
+            }),
+        );
+        assert!(result.is_err());
+        let unchanged: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&provenance).unwrap()).unwrap();
+        assert_eq!(unchanged, original);
     }
 }

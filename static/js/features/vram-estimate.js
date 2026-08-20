@@ -38,7 +38,7 @@ export function rapidEstimatePolicyFromWizardHardware(hardware = {}) {
   const speculativeConfig = hardware.speculativeEnabled ? {
     method: 'mtp',
     model: hardware.speculativeSource === 'external' ? (hardware.speculativeModel || null) : null,
-    num_speculative_tokens: Number(hardware.speculativeTokens || 2),
+    num_speculative_tokens: Number(hardware.speculativeTokens || 3),
     disable_auto_k: !!hardware.speculativeDisableAutoK,
   } : null;
   return {

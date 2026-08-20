@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import json
 import math
+import struct
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +24,19 @@ REQUIRED = (
     "pre_fc_norm_embedding.weight",
     "pre_fc_norm_hidden.weight",
 )
+NUMPY_DTYPES = {
+    "BOOL": "?",
+    "U8": "u1",
+    "I8": "i1",
+    "U16": "<u2",
+    "I16": "<i2",
+    "U32": "<u4",
+    "I32": "<i4",
+    "U64": "<u8",
+    "I64": "<i8",
+    "F16": "<f2",
+    "F32": "<f4",
+}
 TRUNK_TYPES = {"qwen3_5", "qwen3_5_moe", "hy_v3"}
 HEAD_TYPES = {"qwen3_5_mtp", "head"}
 
@@ -62,16 +76,76 @@ def tensor_files(root: Path) -> dict[str, Path]:
     return {key: path for path in files for key in header_keys(path)}
 
 
-def header_keys(path: Path) -> list[str]:
+def tensor_header(path: Path) -> dict[str, Any]:
     try:
         with path.open("rb") as handle:
-            size = int.from_bytes(handle.read(8), "little")
+            size_bytes = handle.read(8)
+            if len(size_bytes) != 8:
+                raise RepairError(f"truncated safetensors header in {path}")
+            size = struct.unpack("<Q", size_bytes)[0]
             if size <= 0 or size > 64 * 1024 * 1024:
                 raise RepairError(f"implausible safetensors header in {path}")
             header = json.loads(handle.read(size))
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise RepairError(f"invalid safetensors header {path}: {exc}") from exc
-    return [key for key in header if key != "__metadata__"]
+    if not isinstance(header, dict):
+        raise RepairError(f"safetensors header is not an object in {path}")
+    return header
+
+
+def header_keys(path: Path) -> list[str]:
+    return [key for key in tensor_header(path) if key != "__metadata__"]
+
+
+def load_tensor(path: Path, header_size: int, name: str, spec: dict[str, Any], mx: Any) -> Any:
+    dtype = spec.get("dtype")
+    shape = spec.get("shape")
+    offsets = spec.get("data_offsets")
+    if not isinstance(dtype, str) or not isinstance(shape, list) or not isinstance(offsets, list):
+        raise RepairError(f"invalid safetensors tensor metadata for {name!r} in {path}")
+    if len(offsets) != 2 or any(not isinstance(value, int) for value in offsets):
+        raise RepairError(f"invalid data offsets for {name!r} in {path}")
+    start, end = offsets
+    if start < 0 or end < start:
+        raise RepairError(f"invalid data range for {name!r} in {path}")
+    with path.open("rb") as handle:
+        handle.seek(8 + header_size + start)
+        payload = handle.read(end - start)
+    if len(payload) != end - start:
+        raise RepairError(f"truncated tensor payload for {name!r} in {path}")
+
+    if dtype == "BF16":
+        # NumPy has no portable bfloat16 dtype. Decode the raw 16-bit words
+        # through MLX so BF16 heads remain loadable without materializing an
+        # unrelated multi-GB trunk shard.
+        import numpy as np
+
+        values = np.frombuffer(payload, dtype="<u2").copy()
+        return mx.array(values).reshape(tuple(shape)).view(mx.bfloat16)
+
+    numpy_dtype = NUMPY_DTYPES.get(dtype)
+    if numpy_dtype is None:
+        raise RepairError(f"unsupported safetensors dtype {dtype!r} for {name!r}")
+    import numpy as np
+
+    values = np.frombuffer(payload, dtype=numpy_dtype).copy()
+    return mx.array(values).reshape(tuple(shape))
+
+
+def load_selected_tensors(path: Path, names: set[str], mx: Any) -> dict[str, Any]:
+    with path.open("rb") as handle:
+        size_bytes = handle.read(8)
+    if len(size_bytes) != 8:
+        raise RepairError(f"truncated safetensors header in {path}")
+    header_size = struct.unpack("<Q", size_bytes)[0]
+    header = tensor_header(path)
+    result: dict[str, Any] = {}
+    for name in names:
+        spec = header.get(name)
+        if not isinstance(spec, dict):
+            raise RepairError(f"MTP tensor {name!r} disappeared from {path}")
+        result[name] = load_tensor(path, header_size, name, spec, mx)
+    return result
 
 
 def canonical(key: str) -> str | None:
@@ -124,10 +198,6 @@ def load_mlx() -> Any:
 
 def load_weights(root: Path, info: dict[str, Any]) -> dict[str, Any]:
     mx = load_mlx()
-    try:
-        from safetensors import safe_open
-    except ImportError as exc:
-        raise RepairError("safetensors is required; run this command with the Rapid-MLX Python environment") from exc
     files = tensor_files(root)
     selected: dict[Path, set[str]] = {}
     for key in info["mtp_keys"]:
@@ -139,11 +209,10 @@ def load_weights(root: Path, info: dict[str, Any]) -> dict[str, Any]:
     for path, names in selected.items():
         # Read only selected tensors.  A fused MTP head can share a multi-GB
         # trunk shard; loading that entire shard defeats header-first hygiene.
-        with safe_open(str(path), framework="numpy") as handle:
-            for original in names:
-                key = canonical(original)
-                if key is not None:
-                    result[key] = mx.array(handle.get_tensor(original))
+        for original, value in load_selected_tensors(path, names, mx).items():
+            key = canonical(original)
+            if key is not None:
+                result[key] = value
     return result
 
 
@@ -158,6 +227,50 @@ def validate_weights(weights: dict[str, Any]) -> dict[str, Any]:
     if not means or any(not math.isfinite(value) or value <= 0 for value in means.values()):
         raise RepairError(f"pre_fc_norm sign check failed: {means}")
     return {"pre_fc_norm_means": means, "all_positive": True}
+
+
+def validate_sidecar(sidecar: Path) -> dict[str, Any]:
+    """Validate an external sidecar without reading or changing provenance.
+
+    A sidecar is deliberately treated as an opaque file rather than a model
+    snapshot: only the MTP tensors named in its safetensors header are opened.
+    This keeps validation cheap for callers and prevents unrelated tensors from
+    becoming an accidental part of the repair contract.
+    """
+    sidecar = sidecar.expanduser().resolve()
+    if not sidecar.is_file():
+        raise RepairError(f"sidecar is not a regular file: {sidecar}")
+    names = header_keys(sidecar)
+    selected: dict[str, str] = {}
+    for original in names:
+        key = canonical(original)
+        if key is None:
+            continue
+        if key in selected and selected[key] != original:
+            raise RepairError(
+                f"sidecar contains duplicate MTP tensor namespaces for {key!r}"
+            )
+        selected[key] = original
+    missing = sorted(set(REQUIRED) - set(selected))
+    if missing:
+        raise RepairError(
+            "sidecar is missing required tensors: " + ", ".join(missing)
+        )
+
+    mx = load_mlx()
+    weights: dict[str, Any] = {}
+    # The header-first reader reads only selected MTP tensors. It does not
+    # materialize unrelated payloads that may share the sidecar file.
+    for original, value in load_selected_tensors(sidecar, set(selected.values()), mx).items():
+        weights[canonical(original)] = value
+    validation = validate_weights(weights)
+    return {
+        "status": "validated",
+        "sidecar": str(sidecar),
+        "tensor_names": sorted(selected),
+        "sha256": sha256(sidecar),
+        "validation": validation,
+    }
 
 
 def sha256(path: Path) -> str:
@@ -347,9 +460,16 @@ def main(argv: list[str] | None = None) -> int:
     repair_parser.add_argument("--source-format", choices=("mlx", "hf"), default="mlx")
     repair_parser.add_argument("--recipe")
     repair_parser.add_argument("--output", required=True)
+    validate_parser = sub.add_parser("validate")
+    validate_parser.add_argument("--sidecar", required=True)
     try:
         args = parser.parse_args(argv)
-        result = inspect(args.snapshot) if args.command == "inspect" else repair(args)
+        if args.command == "inspect":
+            result = inspect(Path(args.snapshot))
+        elif args.command == "repair":
+            result = repair(args)
+        else:
+            result = validate_sidecar(Path(args.sidecar))
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     except (RepairError, OSError, ValueError, json.JSONDecodeError) as exc:
