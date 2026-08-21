@@ -16,7 +16,7 @@ import math
 import struct
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 REQUIRED = (
@@ -62,6 +62,27 @@ def config_value(value: dict[str, Any], key: str) -> Any:
     return nested.get(key) if isinstance(nested, dict) else None
 
 
+def safe_indexed_shard(root: Path, name: Any) -> Path:
+    if not isinstance(name, str) or not name or "\x00" in name:
+        raise RepairError("safetensors index shard path must be a non-empty string")
+    if name.startswith(("/", "\\")):
+        raise RepairError(f"safetensors index shard path escapes snapshot: {name!r}")
+    relative = Path(name)
+    windows_relative = PureWindowsPath(name)
+    if relative.is_absolute() or windows_relative.is_absolute() or windows_relative.drive:
+        raise RepairError(f"safetensors index shard path escapes snapshot: {name!r}")
+    if any(part == ".." for part in name.replace("\\", "/").split("/")):
+        raise RepairError(f"safetensors index shard path escapes snapshot: {name!r}")
+
+    canonical_root = root.expanduser().resolve()
+    candidate = (canonical_root / relative).resolve()
+    try:
+        candidate.relative_to(canonical_root)
+    except ValueError as exc:
+        raise RepairError(f"safetensors index shard path escapes snapshot: {name!r}") from exc
+    return candidate
+
+
 def tensor_files(root: Path) -> dict[str, Path]:
     index = root / "model.safetensors.index.json"
     if index.is_file():
@@ -69,7 +90,9 @@ def tensor_files(root: Path) -> dict[str, Path]:
             weight_map = json.loads(index.read_text(encoding="utf-8"))["weight_map"]
         except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
             raise RepairError(f"invalid safetensors index {index}: {exc}") from exc
-        return {key: root / name for key, name in weight_map.items()}
+        if not isinstance(weight_map, dict):
+            raise RepairError(f"invalid safetensors index {index}: weight_map must be an object")
+        return {key: safe_indexed_shard(root, name) for key, name in weight_map.items()}
     files = sorted(root.glob("*.safetensors"))
     if not files:
         raise RepairError(f"no safetensors files found in {root}")
