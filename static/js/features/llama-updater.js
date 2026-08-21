@@ -165,7 +165,7 @@ async function loadReleaseList() {
     const data = await fetchReleaseList('/api/llama-binary/releases');
     if (data.error) throw new Error(data.error);
 
-    const releases = data.releases ?? [];
+    const releases = sortReleasesChronologically(data.releases ?? []);
     if (!releases.length) {
       listEl.innerHTML = '<div class="llama-version-loading">No releases found.</div>';
       return;
@@ -226,9 +226,9 @@ function showReleaseNotes(release) {
   if (release.body && release.body.trim()) {
     let html;
     if (typeof marked !== 'undefined') {
-      html = marked.parse(release.body);
+      html = marked.parse(normalizeReleaseNotes(release.body));
     } else {
-      html = release.body.replace(/\n/g, '<br>');
+      html = normalizeReleaseNotes(release.body).replace(/\n/g, '<br>');
     }
     html = linkPrRefs(html);
     // eslint-disable-next-line no-unsanitized/property
@@ -238,6 +238,20 @@ function showReleaseNotes(release) {
   } else {
     bodyEl.innerHTML = '<p class="llama-version-notes-none">No release notes for this build.</p>';
   }
+}
+
+/**
+ * GitHub's versioned llama.cpp releases publish changelog entries as bare
+ * commit lines, unlike nightly releases which use Markdown list items. Add
+ * list markers to those commit lines so the notes pane does not collapse the
+ * entire changelog into one paragraph. Existing Markdown lists are left
+ * untouched.
+ */
+function normalizeReleaseNotes(body) {
+  return body.replace(
+    /^(?!\s*[-*+]\s)([0-9a-f]{7,40}\s+.+)$/gim,
+    '- $1',
+  );
 }
 
 function buildReleaseRow(release, isLatest) {
@@ -433,4 +447,13 @@ function relativeAge(iso) {
   if (days < 30)  return `${days}d ago`;
   const months = Math.floor(days / 30);
   return `${months}mo ago`;
+}
+
+function sortReleasesChronologically(releases) {
+  return [...releases].sort((left, right) => {
+    const leftTime = Date.parse(left.published_at || '') || 0;
+    const rightTime = Date.parse(right.published_at || '') || 0;
+    return rightTime - leftTime
+      || String(right.tag || '').localeCompare(String(left.tag || ''));
+  });
 }

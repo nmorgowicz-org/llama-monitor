@@ -111,6 +111,21 @@ pub async fn list_releases(client: &Client) -> Result<Vec<LlamaCppRelease>> {
     Ok(releases)
 }
 
+/// Sort releases newest-first by their GitHub publication timestamp.
+///
+/// The GitHub releases endpoint does not make its response order a suitable
+/// chronological contract, especially when stable tags and build tags are
+/// published close together. Empty timestamps sort last; tag names provide a
+/// deterministic tie-breaker.
+pub fn sort_releases_by_published_at(releases: &mut [LlamaCppRelease]) {
+    releases.sort_by(|left, right| {
+        right
+            .published_at
+            .cmp(&left.published_at)
+            .then_with(|| right.tag_name.cmp(&left.tag_name))
+    });
+}
+
 /// Select appropriate assets for the given platform/backend.
 ///
 /// This is a best-effort heuristic based on known release asset naming conventions.
@@ -382,6 +397,40 @@ fn extract_trailing_build_number(name: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn releases_are_sorted_by_publication_time_not_api_order() {
+        let mut releases = vec![
+            LlamaCppRelease {
+                tag_name: "b10549".into(),
+                assets: Vec::new(),
+                published_at: "2026-08-21T10:00:00Z".into(),
+                body: String::new(),
+            },
+            LlamaCppRelease {
+                tag_name: "v0.2.0".into(),
+                assets: Vec::new(),
+                published_at: "2026-08-21T11:00:00Z".into(),
+                body: String::new(),
+            },
+            LlamaCppRelease {
+                tag_name: "b10567".into(),
+                assets: Vec::new(),
+                published_at: "2026-08-21T11:30:00Z".into(),
+                body: String::new(),
+            },
+        ];
+
+        sort_releases_by_published_at(&mut releases);
+
+        assert_eq!(
+            releases
+                .iter()
+                .map(|release| release.tag_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b10567", "v0.2.0", "b10549"]
+        );
+    }
 
     #[test]
     fn test_select_assets_cpu_x64() {

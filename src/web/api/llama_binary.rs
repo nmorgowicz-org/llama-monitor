@@ -8,7 +8,7 @@ use crate::inference::launch::launch_local;
 use crate::inference::llama_cpp::ServerConfig;
 use crate::llama::llama_cpp_downloader::{
     ReleaseQuery, cleanup_old_binaries, download_and_extract, get_release_by_tag, list_releases,
-    select_assets,
+    select_assets, sort_releases_by_published_at,
 };
 use crate::llama::server::{start_server, stop_server};
 use crate::state::AppState;
@@ -270,7 +270,8 @@ fn api_llama_binary_releases(
                 };
 
                 match list_releases(&client).await {
-                    Ok(releases) => {
+                    Ok(mut releases) => {
+                        sort_releases_by_published_at(&mut releases);
                         let items: Vec<serde_json::Value> = releases
                             .into_iter()
                             .take(8)

@@ -36,12 +36,33 @@ export default async function(ctx, options) {
     // Wait for release list to populate (real GitHub API call)
     await sleep(2000);
 
-    // Click on the second release row to show its notes (latest is auto-selected)
-    await page.evaluate(() => {
-        const rows = document.querySelectorAll('.llama-version-row');
-        if (rows.length > 1) {
-            rows[1].click();
+    // Versioned releases publish bare commit lines; keep a regression capture
+    // proving those lines render as a readable list rather than one paragraph.
+    const stableTag = await page.evaluate(() => {
+        const stableRow = [...document.querySelectorAll('.llama-version-row')].find(row =>
+            /^v\d+\.\d+\.\d+$/.test(row.dataset.tag || '')
+        );
+        if (stableRow) stableRow.click();
+        return stableRow?.dataset.tag || '';
+    });
+    if (stableTag) {
+        await sleep(800);
+        const stableNotes = await page.evaluate(() => ({
+            tag: document.getElementById('llama-version-notes-tag')?.textContent || '',
+            changelogItems: document.querySelectorAll('#llama-version-notes-body li').length,
+        }));
+        if (stableNotes.tag !== stableTag || stableNotes.changelogItems === 0) {
+            throw new Error(`Versioned release notes were not rendered as a list: ${stableTag}`);
         }
+        await captureShot(page, 'llama-updater-stable-release-notes.png', { fullPage: true });
+    }
+
+    // Keep the beta/nightly notes capture independent of release ordering.
+    await page.evaluate(() => {
+        const betaRow = [...document.querySelectorAll('.llama-version-row')].find(row =>
+            /^b\d+$/.test(row.dataset.tag || '')
+        );
+        if (betaRow) betaRow.click();
     });
     await sleep(800);
     await captureShot(page, 'llama-updater-version-modal.png', { fullPage: true });
