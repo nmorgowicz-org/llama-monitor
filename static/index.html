@@ -3440,7 +3440,7 @@
                                 <div class="pe-field">
                                     <label class="pe-label pe-toggle-label" for="modal-rapid-speculative-enabled">Experimental MTP speculation</label>
                                     <div class="pe-toggle"><input type="checkbox" class="pe-toggle-input" id="modal-rapid-speculative-enabled"><span class="pe-toggle-slider"></span></div>
-                                    <div class="pe-field-hint">Off by default and not recommended for normal chat/coding. Rapid 0.11.1 only engages for greedy, unconstrained requests; sampled and constrained-tool requests fall through.</div>
+                                    <div class="pe-field-hint">Works with sampling (temperature, top-p). Constrained decoding and tool-call grammars still bypass speculation.</div>
                                 </div>
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-rapid-speculative-source">MTP source</label>
@@ -3449,11 +3449,42 @@
                                 <div class="pe-field" id="modal-rapid-speculative-sidecars-wrap" style="display:none;">
                                     <label class="pe-label">Available sidecars</label>
                                     <div id="modal-rapid-speculative-sidecars-list" class="pe-field-hint" style="font-size:12px;"></div>
+                                    <div id="modal-rapid-speculative-repair-wrap" style="margin-top:8px;">
+                                        <button type="button" class="pe-action-btn" id="modal-rapid-speculative-repair-toggle" aria-expanded="false" aria-controls="modal-rapid-speculative-repair-form">Build / repair sidecar</button>
+                                        <div id="modal-rapid-speculative-repair-form" role="region" aria-labelledby="modal-rapid-speculative-repair-toggle" hidden style="margin-top:8px;">
+                                            <div class="pe-field-hint" style="margin-bottom:6px;">Uses the guarded local repair worker. The selected MLX/BF16 source or recipe is validated before a managed sidecar is registered.</div>
+                                            <label class="pe-label" for="modal-rapid-speculative-repair-kind">Repair source</label>
+                                            <select class="pe-select" id="modal-rapid-speculative-repair-kind">
+                                                <option value="source">MLX source directory</option>
+                                                <option value="recipe">NuSLERP recipe file</option>
+                                                <option value="bf16">BF16 parent / Hugging Face source</option>
+                                            </select>
+                                            <label class="pe-label" for="modal-rapid-speculative-repair-source" style="margin-top:6px;">Source or recipe path</label>
+                                            <input class="pe-input" id="modal-rapid-speculative-repair-source" placeholder="/path/to/source-or-recipe.json or owner/repo">
+                                            <label class="pe-label" for="modal-rapid-speculative-repair-revision" id="modal-rapid-speculative-repair-revision-label" style="display:none; margin-top:6px;">Pinned BF16 revision</label>
+                                            <input class="pe-input" id="modal-rapid-speculative-repair-revision" style="display:none;" placeholder="40-character commit SHA">
+                                            <div style="display:flex; gap:6px; margin-top:8px;">
+                                                <button type="button" class="pe-action-btn" id="modal-rapid-speculative-repair-start">Start repair</button>
+                                                <button type="button" class="pe-action-btn" id="modal-rapid-speculative-repair-validate">Validate current sidecar</button>
+                                                <button type="button" class="pe-action-btn" id="modal-rapid-speculative-repair-requalify">Requalify sidecar</button>
+                                            </div>
+                                            <div class="pe-field" style="margin-top:8px;">
+                                                <label class="pe-label" for="modal-rapid-speculative-requalification-mode">Live validation depth</label>
+                                                <select class="pe-select" id="modal-rapid-speculative-requalification-mode">
+                                                    <option value="screen" selected>Fast screen — short sampled probe (about 2–5 min)</option>
+                                                    <option value="full">Full qualification — sampled and tool grammar (about 40–60 min)</option>
+                                                    <option value="full-diagnostic">Full + greedy safety diagnostic (about 60–90 min)</option>
+                                                </select>
+                                                <div class="pe-field-hint">Fast screen confirms that this sidecar loads and produces live speculative activity. Full qualification is required before the runtime capability can be promoted.</div>
+                                            </div>
+                                            <div class="pe-field-hint" id="modal-rapid-speculative-repair-status" style="margin-top:6px; display:none;"></div>
+                                        </div>
+                                    </div>
                                 </div>
                                 <div class="pe-field" id="modal-rapid-speculative-model-wrap">
                                     <label class="pe-label" for="modal-rapid-speculative-model">Resolved sidecar</label>
                                     <input class="pe-input" id="modal-rapid-speculative-model" placeholder="/absolute/local-sidecar-path">
-                                    <div class="pe-field-hint">Remote Hugging Face sidecars can be preflighted, but Rapid 0.11.1 cannot launch them at a pinned revision. Use an immutable local sidecar.</div>
+                                <div class="pe-field-hint">Remote Hugging Face sidecars can be preflighted, but launch requires an immutable local sidecar.</div>
                                 </div>
                                 <div class="pe-field" id="modal-rapid-speculative-pin-status-wrap" style="display:none;">
                                     <div class="pe-field-hint" id="modal-rapid-speculative-pin-status" style="display:flex; align-items:center; gap:6px; font-size:12px;"></div>
@@ -3468,11 +3499,12 @@
                                 </div>
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-rapid-speculative-tokens">Speculative tokens</label>
-                                    <select class="pe-select" id="modal-rapid-speculative-tokens"><option value="1">1</option><option value="2">2 — conservative</option><option value="3">3</option><option value="4">4</option><option value="6">6</option><option value="8">8 — maximum</option></select>
+                                    <select class="pe-select" id="modal-rapid-speculative-tokens"><option value="1">1</option><option value="2">2 — conservative</option><option value="3" selected>3</option><option value="4">4</option><option value="6">6</option><option value="8">8 — maximum</option></select>
                                 </div>
                                 <div class="pe-field">
                                     <label class="pe-label pe-toggle-label" for="modal-rapid-speculative-disable-auto-k">Disable automatic K selection</label>
                                     <div class="pe-toggle"><input type="checkbox" class="pe-toggle-input" id="modal-rapid-speculative-disable-auto-k"><span class="pe-toggle-slider"></span></div>
+                                    <div class="pe-field-hint">Raising the token count alone usually does not increase depth: the adaptive controller re-picks K each round from measured acceptance. This pins depth at the chosen value for A/B benchmarking, but can reduce throughput when acceptance is low.</div>
                                 </div>
                                 <div class="pe-field">
                                     <label class="pe-label pe-toggle-label" for="modal-rapid-auto-tool-choice">Automatic tool choice</label>
@@ -4143,7 +4175,7 @@
                                          <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
                                          <span class="kv-unified-text">Experimental MTP speculation</span>
                                      </label>
-                                     <div class="field-hint">Not recommended for normal chat or coding: Rapid 0.11.1 only engages on greedy, unconstrained requests. Sampling and constrained tool calls silently fall through.</div>
+                                     <div class="field-hint">Works with sampling (temperature, top-p). Constrained decoding and tool-call grammars still bypass speculation.</div>
                                  </div>
                                  <div class="hardware-field" id="spawn-rapid-speculative-mode-wrap" style="display:none;">
                                      <label for="spawn-rapid-speculative-source">MTP source</label>
@@ -4151,7 +4183,7 @@
                                          <option value="embedded" selected>Embedded prediction heads</option>
                                          <option value="external">External local sidecar</option>
                                      </select>
-                                      <div class="field-hint">Use an immutable local sidecar. Remote Hugging Face sidecars can be preflighted but Rapid 0.11.1 cannot launch them at a pinned revision.</div>
+                                       <div class="field-hint">Use an immutable local sidecar. Remote Hugging Face sidecars can be preflighted, but launch requires an immutable local sidecar.</div>
                                   </div>
                                     <div class="hardware-field" id="spawn-rapid-speculative-sidecars-wrap" style="display:none;">
                                         <label>Available sidecars</label>
@@ -4178,7 +4210,7 @@
                                    </div>
                                  <div class="hardware-field" id="spawn-rapid-speculative-tokens-wrap" style="display:none;">
                                      <label for="spawn-rapid-speculative-tokens">Speculative tokens</label>
-                                     <select id="spawn-rapid-speculative-tokens"><option value="1">1</option><option value="2" selected>2 — conservative</option><option value="3">3</option><option value="4">4</option><option value="6">6</option><option value="8">8 — maximum</option></select>
+                                     <select id="spawn-rapid-speculative-tokens"><option value="1">1</option><option value="2">2 — conservative</option><option value="3" selected>3</option><option value="4">4</option><option value="6">6</option><option value="8">8 — maximum</option></select>
                                  </div>
                                  <div class="hardware-field" id="spawn-rapid-speculative-auto-k-wrap" style="display:none;">
                                      <label class="kv-unified-toggle" for="spawn-rapid-speculative-disable-auto-k">
@@ -4186,6 +4218,7 @@
                                          <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
                                          <span class="kv-unified-text">Disable automatic K selection</span>
                                      </label>
+                                     <div class="field-hint">Raising the token count alone usually does not increase depth: the adaptive controller re-picks K each round from measured acceptance. This pins depth at the chosen value for A/B benchmarking, but can reduce throughput when acceptance is low.</div>
                                  </div>
                                  <div class="hardware-field">
                                      <label class="kv-unified-toggle" for="spawn-rapid-auto-tool-choice">
@@ -7552,6 +7585,26 @@
             </button>
         </div>
     <div class="rapid-mlx-modal-status" id="rapid-mlx-status-text">Checking runtime…</div>
+    <div class="rapid-mlx-source-switcher" role="tablist" aria-label="Rapid-MLX runtime source">
+      <button type="button" class="rapid-mlx-source-tab active" id="rapid-mlx-source-official" role="tab" aria-selected="true">Official releases</button>
+      <button type="button" class="rapid-mlx-source-tab" id="rapid-mlx-source-development" role="tab" aria-selected="false">Development source</button>
+    </div>
+    <section class="rapid-mlx-development-source" id="rapid-mlx-development-source" hidden aria-label="Rapid-MLX development source">
+      <p class="rapid-mlx-development-copy">Use upstream or fork <code>main</code>, a pull request, branch, tag, or exact commit. The reference is resolved to an immutable commit before installation.</p>
+      <div class="rapid-mlx-development-grid">
+        <label for="rapid-mlx-development-repository">Repository
+          <input id="rapid-mlx-development-repository" type="text" value="nmorgowicz/Rapid-MLX" autocomplete="off" spellcheck="false" placeholder="owner/repository">
+        </label>
+        <label for="rapid-mlx-development-reference">Reference
+          <input id="rapid-mlx-development-reference" type="text" value="main" autocomplete="off" spellcheck="false" placeholder="main, branch, pr:2140, or SHA">
+        </label>
+      </div>
+      <div class="rapid-mlx-development-actions">
+        <button type="button" class="rapid-mlx-action-btn rapid-mlx-action-btn-soft" id="rapid-mlx-development-resolve">Resolve revision</button>
+        <button type="button" class="rapid-mlx-action-btn" id="rapid-mlx-development-install" disabled>Install and activate</button>
+      </div>
+      <div class="rapid-mlx-development-resolution" id="rapid-mlx-development-resolution" aria-live="polite">No development revision resolved.</div>
+    </section>
     <fieldset class="rapid-mlx-profile" id="rapid-mlx-profile">
       <legend>Optional capabilities</legend>
       <label><input type="checkbox" id="rapid-mlx-extra-guided" value="guided" checked> Guided generation</label>

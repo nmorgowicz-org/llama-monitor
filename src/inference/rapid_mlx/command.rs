@@ -857,7 +857,7 @@ mod tests {
         let config = crate::inference::rapid_mlx::RapidMlxSpeculativeConfig {
             method: crate::inference::rapid_mlx::RapidMlxSpeculativeMethod::Mtp,
             model: None,
-            num_speculative_tokens: 2,
+            num_speculative_tokens: 3,
             disable_auto_k: false,
         };
         let capabilities =

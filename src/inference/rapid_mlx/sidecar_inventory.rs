@@ -23,11 +23,15 @@ const SIDECAR_WEIGHTS: &str = "mtp.safetensors";
 
 /// The file produced by the build script with provenance metadata.
 const PROVENANCE_FILE: &str = "provenance.json";
+const MTP_TRUNK_MODEL_TYPES: &[&str] = &["qwen3_5", "qwen3_5_moe", "hy_v3"];
 
 /// Provenance data for a locally-built MTP sidecar.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SidecarProvenance {
+    /// Lifecycle state for this artifact (`candidate`, `qualified`, or pending).
+    #[serde(default)]
+    pub status: Option<String>,
     /// The trunk model directory this sidecar was built for.
     pub trunk: String,
     /// The BF16 source (HF repo id or local path) the MTP tensors were extracted from.
@@ -47,6 +51,27 @@ pub struct SidecarProvenance {
     /// Maximum MTP depth if known.
     #[serde(default)]
     pub mtp_depth_max: Option<i64>,
+    /// Provenance schema version emitted by the builder.
+    #[serde(default)]
+    pub schema_version: Option<u32>,
+    /// How the head was produced: recipe reconstruction or direct parent graft.
+    #[serde(default)]
+    pub repair_mode: Option<String>,
+    /// SHA-256 of the exact merge recipe, when recipe reconstruction was used.
+    #[serde(default)]
+    pub recipe_digest: Option<String>,
+    /// Merge method used for recipe reconstruction (currently `nuslerp`).
+    #[serde(default)]
+    pub recipe_method: Option<String>,
+    /// Number of leaf parent sources in the recipe.
+    #[serde(default)]
+    pub recipe_parent_count: Option<usize>,
+    /// Arithmetic precision used while reconstructing the recipe head.
+    #[serde(default)]
+    pub recipe_precision: Option<String>,
+    /// Served requalification status, if the sidecar has been tested after repair.
+    #[serde(default)]
+    pub requalification_status: Option<String>,
 }
 
 /// One discovered local sidecar.
@@ -82,11 +107,44 @@ fn sidecar_root() -> PathBuf {
         .unwrap_or_else(|| crate::paths::AppPaths::default_active_root().join(SIDECAR_SUBDIR))
 }
 
+/// Return the managed sidecar directory for a trunk model path.
+pub fn sidecar_dir_for_trunk(trunk: &Path) -> PathBuf {
+    sidecar_root().join(slugify_trunk_name(trunk))
+}
+
+fn slugify_trunk_name(trunk: &Path) -> String {
+    let name = trunk
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("trunk")
+        .to_ascii_lowercase();
+    let mut slug = String::new();
+    let mut pending_separator = false;
+    for ch in name.chars() {
+        if ch.is_ascii_lowercase() || ch.is_ascii_digit() {
+            if pending_separator && !slug.is_empty() {
+                slug.push('-');
+            }
+            pending_separator = false;
+            slug.push(ch);
+        } else {
+            pending_separator = true;
+        }
+    }
+    if slug.is_empty() {
+        "trunk".to_string()
+    } else {
+        slug
+    }
+}
+
 /// Discover all sidecars under the managed root. Returns an empty list if the
 /// root does not exist (no sidecars built yet).
 pub fn discover_sidecars() -> Result<Vec<SidecarEntry>> {
-    let root = sidecar_root();
+    discover_sidecars_at(&sidecar_root())
+}
 
+fn discover_sidecars_at(root: &Path) -> Result<Vec<SidecarEntry>> {
     // No root = no sidecars. Not an error.
     if !root.exists() {
         return Ok(Vec::new());
@@ -94,7 +152,7 @@ pub fn discover_sidecars() -> Result<Vec<SidecarEntry>> {
 
     let mut entries = Vec::new();
 
-    for entry in std::fs::read_dir(&root).context("Failed to read sidecar root directory")? {
+    for entry in std::fs::read_dir(root).context("Failed to read sidecar root directory")? {
         let entry = entry.context("Failed to read sidecar directory entry")?;
         let dir_path = entry.path();
 
@@ -167,60 +225,124 @@ fn parse_provenance(
 
     // Extract fields from the provenance structure produced by build-mtp-head.py
     let trunk = provenance
-        .get("source")
-        .and_then(|s| s.get("trunk"))
+        .get("trunk")
         .and_then(|v| v.as_str())
+        .or_else(|| {
+            provenance
+                .get("source")
+                .and_then(|s| s.get("trunk"))
+                .and_then(|v| v.as_str())
+        })
+        .or_else(|| {
+            provenance
+                .get("target")
+                .and_then(|target| target.get("snapshot"))
+                .and_then(|v| v.as_str())
+        })
         .unwrap_or("")
         .to_string();
 
     let bf16_source = provenance
-        .get("source")
-        .and_then(|s| s.get("bf16_source"))
+        .get("bf16_source")
         .and_then(|v| v.as_str())
+        .or_else(|| {
+            provenance
+                .get("source")
+                .and_then(|s| s.get("bf16_source"))
+                .and_then(|v| v.as_str())
+        })
+        .or_else(|| {
+            provenance
+                .get("source")
+                .and_then(|source| source.get("snapshot"))
+                .and_then(|v| v.as_str())
+        })
         .unwrap_or("")
         .to_string();
 
     let built_at = provenance
         .get("built_at")
         .and_then(|v| v.as_str())
+        .or_else(|| provenance.get("created_at").and_then(|v| v.as_str()))
         .unwrap_or("")
         .to_string();
 
     let sha256 = provenance
         .get("sha256")
         .and_then(|v| v.as_str())
+        .or_else(|| {
+            provenance
+                .get("validation")
+                .and_then(|validation| validation.get("sha256"))
+                .and_then(|v| v.as_str())
+        })
         .unwrap_or("")
         .to_string();
 
     // Norm check: all_positive field in validation
     let norm_check_passed = provenance
-        .get("validation")
-        .and_then(|v| v.get("all_positive"))
+        .get("norm_check_passed")
         .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+        .unwrap_or_else(|| {
+            provenance
+                .get("validation")
+                .and_then(|v| v.get("all_positive"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or_else(|| {
+                    provenance
+                        .get("validation")
+                        .and_then(|v| v.get("pre_fc_norm_means"))
+                        .and_then(|v| v.as_object())
+                        .map(|means| {
+                            !means.is_empty()
+                                && means.values().all(|value| {
+                                    value
+                                        .as_f64()
+                                        .is_some_and(|mean| mean.is_finite() && mean > 0.0)
+                                })
+                        })
+                        .unwrap_or(false)
+                })
+        });
+
+    let recipe = provenance.get("recipe");
+    let recipe_parent_count = recipe
+        .and_then(|value| value.get("parents"))
+        .and_then(|value| value.as_array())
+        .map(Vec::len);
 
     // Quantization hint: if the slug or bf16_source contains quant info
-    let quantization = {
-        let slug_lower = slug.to_lowercase();
-        if slug_lower.contains("8bit") || slug_lower.contains("q8") || slug_lower.contains("mxfp8")
-        {
-            Some("8-bit".to_string())
-        } else if slug_lower.contains("4bit") || slug_lower.contains("q4") {
-            Some("4-bit".to_string())
-        } else {
-            None
-        }
-    };
+    let quantization = provenance
+        .get("quantization")
+        .and_then(|value| value.as_str())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            let slug_lower = slug.to_lowercase();
+            if slug_lower.contains("8bit")
+                || slug_lower.contains("q8")
+                || slug_lower.contains("mxfp8")
+            {
+                Some("8-bit".to_string())
+            } else if slug_lower.contains("4bit") || slug_lower.contains("q4") {
+                Some("4-bit".to_string())
+            } else {
+                None
+            }
+        });
 
     // File size estimate
-    let estimated_memory_bytes = weights_path.metadata().ok().map(|m| m.len()).or_else(|| {
-        // If the weights file doesn't exist yet, we can't estimate.
-        // But the provenance might have a size from the build time.
-        provenance
-            .get("validation")
-            .and_then(|v| v.get("estimated_memory_bytes"))
-            .and_then(|v| v.as_u64())
-    });
+    let estimated_memory_bytes = provenance
+        .get("estimated_memory_bytes")
+        .and_then(|value| value.as_u64())
+        .or_else(|| weights_path.metadata().ok().map(|m| m.len()))
+        .or_else(|| {
+            // If the weights file doesn't exist yet, we can't estimate.
+            // But the provenance might have a size from the build time.
+            provenance
+                .get("validation")
+                .and_then(|v| v.get("estimated_memory_bytes"))
+                .and_then(|v| v.as_u64())
+        });
 
     Ok(SidecarEntry {
         slug: slug.to_string(),
@@ -228,6 +350,10 @@ fn parse_provenance(
         has_weights: weights_path.is_file(),
         has_provenance: true,
         provenance: Some(SidecarProvenance {
+            status: provenance
+                .get("status")
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned),
             trunk,
             bf16_source,
             built_at,
@@ -235,7 +361,35 @@ fn parse_provenance(
             norm_check_passed,
             estimated_memory_bytes,
             quantization,
-            mtp_depth_max: None,
+            mtp_depth_max: provenance
+                .get("mtp_depth_max")
+                .and_then(|value| value.as_i64()),
+            schema_version: provenance
+                .get("schema_version")
+                .and_then(|value| value.as_u64())
+                .and_then(|value| u32::try_from(value).ok()),
+            repair_mode: provenance
+                .get("repair_mode")
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned),
+            recipe_digest: recipe
+                .and_then(|value| value.get("digest"))
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned),
+            recipe_method: recipe
+                .and_then(|value| value.get("method"))
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned),
+            recipe_parent_count,
+            recipe_precision: recipe
+                .and_then(|value| value.get("compute_dtype"))
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned),
+            requalification_status: provenance
+                .get("requalification")
+                .and_then(|value| value.get("status"))
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned),
         }),
     })
 }
@@ -251,40 +405,244 @@ pub fn estimate_local_companion_vram(companion_path: &Path) -> Option<u64> {
         .map(|m| m.len())
 }
 
-/// Check if a companion path belongs to a known sidecar in the inventory.
-/// Returns the sidecar entry if found, `None` otherwise.
-#[allow(dead_code)]
-pub fn find_sidecar_for_path(companion_path: &Path) -> Option<SidecarEntry> {
-    discover_sidecars().ok().and_then(|entries| {
-        entries
-            .into_iter()
-            .find(|e| e.path == companion_path.to_string_lossy())
+/// Check if a trunk is an MTP-eligible Rapid-MLX architecture.
+///
+/// This mirrors Rapid-MLX's model-type gate. Tensor metadata or a sidecar
+/// alone must never make an unrelated MLX model eligible for speculation.
+pub fn is_mtp_eligible_trunk(trunk: &Path) -> bool {
+    let Ok(raw) = std::fs::read_to_string(trunk.join("config.json")) else {
+        return false;
+    };
+    let Ok(config) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return false;
+    };
+    let model_type = config
+        .get("model_type")
+        .or_else(|| config.get("text_config").and_then(|v| v.get("model_type")))
+        .and_then(|v| v.as_str());
+    model_type.is_some_and(|value| MTP_TRUNK_MODEL_TYPES.contains(&value))
+}
+
+fn paths_match(left: &str, right: &Path) -> bool {
+    left == right.to_string_lossy()
+        || std::fs::canonicalize(left)
+            .ok()
+            .zip(std::fs::canonicalize(right).ok())
+            .is_some_and(|(left, right)| left == right)
+}
+
+/// Find the validated managed sidecar for a trunk, or accept a managed
+/// sidecar directory for compatibility with callers that already have one.
+pub fn find_sidecar_for_path(trunk_or_sidecar: &Path) -> Option<SidecarEntry> {
+    find_sidecar_for_root(&sidecar_root(), trunk_or_sidecar)
+}
+
+fn find_sidecar_for_root(root: &Path, trunk_or_sidecar: &Path) -> Option<SidecarEntry> {
+    discover_sidecars_at(root).ok().and_then(|entries| {
+        entries.into_iter().find(|entry| {
+            let Some(provenance) = entry.provenance.as_ref() else {
+                return false;
+            };
+            let matches_trunk = paths_match(&provenance.trunk, trunk_or_sidecar);
+            let matches_sidecar = paths_match(&entry.path, trunk_or_sidecar);
+            (matches_trunk || matches_sidecar)
+                && is_usable(entry)
+                && is_mtp_eligible_trunk(Path::new(&provenance.trunk))
+        })
     })
+}
+
+fn is_usable(entry: &SidecarEntry) -> bool {
+    entry.has_weights
+        && entry.has_provenance
+        && entry.provenance.as_ref().is_some_and(|provenance| {
+            provenance.norm_check_passed
+                && matches!(
+                    provenance.status.as_deref(),
+                    Some("candidate") | Some("qualified") | Some("built_unvalidated_online")
+                )
+        })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn test_sidecar_root(dir: &Path) {
-        let _ = SIDECAR_ROOT.set(dir.join(SIDECAR_SUBDIR));
-    }
 
     #[test]
     fn empty_root_returns_no_entries() {
         let dir = tempfile::tempdir().unwrap();
-        test_sidecar_root(dir.path());
+        let root = dir.path().join(SIDECAR_SUBDIR);
+        assert!(discover_sidecars_at(&root).unwrap().is_empty());
+    }
 
-        // Note: SIDECAR_ROOT is a OnceLock, so after set() it's immutable.
-        // For this test we just check that a non-existent root returns empty.
-        // In practice, the root would be set once at startup.
-        let root = sidecar_root();
-        assert!(!root.exists());
+    #[test]
+    fn eligible_trunk_selects_usable_matching_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let trunk = dir.path().join("qwen-trunk");
+        let root = dir.path().join("sidecars");
+        let sidecar = root.join("qwen-trunk");
+        std::fs::create_dir_all(&trunk).unwrap();
+        std::fs::create_dir_all(&sidecar).unwrap();
+        std::fs::write(
+            trunk.join("config.json"),
+            serde_json::json!({"model_type": "qwen3_5"}).to_string(),
+        )
+        .unwrap();
+        std::fs::write(sidecar.join(SIDECAR_WEIGHTS), b"weights").unwrap();
+        std::fs::write(
+            sidecar.join(PROVENANCE_FILE),
+            serde_json::json!({
+                "status": "candidate",
+                "trunk": trunk,
+                "bf16_source": "parent/qwen",
+                "built_at": "2026-08-20T00:00:00Z",
+                "sha256": "digest",
+                "norm_check_passed": true
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let entry = find_sidecar_for_root(&root, &trunk).expect("matching sidecar");
+        assert_eq!(entry.slug, "qwen-trunk");
+    }
+
+    #[test]
+    fn non_allowlisted_trunk_cannot_adopt_a_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let trunk = dir.path().join("llama-trunk");
+        let root = dir.path().join("sidecars");
+        let sidecar = root.join("llama-trunk");
+        std::fs::create_dir_all(&trunk).unwrap();
+        std::fs::create_dir_all(&sidecar).unwrap();
+        std::fs::write(
+            trunk.join("config.json"),
+            serde_json::json!({"model_type": "llama"}).to_string(),
+        )
+        .unwrap();
+        std::fs::write(sidecar.join(SIDECAR_WEIGHTS), b"weights").unwrap();
+        std::fs::write(
+            sidecar.join(PROVENANCE_FILE),
+            serde_json::json!({
+                "status": "qualified",
+                "trunk": trunk,
+                "bf16_source": "parent/llama",
+                "built_at": "2026-08-20T00:00:00Z",
+                "sha256": "digest",
+                "norm_check_passed": true
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        assert!(find_sidecar_for_root(&root, &trunk).is_none());
     }
 
     #[test]
     fn provenance_parsed_correctly() {
-        // This tests parse_provenance with a realistic provenance.json
-        // (skipped for now since it requires a temp dir setup; the real
-        // integration test is the API endpoint)
+        let dir = tempfile::tempdir().unwrap();
+        let weights = dir.path().join(SIDECAR_WEIGHTS);
+        let provenance_path = dir.path().join(PROVENANCE_FILE);
+        std::fs::write(&weights, b"fixture").unwrap();
+        std::fs::write(
+            &provenance_path,
+            serde_json::json!({
+                "schema_version": 2,
+                "status": "repaired",
+                "repair_mode": "recipe_reconstruction",
+                "target": {"snapshot": "/models/brainwaves"},
+                "created_at": "2026-08-20T12:00:00Z",
+                "validation": {"pre_fc_norm_means": {
+                    "pre_fc_norm_embedding.weight": 1.0,
+                    "pre_fc_norm_hidden.weight": 1.0
+                }},
+                "recipe": {
+                    "digest": "abc123",
+                    "method": "nuslerp",
+                    "compute_dtype": "bfloat16",
+                    "parents": [{"repo_id": "parent/a"}, {"repo_id": "parent/b"}]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let entry =
+            parse_provenance("brainwaves-recipe", dir.path(), &weights, &provenance_path).unwrap();
+        let provenance = entry.provenance.unwrap();
+        assert_eq!(provenance.status.as_deref(), Some("repaired"));
+        assert_eq!(
+            provenance.repair_mode.as_deref(),
+            Some("recipe_reconstruction")
+        );
+        assert_eq!(provenance.recipe_method.as_deref(), Some("nuslerp"));
+        assert_eq!(provenance.recipe_parent_count, Some(2));
+        assert_eq!(provenance.recipe_precision.as_deref(), Some("bfloat16"));
+        assert!(provenance.norm_check_passed);
+    }
+
+    #[test]
+    fn top_level_schema_v2_provenance_is_parsed_correctly() {
+        let dir = tempfile::tempdir().unwrap();
+        let weights = dir.path().join(SIDECAR_WEIGHTS);
+        let provenance_path = dir.path().join(PROVENANCE_FILE);
+        std::fs::write(&weights, b"fixture").unwrap();
+        std::fs::write(
+            &provenance_path,
+            serde_json::json!({
+                "schema_version": 2,
+                "status": "candidate",
+                "repair_mode": "head_only_adoption",
+                "trunk": "/models/qwen35-9b",
+                "bf16_source": "/heads/qwen35-9b",
+                "built_at": "2026-08-20T12:00:00Z",
+                "sha256": "digest",
+                "norm_check_passed": true,
+                "estimated_memory_bytes": 123,
+                "quantization": "4-bit",
+                "mtp_depth_max": 1,
+                "validation": {"all_positive": true}
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let entry = parse_provenance("qwen35-9b", dir.path(), &weights, &provenance_path).unwrap();
+        let provenance = entry.provenance.unwrap();
+        assert_eq!(provenance.trunk, "/models/qwen35-9b");
+        assert_eq!(provenance.bf16_source, "/heads/qwen35-9b");
+        assert_eq!(provenance.quantization.as_deref(), Some("4-bit"));
+        assert_eq!(provenance.mtp_depth_max, Some(1));
+        assert_eq!(provenance.estimated_memory_bytes, Some(123));
+        assert!(provenance.norm_check_passed);
+    }
+
+    #[test]
+    fn pending_sidecar_is_not_usable() {
+        let entry = SidecarEntry {
+            slug: "pending".into(),
+            path: "/tmp/pending".into(),
+            has_weights: true,
+            has_provenance: true,
+            provenance: Some(SidecarProvenance {
+                status: Some("pending".into()),
+                trunk: "/tmp/trunk".into(),
+                bf16_source: "unknown".into(),
+                built_at: "2026-08-20T00:00:00Z".into(),
+                sha256: "abc".into(),
+                norm_check_passed: false,
+                estimated_memory_bytes: None,
+                quantization: None,
+                mtp_depth_max: None,
+                schema_version: Some(2),
+                repair_mode: Some("relocation".into()),
+                recipe_digest: None,
+                recipe_method: None,
+                recipe_parent_count: None,
+                recipe_precision: None,
+                requalification_status: None,
+            }),
+        };
+        assert!(!is_usable(&entry));
     }
 }

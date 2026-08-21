@@ -45,6 +45,11 @@ def main():
         "--hf-model", required=True, help="HuggingFace model ID (e.g. Qwen/Qwen3.5-27B)"
     )
     parser.add_argument(
+        "--revision",
+        default=None,
+        help="Immutable Hugging Face commit/revision for every source fetch.",
+    )
+    parser.add_argument(
         "--mlx-model", required=True, help="Path to quantized MLX model directory"
     )
     parser.add_argument(
@@ -80,12 +85,38 @@ def main():
     from huggingface_hub import hf_hub_download
 
     logger.info(f"Downloading weight index from {args.hf_model}...")
-    idx_path = hf_hub_download(args.hf_model, "model.safetensors.index.json")
+    idx_path = hf_hub_download(
+        args.hf_model, "model.safetensors.index.json", revision=args.revision
+    )
     with open(idx_path) as f:
         idx = json.load(f)
 
     weight_map = idx.get("weight_map", {})
-    mtp_keys = {k: v for k, v in weight_map.items() if k.startswith("mtp.")}
+
+    def canonical_mtp_key(key):
+        """Normalize the MTP namespace variants published on the Hub.
+
+        MLX head-only checkpoints commonly publish bare keys, while full
+        Qwen checkpoints may retain the Transformers ``language_model.mtp``
+        wrapper.  The sidecar contract is always the explicit ``mtp.*``
+        namespace, so normalize before quantization and serialization.
+        """
+        if key.startswith("language_model.mtp."):
+            return "mtp." + key[len("language_model.mtp."):]
+        if key.startswith("mtp."):
+            return key
+        if (
+            key == "fc.weight"
+            or key.startswith("layers.")
+            or key.startswith("pre_fc_norm_")
+            or key.startswith("norm.")
+        ):
+            return "mtp." + key
+        return None
+
+    mtp_keys = {
+        k: v for k, v in weight_map.items() if canonical_mtp_key(k) is not None
+    }
 
     if not mtp_keys:
         logger.error("No mtp.* weights found in model index!")
@@ -101,11 +132,14 @@ def main():
     all_mtp_weights = {}
     for shard_file in shard_files:
         logger.info(f"Downloading {shard_file}...")
-        shard_path = hf_hub_download(args.hf_model, shard_file)
+        shard_path = hf_hub_download(args.hf_model, shard_file, revision=args.revision)
         shard_weights = mx.load(shard_path)
         for k in mtp_keys:
             if mtp_keys[k] == shard_file and k in shard_weights:
-                all_mtp_weights[k] = shard_weights[k]
+                canonical = canonical_mtp_key(k)
+                if canonical in all_mtp_weights:
+                    raise ValueError(f"Duplicate MTP tensor after namespace normalization: {canonical}")
+                all_mtp_weights[canonical] = shard_weights[k]
         del shard_weights
 
     logger.info(f"Extracted {len(all_mtp_weights)} MTP weight tensors")
@@ -196,7 +230,9 @@ def main():
     text_config = config.get("text_config", config)
     if text_config.get("mtp_num_hidden_layers") is None:
         # Read from HF config
-        hf_cfg_path = hf_hub_download(args.hf_model, "config.json")
+        hf_cfg_path = hf_hub_download(
+            args.hf_model, "config.json", revision=args.revision
+        )
         with open(hf_cfg_path) as f:
             hf_cfg = json.load(f)
         hf_tc = hf_cfg.get("text_config", hf_cfg)

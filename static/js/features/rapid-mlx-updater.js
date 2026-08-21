@@ -9,8 +9,19 @@ import { attachModalFocusTrap, detachModalFocusTrap, fetchReleaseList, buildRele
 
 let _runtimeStatus = null;
 let _releases = [];
+let _developmentResolution = null;
 let _mutationInflight = false;
 let _changelogCache = Object.create(null);
+const SHA_SHORT_LENGTH = 12;
+
+function activeRuntimeLabel(active) {
+  if (!active) return 'No Rapid-MLX runtime installed.';
+  if (active.source_kind === 'git' && active.source_commit) {
+    const repository = active.source_repository || 'development source';
+    return `Rapid-MLX ${repository}@${active.source_commit.slice(0, SHA_SHORT_LENGTH)}`;
+  }
+  return `Rapid-MLX v${active.version}`;
+}
 
 export function initRapidMlxUpdater() {
   // Settings: Manage button
@@ -26,6 +37,16 @@ export function initRapidMlxUpdater() {
   }
 
   const actionRow = document.querySelector('#rapid-mlx-modal .rapid-mlx-modal-actions');
+  const officialTab = document.getElementById('rapid-mlx-source-official');
+  const developmentTab = document.getElementById('rapid-mlx-source-development');
+  if (officialTab) officialTab.addEventListener('click', () => selectRuntimeSource('official'));
+  if (developmentTab) developmentTab.addEventListener('click', () => selectRuntimeSource('development'));
+
+  const resolveDevelopmentBtn = document.getElementById('rapid-mlx-development-resolve');
+  if (resolveDevelopmentBtn) resolveDevelopmentBtn.addEventListener('click', resolveDevelopmentSource);
+  const installDevelopmentBtn = document.getElementById('rapid-mlx-development-install');
+  if (installDevelopmentBtn) installDevelopmentBtn.addEventListener('click', installDevelopmentSource);
+
   if (actionRow && !document.getElementById('rapid-mlx-settings-evidence-btn')) {
     const evidenceBtn = document.createElement('button');
     evidenceBtn.id = 'rapid-mlx-settings-evidence-btn';
@@ -221,8 +242,10 @@ export async function fetchRuntimeStatus() {
     const pillVer = document.getElementById('rapid-mlx-pill-version');
     if (pill && supported && active && !mutating) {
       pill.style.display = 'flex';
-      if (pillVer) pillVer.textContent = `Rapid-MLX · v${active.version}`;
-      pill.title = `Rapid-MLX runtime v${active.version}. Click to manage.`;
+      if (pillVer) pillVer.textContent = active.source_kind === 'git'
+        ? `Rapid-MLX · ${active.source_commit?.slice(0, SHA_SHORT_LENGTH) || 'development'}`
+        : `Rapid-MLX · v${active.version}`;
+      pill.title = `${activeRuntimeLabel(active)}. Click to manage.`;
     } else if (pill) {
       pill.style.display = 'none';
     }
@@ -246,6 +269,127 @@ export async function fetchReleases() {
     _releases = data.releases || [];
   } catch {
     // silent
+  }
+}
+
+function selectRuntimeSource(source) {
+  const official = source === 'official';
+  const officialTab = document.getElementById('rapid-mlx-source-official');
+  const developmentTab = document.getElementById('rapid-mlx-source-development');
+  const developmentPanel = document.getElementById('rapid-mlx-development-source');
+  const releasesList = document.getElementById('rapid-mlx-releases-list');
+  const releasesPane = releasesList?.closest('.rapid-mlx-pane-list');
+  const notesPane = document.querySelector('#rapid-mlx-modal .rapid-mlx-pane-notes');
+
+  officialTab?.classList.toggle('active', official);
+  officialTab?.setAttribute('aria-selected', String(official));
+  developmentTab?.classList.toggle('active', !official);
+  developmentTab?.setAttribute('aria-selected', String(!official));
+  if (developmentPanel) developmentPanel.hidden = official;
+  if (releasesPane) releasesPane.style.display = official ? '' : 'none';
+  if (notesPane) notesPane.style.display = official ? '' : 'none';
+}
+
+function developmentRequest(includeConfirmation = false) {
+  const repository = document.getElementById('rapid-mlx-development-repository')?.value.trim() || '';
+  const reference = document.getElementById('rapid-mlx-development-reference')?.value.trim() || '';
+  return {
+    repository,
+    reference,
+    resolved_commit: _developmentResolution?.resolved_commit || null,
+    extras: selectedRuntimeExtras(),
+    ...(includeConfirmation ? { confirm: 'INSTALL_RAPID_MLX_DEVELOPMENT' } : { confirm: '' }),
+  };
+}
+
+function renderDevelopmentResolution(message, kind = '') {
+  const statusEl = document.getElementById('rapid-mlx-development-resolution');
+  const installBtn = document.getElementById('rapid-mlx-development-install');
+  if (!statusEl) return;
+  statusEl.className = `rapid-mlx-development-resolution${kind ? ` ${kind}` : ''}`;
+  statusEl.textContent = message;
+  if (installBtn) installBtn.disabled = !_developmentResolution || _mutationInflight;
+}
+
+async function resolveDevelopmentSource() {
+  if (_mutationInflight) return;
+  const resolveBtn = document.getElementById('rapid-mlx-development-resolve');
+  if (resolveBtn) {
+    resolveBtn.disabled = true;
+    resolveBtn.textContent = 'Resolving…';
+  }
+  _developmentResolution = null;
+  renderDevelopmentResolution('Resolving the reference to an immutable commit…');
+
+  try {
+    const response = await fetch('/api/rapid-mlx/runtime/development/resolve', {
+      method: 'POST',
+      headers: {
+        ...(window.authHeaders ? window.authHeaders() : {}),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(developmentRequest()),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || !body.source) throw new Error(body.error || 'Could not resolve development source');
+    _developmentResolution = body.source;
+    const source = body.source;
+    const title = source.title ? ` · ${source.title}` : '';
+    const base = source.base_commit ? ` · base ${source.base_commit.slice(0, SHA_SHORT_LENGTH)}` : '';
+    renderDevelopmentResolution(
+      `Resolved ${source.repository}@${source.requested_ref} → ${source.resolved_commit}${title}${base}`,
+      'is-success'
+    );
+  } catch (error) {
+    renderDevelopmentResolution(error.message, 'is-error');
+  } finally {
+    if (resolveBtn) {
+      resolveBtn.disabled = false;
+      resolveBtn.textContent = 'Resolve revision';
+    }
+  }
+}
+
+async function installDevelopmentSource() {
+  if (_mutationInflight || !_developmentResolution) return;
+  const installBtn = document.getElementById('rapid-mlx-development-install');
+  _mutationInflight = true;
+  if (installBtn) {
+    installBtn.disabled = true;
+    installBtn.textContent = 'Installing…';
+  }
+
+  const token = await getDbAdminToken();
+  if (!token) {
+    showToast('Rapid-MLX development install requires authentication.', 'error');
+    _mutationInflight = false;
+    if (installBtn) {
+      installBtn.disabled = false;
+      installBtn.textContent = 'Install and activate';
+    }
+    return;
+  }
+
+  try {
+    const response = await fetch('/api/rapid-mlx/runtime/development/install', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(developmentRequest(true)),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || 'Development install failed');
+    showToast(`Rapid-MLX ${_developmentResolution.resolved_commit.slice(0, SHA_SHORT_LENGTH)} install started`, 'success');
+    if (body.job_id) pollJob(body.job_id);
+  } catch (error) {
+    showToast(`Rapid-MLX development install failed: ${error.message}`, 'error');
+    _mutationInflight = false;
+    if (installBtn) {
+      installBtn.disabled = false;
+      installBtn.textContent = 'Install and activate';
+    }
   }
 }
 
@@ -275,7 +419,7 @@ function updateSettingsSummary() {
 
   if (active) {
     const note = rollbackAvail ? ' · Rollback available' : '';
-    summaryEl.textContent = `v${active.version} active${note}.`;
+    summaryEl.textContent = `${activeRuntimeLabel(active)} active${note}.`;
   } else {
     summaryEl.textContent = 'No Rapid-MLX runtime installed.';
   }
@@ -317,7 +461,7 @@ async function openRapidMlxModal() {
     } else if (mutating) {
       statusEl.textContent = 'Runtime operation in progress…';
     } else if (active) {
-      statusEl.textContent = `Rapid-MLX v${active.version} is active.`;
+      statusEl.textContent = `${activeRuntimeLabel(active)} is active.`;
     } else {
       statusEl.textContent = 'No Rapid-MLX runtime installed.';
     }
@@ -329,7 +473,7 @@ async function openRapidMlxModal() {
   const rollbackBtn = document.getElementById('rapid-mlx-rollback-btn');
 
   if (upgradeBtn) {
-    upgradeBtn.style.display = (supported && active && !mutating) ? '' : 'none';
+    upgradeBtn.style.display = (supported && active && active.source_kind !== 'git' && !mutating) ? '' : 'none';
   }
   if (repairBtn) {
     repairBtn.style.display = (supported && active && !mutating) ? '' : 'none';
@@ -337,6 +481,10 @@ async function openRapidMlxModal() {
   if (rollbackBtn) {
     rollbackBtn.style.display = (supported && rollbackAvail && !mutating) ? '' : 'none';
   }
+
+  selectRuntimeSource('official');
+  _developmentResolution = null;
+  renderDevelopmentResolution('No development revision resolved.');
 
   // Render releases list
   const listEl = document.getElementById('rapid-mlx-releases-list');
@@ -455,12 +603,18 @@ function buildReleaseRow(release, isCurrent, isLatest) {
 // ── Actions (use db-admin-token for mutations) ──────────────────────────────
 
 async function getDbAdminToken() {
-  const tokenResp = await fetch('/api/db/admin-token', {
-    headers: window.authHeaders ? window.authHeaders() : {},
-  });
-  if (!tokenResp.ok) return null;
-  const data = await tokenResp.json().catch(() => ({}));
-  return data.token || null;
+  try {
+    const tokenResp = await fetch('/api/db/admin-token', {
+      headers: window.authHeaders ? window.authHeaders() : {},
+    });
+    if (!tokenResp.ok) return null;
+    const data = await tokenResp.json().catch(() => ({}));
+    return data.token || null;
+  } catch {
+    // Callers use a null token to restore their mutation controls. Never let a
+    // network/authentication failure strand the global mutation guard.
+    return null;
+  }
 }
 
 async function installVersion(btn, release) {

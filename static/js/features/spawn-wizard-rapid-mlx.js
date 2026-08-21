@@ -15,9 +15,14 @@
 
 import { wizardState, dom } from './spawn-wizard.js';
 import {
+    RAPID_MLX_DEFAULT_SPECULATIVE_TOKENS,
     rapidMlxPrefillStepSizeDefault,
     rapidMlxProfileHasVision,
 } from './rapid-mlx-prefill.js';
+import {
+    findRapidMlxSidecarForTrunk,
+    rapidMlxSidecarProvenance,
+} from '../core/rapid-mlx-sidecars.js';
 
 /*
  * Mirrors the two Rapid-MLX mutual-exclusion rules that involve the Phase 7 throughput
@@ -325,24 +330,58 @@ async function _fetchSpawnSidecars() {
 
     const h = wizardState.hardware;
     const modelInput = document.getElementById('spawn-rapid-speculative-model');
+    const selectedTrunk = (wizardState.model.path || '').trim();
+    const matchingSidecar = findRapidMlxSidecarForTrunk(data.sidecars, selectedTrunk);
+
+    // Auto-selection is deliberately one-way: only an empty field or a value we
+    // previously selected automatically may be replaced. A typed path or a
+    // sidecar chosen from the list is the user's override and must survive a
+    // refresh or model-path change.
+    if (matchingSidecar && (!h.speculativeModel || h.speculativeModelAutoSelected)) {
+      h.speculativeModel = matchingSidecar.path;
+      h.speculativeModelAutoSelected = true;
+      if (modelInput) modelInput.value = matchingSidecar.path;
+      window.scheduleVramUpdate?.();
+    } else if (!matchingSidecar && h.speculativeModelAutoSelected) {
+      h.speculativeModel = '';
+      h.speculativeModelAutoSelected = false;
+      if (modelInput) modelInput.value = '';
+      _hideSpawnTrust();
+      window.scheduleVramUpdate?.();
+    }
 
     // Build sidecar list
     let html = '';
+    if (matchingSidecar && h.speculativeModelAutoSelected) {
+      html += '<div class="field-hint" style="color:var(--success,#5ce68a); margin-bottom:5px;">Auto-selected validated sidecar for this trunk. The path remains editable below.</div>';
+    } else if (!matchingSidecar) {
+      const reason = selectedTrunk.startsWith('/')
+        ? (h.speculativeModel
+          ? 'No managed sidecar matches this trunk; the existing manual path is preserved—verify the pairing before launch.'
+          : 'No validated sidecar is registered for this trunk; speculation will stay off until one is selected.')
+        : (h.speculativeModel
+          ? 'Managed auto-selection is unavailable for this model reference; the explicit sidecar path is preserved.'
+          : 'Select a local trunk or enter an explicit local sidecar; managed auto-selection is unavailable for this model reference.');
+      html += '<div class="field-hint" style="color:var(--warn,#e6a41c); margin-bottom:5px;">' + reason + '</div>';
+    }
     data.sidecars.forEach((s, i) => {
-      const vram = s.estimatedMemoryBytes != null
-        ? '~' + (s.estimatedMemoryBytes >= 1073741824
-            ? (s.estimatedMemoryBytes / 1073741824).toFixed(1) + ' GB'
-            : Math.round(s.estimatedMemoryBytes / 1048576) + ' MB')
+      const p = rapidMlxSidecarProvenance(s);
+      const vram = p.estimatedMemoryBytes != null
+          ? '~' + (p.estimatedMemoryBytes >= 1073741824
+            ? (p.estimatedMemoryBytes / 1073741824).toFixed(1) + ' GB'
+            : Math.round(p.estimatedMemoryBytes / 1048576) + ' MB')
         : '? VRAM';
 
-      const trunkShort = s.trunk ? s.trunk.split('/').pop() : '?';
+      const trunkShort = p.trunk ? p.trunk.split('/').pop() : '?';
 
       html += '<button type="button" class="hw-action-btn" data-sidecar-index="' + i + '" style="display:block; width:100%; text-align:left; padding:6px 8px; margin-bottom:4px; font-size:11px; background:var(--color-surface,#1a1d24); border:1px solid var(--color-border,#2a2d34); border-radius:4px; cursor:pointer;">';
       html += '<strong>' + DOMPurify.sanitize(s.slug) + '</strong> ';
       html += '<span style="color:var(--text-muted,#888);">' + vram + '</span>';
-      if (s.trunk) html += ' <span style="color:var(--text-muted,#888);">for ' + DOMPurify.sanitize(trunkShort) + '</span>';
-      if (s.builtAt) html += ' <span style="color:var(--text-muted,#888);">(' + _timeAgoSpawn(s.builtAt) + ')</span>';
-      if (!s.normCheckPassed) html += ' <span style="color:var(--err,#e65c5c);">⚠ norm check failed</span>';
+      if (p.trunk) html += ' <span style="color:var(--text-muted,#888);">for ' + DOMPurify.sanitize(trunkShort) + '</span>';
+      if (p.repairMode === 'recipe_reconstruction') html += ' <span style="color:var(--accent,#8cc8ff);">' + (p.requalificationStatus === 'passed' ? 'Recipe reconstructed · qualified' : 'Recipe reconstructed · awaiting requalification') + '</span>';
+      else if (p.repairMode === 'direct_parent') html += ' <span style="color:var(--text-muted,#888);">Direct parent</span>';
+      if (p.builtAt) html += ' <span style="color:var(--text-muted,#888);">(' + _timeAgoSpawn(p.builtAt) + ')</span>';
+      if (!p.normCheckPassed) html += ' <span style="color:var(--err,#e65c5c);">⚠ norm check failed</span>';
       html += '</button>';
     });
 
@@ -354,19 +393,22 @@ async function _fetchSpawnSidecars() {
       btn.addEventListener('click', async () => {
         const idx = parseInt(btn.getAttribute('data-sidecar-index'));
         const sidecar = data.sidecars[idx];
+        const p = rapidMlxSidecarProvenance(sidecar);
 
         // Set the companion model path
         if (modelInput) {
           modelInput.value = sidecar.path;
           h.speculativeModel = sidecar.path;
+          h.speculativeModelAutoSelected = false;
+          window.scheduleVramUpdate?.();
         }
 
         // Populate pin status from sidecar data
         h.speculativeTrustRepoId = sidecar.slug;
-        h.speculativeTrustRevision = sidecar.sha256 ? sidecar.sha256.substring(0, 12) : '';
+        h.speculativeTrustRevision = p.sha256 ? p.sha256.substring(0, 12) : '';
         h.speculativeTrustRequired = false; // local sidecars don't need trust
-        h.speculativeTrustEstimatedMemoryBytes = sidecar.estimatedMemoryBytes;
-        h.speculativeTrustResolvedAt = sidecar.builtAt;
+        h.speculativeTrustEstimatedMemoryBytes = p.estimatedMemoryBytes;
+        h.speculativeTrustResolvedAt = p.builtAt;
         h.speculativeTrustStale = false;
         _renderSpawnPinStatus();
         _updateSpawnTrustUI(h, !!h.speculativeEnabled);
@@ -378,12 +420,19 @@ async function _fetchSpawnSidecars() {
   }
 }
 
+export function refreshRapidMlxSidecars() {
+  const h = wizardState.hardware;
+  if (h.speculativeEnabled && h.speculativeSource === 'external') {
+    _fetchSpawnSidecars();
+  }
+}
+
 export function syncRapidSpeculativeFields() {
   const h = wizardState.hardware;
   if (dom.speculativeEnabledCheck) dom.speculativeEnabledCheck.checked = !!h.speculativeEnabled;
   if (dom.speculativeSourceSelect) dom.speculativeSourceSelect.value = h.speculativeSource || 'embedded';
   if (dom.speculativeModelInput) dom.speculativeModelInput.value = h.speculativeModel || '';
-  if (dom.speculativeTokensSelect) dom.speculativeTokensSelect.value = String(h.speculativeTokens || 2);
+    if (dom.speculativeTokensSelect) dom.speculativeTokensSelect.value = String(h.speculativeTokens || RAPID_MLX_DEFAULT_SPECULATIVE_TOKENS);
   if (dom.speculativeDisableAutoKCheck) dom.speculativeDisableAutoKCheck.checked = !!h.speculativeDisableAutoK;
   if (dom.autoToolChoiceCheck) dom.autoToolChoiceCheck.checked = !!h.autoToolChoice;
   const enabled = !!h.speculativeEnabled;
@@ -393,9 +442,9 @@ export function syncRapidSpeculativeFields() {
   if (modelWrap) modelWrap.style.display = enabled && h.speculativeSource === 'external' ? '' : 'none';
   const sidecarsWrap = document.getElementById('spawn-rapid-speculative-sidecars-wrap');
   if (sidecarsWrap) {
-    if (enabled && h.speculativeSource === 'external') {
-      sidecarsWrap.style.display = '';
-      _fetchSpawnSidecars();
+      if (enabled && h.speculativeSource === 'external') {
+        sidecarsWrap.style.display = '';
+        _fetchSpawnSidecars();
     } else {
       sidecarsWrap.style.display = 'none';
     }
@@ -503,7 +552,13 @@ export function bindRapidMlxAdvancedControls() {
        scheduleVramUpdate();
      });
    };
-    bindInput(dom.speculativeModelInput, 'speculativeModel');
+bindInput(dom.speculativeModelInput, 'speculativeModel');
+if (dom.speculativeModelInput && !dom.speculativeModelInput.dataset.sidecarOverrideBound) {
+      dom.speculativeModelInput.dataset.sidecarOverrideBound = '1';
+      dom.speculativeModelInput.addEventListener('input', () => {
+        wizardState.hardware.speculativeModelAutoSelected = false;
+      });
+    }
     if (dom.speculativeModelInput && !dom.speculativeModelInput.dataset.trustBound) {
       dom.speculativeModelInput.dataset.trustBound = '1';
       (function() {
@@ -900,7 +955,7 @@ export function buildRapidMlxConfig(h, m) {
       speculative_config: {
         method: 'mtp',
         ...(h.speculativeSource === 'external' && { model: h.speculativeModel.trim() }),
-        num_speculative_tokens: Number(h.speculativeTokens || 2),
+                        num_speculative_tokens: Number(h.speculativeTokens || RAPID_MLX_DEFAULT_SPECULATIVE_TOKENS),
         disable_auto_k: !!h.speculativeDisableAutoK,
       },
       ...(h.speculativeTrustRequired && h.speculativeTrustConsent &&

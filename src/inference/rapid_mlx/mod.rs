@@ -8,8 +8,10 @@ pub mod info_query;
 pub mod mlx_meta;
 pub mod model_resolver;
 pub mod poller;
+pub mod repair;
 pub mod runtime;
 pub mod settings;
+pub(crate) mod sidecar_hygiene;
 pub mod sidecar_inventory;
 pub mod spec_decode_store;
 // The managed-updater module is complete and unit-tested but has no caller in the
@@ -34,7 +36,7 @@ use crate::inference::supervisor::SupervisedLaunch;
 use anyhow::{Result, anyhow};
 use std::collections::BTreeSet;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// The launch-safe PFlash policy. See `RapidMlxConfig::pflash_policy`.
@@ -43,7 +45,7 @@ fn default_pflash_policy() -> Option<String> {
 }
 
 fn default_num_speculative_tokens() -> u32 {
-    2
+    3
 }
 
 /// Rapid-MLX speculative decoding method.
@@ -1127,6 +1129,14 @@ pub(crate) fn build_launch_argv(
         adapter.resolved_model.clone()
     };
 
+    let (_, speculative_warning) = effective_speculative_config(adapter);
+    if let Some(warning) = speculative_warning {
+        overlay_warning = Some(match overlay_warning {
+            Some(existing) => format!("{existing}\n{warning}"),
+            None => warning,
+        });
+    }
+
     let mut builder = RapidMlxCommandBuilder::new(resolved_model)
         .host(adapter.host.clone())
         .port(adapter.port);
@@ -1166,6 +1176,7 @@ pub(crate) fn apply_phase7_adapter_config(
     builder: command::RapidMlxCommandBuilder,
     adapter: &RapidMlxAdapter,
 ) -> command::RapidMlxCommandBuilder {
+    let (speculative_config, _) = effective_speculative_config(adapter);
     builder
         .kv_cache_dtype(adapter.kv_cache_dtype.as_ref().map(|kv| {
             use crate::inference::rapid_mlx::command::KvCacheDtypeArg;
@@ -1191,7 +1202,7 @@ pub(crate) fn apply_phase7_adapter_config(
         .completion_batch_size(adapter.completion_batch_size)
         .prefill_step_size(Some(adapter.prefill_step_size))
         .reasoning_mode(adapter.reasoning_mode.clone())
-        .speculative_config(adapter.speculative_config.clone())
+        .speculative_config(speculative_config)
         .mllm_vision(adapter.mllm_vision.clone())
         .embeddings(adapter.embeddings.clone())
         .gpu_memory_utilization(adapter.gpu_memory_utilization)
@@ -1206,6 +1217,55 @@ pub(crate) fn apply_phase7_adapter_config(
             adapter.default_frequency_penalty,
             adapter.max_tokens,
         )
+}
+
+fn effective_speculative_config(
+    adapter: &RapidMlxAdapter,
+) -> (Option<RapidMlxSpeculativeConfig>, Option<String>) {
+    let Some(mut config) = adapter.speculative_config.clone() else {
+        return (None, None);
+    };
+
+    let trunk = Path::new(&adapter.resolved_model.launch_argument);
+    let has_explicit_companion = config
+        .model
+        .as_deref()
+        .is_some_and(|model| !model.trim().is_empty());
+
+    if trunk.is_absolute() {
+        if !sidecar_inventory::is_mtp_eligible_trunk(trunk) {
+            return (
+                None,
+                Some(
+                    "Rapid-MLX speculation disabled: the selected model architecture is not MTP-eligible"
+                        .into(),
+                ),
+            );
+        }
+
+        if !has_explicit_companion {
+            let Some(sidecar) = sidecar_inventory::find_sidecar_for_path(trunk) else {
+                return (
+                    None,
+                    Some(
+                        "Rapid-MLX speculation disabled: no validated managed MTP sidecar is registered for this trunk"
+                            .into(),
+                    ),
+                );
+            };
+            config.model = Some(sidecar.path);
+        }
+    } else if !has_explicit_companion {
+        return (
+            None,
+            Some(
+                "Rapid-MLX speculation disabled: the selected model is not a local trunk with a managed sidecar"
+                    .into(),
+            ),
+        );
+    }
+
+    (Some(config), None)
 }
 
 pub fn map_provisional_chat_request(body: &[u8]) -> Result<Vec<u8>> {
@@ -1343,6 +1403,38 @@ mod tests {
         // absent, and must resolve to `Custom` — not `Auto` — so old presets keep their
         // exact stored prefix_cache_enabled/retained_cache_mib/hybrid_cache_entries values.
         assert_eq!(CacheMode::default(), CacheMode::Custom);
+    }
+
+    #[test]
+    fn speculative_config_defaults_to_three_tokens_without_overwriting_saved_values() {
+        let fresh: RapidMlxSpeculativeConfig = serde_json::from_str(r#"{"method":"mtp"}"#).unwrap();
+        assert_eq!(fresh.num_speculative_tokens, 3);
+        assert!(!fresh.disable_auto_k);
+
+        let saved: RapidMlxSpeculativeConfig =
+            serde_json::from_str(r#"{"method":"mtp","num_speculative_tokens":2}"#).unwrap();
+        assert_eq!(saved.num_speculative_tokens, 2);
+    }
+
+    #[test]
+    fn explicit_sidecar_is_preserved_for_non_local_model_alias() {
+        let mut adapter = RapidMlxAdapter::from_resolved(
+            RuntimeMetadata::default(),
+            ResolvedRapidMlxLaunchModel::validated_alias("org/model").unwrap(),
+        );
+        adapter.speculative_config = Some(RapidMlxSpeculativeConfig {
+            method: RapidMlxSpeculativeMethod::Mtp,
+            model: Some("/managed/sidecar".into()),
+            num_speculative_tokens: 3,
+            disable_auto_k: false,
+        });
+
+        let (effective, warning) = effective_speculative_config(&adapter);
+        assert_eq!(
+            effective.and_then(|config| config.model),
+            Some("/managed/sidecar".into())
+        );
+        assert!(warning.is_none());
     }
 
     #[test]

@@ -245,6 +245,39 @@ Rules:
   - Llama Monitor may use them if found and compatible.
   - It never rewrites, removes, or "converts" them into managed runtimes.
 
+## Development sources
+
+The Runtime Manager also supports an explicitly selected development source. Choose
+**Development source**, enter a GitHub `owner/repository` and one of:
+
+- `main` or another branch;
+- a tag;
+- `pr:<number>` (for example, `pr:2140`); or
+- an exact commit SHA.
+
+Foundry resolves that lookup reference through GitHub and shows the commit before
+installation. The install request must include that resolved 40-character SHA, and
+the managed environment installs the Git requirement pinned to that SHA. A moving
+branch is never followed implicitly. If the branch is rebased, resolve and install
+again; the new commit receives a new immutable environment and must be requalified.
+
+The active inventory and status APIs expose `source_kind: "git"`, the repository,
+the requested reference, and the resolved commit. The active commit is also shown in
+the Runtime Manager status and navigation pill. Official release upgrade remains a
+separate action, so activating a development source does not silently switch it to
+the newest published release. Repair reuses the active Git source and rollback keeps
+the same managed-environment guarantees as release runtimes.
+
+Development-source mutations use the same `db-admin-token` protection as release
+mutations. Resolve uses `api-token`:
+
+- `POST /api/rapid-mlx/runtime/development/resolve`
+- `POST /api/rapid-mlx/runtime/development/install`
+
+MTP qualification is tied to both the runtime commit and the sidecar/runtime
+contract. A changed development SHA therefore requires a fresh qualification gate,
+even when the package reports the same version.
+
 ## Install flow
 
 Install is a single bounded transaction. From `updater.rs`:

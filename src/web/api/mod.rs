@@ -23,6 +23,7 @@ mod metrics;
 mod models;
 #[path = "presets.rs"]
 mod preset_routes;
+mod rapid_mlx_repair;
 mod rapid_mlx_runtime;
 mod remote_agent;
 mod self_update;
@@ -74,6 +75,7 @@ pub fn api_routes(
     let lhm_routes = lhm::routes(ctx.clone());
     let remote_agent_routes = remote_agent::routes(ctx.clone());
     let rapid_mlx_runtime_routes = rapid_mlx_runtime::routes(ctx.clone());
+    let rapid_mlx_repair_routes = rapid_mlx_repair::routes(ctx.clone());
     let sensor_bridge_routes = sensor_bridge::routes(ctx.clone());
     let doctor_routes = doctor::routes(ctx.clone());
 
@@ -103,6 +105,7 @@ pub fn api_routes(
         .or(lhm_routes)
         .or(remote_agent_routes)
         .or(rapid_mlx_runtime_routes)
+        .or(rapid_mlx_repair_routes)
         .or(sensor_bridge_routes)
         .or(doctor_routes)
         .or(metrics_routes)

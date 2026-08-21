@@ -6,7 +6,11 @@
 // MemoryBreakdown values for the same model/context/backend.
 
 import { showToast } from './toast.js';
-import { RAPID_MLX_TEXT_PREFILL_STEP_SIZE, RAPID_MLX_VISION_PREFILL_STEP_SIZE } from './rapid-mlx-prefill.js';
+import {
+  RAPID_MLX_DEFAULT_SPECULATIVE_TOKENS,
+  RAPID_MLX_TEXT_PREFILL_STEP_SIZE,
+  RAPID_MLX_VISION_PREFILL_STEP_SIZE,
+} from './rapid-mlx-prefill.js';
 
 let debounce = null;
 let currentRequestId = 0;
@@ -38,7 +42,7 @@ export function rapidEstimatePolicyFromWizardHardware(hardware = {}) {
   const speculativeConfig = hardware.speculativeEnabled ? {
     method: 'mtp',
     model: hardware.speculativeSource === 'external' ? (hardware.speculativeModel || null) : null,
-    num_speculative_tokens: Number(hardware.speculativeTokens || 2),
+    num_speculative_tokens: Number(hardware.speculativeTokens || RAPID_MLX_DEFAULT_SPECULATIVE_TOKENS),
     disable_auto_k: !!hardware.speculativeDisableAutoK,
   } : null;
   return {

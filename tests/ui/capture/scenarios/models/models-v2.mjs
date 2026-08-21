@@ -100,6 +100,7 @@ export default async function(ctx, options) {
             showDraftModels: true,
         }));
     });
+    await page.evaluateOnNewDocument(installFetchMocks, true);
     await page.reload({ waitUntil: 'networkidle0' });
     await page.waitForSelector('html.modules-ready', { timeout: 15000 });
     await page.evaluate(installFetchMocks, true);
@@ -121,6 +122,21 @@ export default async function(ctx, options) {
     await captureShot(page, 'models-inventory-narrow.png', { fullPage: true });
     await page.setViewport(DEFAULT_VIEWPORT);
     await sleep(250);
+
+    await page.evaluate(() => {
+        const card = [...document.querySelectorAll('.mm-model-card')]
+            .find(candidate => candidate.textContent.includes('Qwen 3 MLX 4-bit'));
+        const button = [...(card?.querySelectorAll('button') || [])]
+            .find(candidate => candidate.textContent.includes('Repair MTP sidecar'));
+        button?.click();
+    });
+    await page.waitForSelector('#preset-modal.open', { timeout: 8000 });
+    await page.waitForSelector('#modal-rapid-speculative-repair-form');
+    await captureShot(page, 'models-mtp-repair-seeded.png', { fullPage: true });
+    await page.click('#preset-modal-close');
+    await page.evaluate(() => window.openModelsModal?.());
+    await page.waitForSelector('#models-modal.open', { timeout: 8000 });
+    await sleep(500);
 
     await page.evaluate(() => {
         document.documentElement.dataset.theme = 'dark';

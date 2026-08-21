@@ -46,6 +46,9 @@
 
   "port": 8110,
 
+  "numSpeculativeTokens": 3,
+  "disableAutoK": false,
+
   "$hfHubCacheNote": [
     "Repo-id models (the positive control) resolve from the app's own HF cache at",
     "~/.config/local-llm-foundry/models/cache/huggingface/hub, which is where the resolver",
