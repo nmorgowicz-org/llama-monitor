@@ -20,19 +20,26 @@ use tokio::sync::{Notify, Semaphore};
 
 use super::sidecar_inventory::{SidecarEntry, discover_sidecars, sidecar_dir_for_trunk};
 
+/// Maximum number of queued, running, or recently completed jobs retained for
+/// status inspection. Completed entries are pruned when a new job is queued.
 const MAX_JOBS: usize = 16;
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
+/// Upper bound for one repair or requalification subprocess.
 const REPAIR_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
 const SCRIPT_NAME: &str = "repair-mtp-mlx.py";
 const VALIDATE_OPERATION: &str = "validate";
 const REQUALIFY_OPERATION: &str = "requalify";
 const REQUALIFY_SCRIPT_NAME: &str = "rapid-mlx-requalify-spec-decode.mjs";
 const RECIPE_NAME: &str = "spec-decode-recipe.json";
+const DEFAULT_REQUAL_TOKENS: u32 = 3;
+const SCREEN_ESTIMATE_SECONDS: u64 = 5 * 60;
+const FULL_ESTIMATE_SECONDS: u64 = 90 * 60;
 
 fn default_operation() -> String {
     "repair".to_string()
 }
 
+/// Authenticated request describing one managed Rapid-MLX MTP operation.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepairRequest {
@@ -63,6 +70,7 @@ pub struct RepairRequest {
     pub requalification_mode: Option<String>,
 }
 
+/// Operator-facing state for a queued, running, or completed MTP job.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepairJobSnapshot {
@@ -88,6 +96,12 @@ static JOBS: LazyLock<Mutex<BTreeMap<String, RuntimeJob>>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
 static JOB_GATE: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Semaphore::new(1)));
 
+/// Validate and enqueue a managed MTP repair, validation, or requalification job.
+///
+/// The returned snapshot is the initial queued state. The subprocess runs in a
+/// background task, and callers should use [`get_job`] or [`list_jobs`] to
+/// observe its terminal result. At most one MLX subprocess runs at a time;
+/// [`MAX_JOBS`] bounds retained lifecycle state separately.
 pub fn start_job(request: RepairRequest, scripts_dir: &Path) -> Result<RepairJobSnapshot> {
     let target = existing_directory(&request.target, "target")?;
     let operation = request.operation.trim().to_ascii_lowercase();
@@ -178,7 +192,11 @@ pub fn start_job(request: RepairRequest, scripts_dir: &Path) -> Result<RepairJob
     } else {
         None
     };
-    let requal_tokens = request.num_speculative_tokens.unwrap_or(3);
+    // Three draft tokens matches the short qualification recipe's conservative
+    // default; the observed K histogram remains authoritative.
+    let requal_tokens = request
+        .num_speculative_tokens
+        .unwrap_or(DEFAULT_REQUAL_TOKENS);
     let disable_auto_k = request.disable_auto_k;
     if operation == REQUALIFY_OPERATION && !(1..=8).contains(&requal_tokens) {
         bail!("numSpeculativeTokens must be between 1 and 8");
@@ -221,9 +239,9 @@ pub fn start_job(request: RepairRequest, scripts_dir: &Path) -> Result<RepairJob
     };
     let estimated_seconds = if operation == REQUALIFY_OPERATION {
         Some(if requalification_mode == "screen" {
-            300
+            SCREEN_ESTIMATE_SECONDS
         } else {
-            5_400
+            FULL_ESTIMATE_SECONDS
         })
     } else {
         None
@@ -241,45 +259,26 @@ pub fn start_job(request: RepairRequest, scripts_dir: &Path) -> Result<RepairJob
         total_steps,
     }));
     let cancel = Arc::new(Notify::new());
-    {
-        let mut jobs = JOBS
-            .lock()
-            .map_err(|_| anyhow!("repair job registry poisoned"))?;
-        jobs.retain(|_, job| {
-            job.snapshot
-                .lock()
-                .map(|snapshot| {
-                    !matches!(
-                        snapshot.status.as_str(),
-                        "completed" | "failed" | "cancelled"
-                    )
-                })
-                .unwrap_or(false)
-        });
-        if jobs.len() >= MAX_JOBS {
-            bail!("too many retained MTP repair jobs");
-        }
-        jobs.insert(
-            job_id.clone(),
-            RuntimeJob {
-                snapshot: snapshot.clone(),
-                cancel: cancel.clone(),
-            },
-        );
-    }
+    register_job(&job_id, snapshot.clone(), cancel.clone())?;
 
     let task_snapshot = snapshot.clone();
     let validation = operation == VALIDATE_OPERATION;
     let requalifying = operation == REQUALIFY_OPERATION;
     let operation_for_message = operation.clone();
     tokio::spawn(async move {
-        let permit = match JOB_GATE.clone().acquire_owned().await {
+        let permit = tokio::select! {
+            permit = JOB_GATE.clone().acquire_owned() => match permit {
             Ok(permit) => permit,
             Err(error) => {
                 set_failed(
                     &task_snapshot,
                     format!("repair worker unavailable: {error}"),
                 );
+                return;
+            }
+        },
+        _cancelled = cancel.notified() => {
+                set_cancelled(&task_snapshot);
                 return;
             }
         };
@@ -298,78 +297,33 @@ pub fn start_job(request: RepairRequest, scripts_dir: &Path) -> Result<RepairJob
         } else {
             set_running(&task_snapshot, "inspecting", "Reading MTP tensor headers");
         }
-        let mut command = if requalifying {
-            let mut command = Command::new(node);
-            command.arg(&script);
-            command
-        } else {
-            Command::new(&python)
+        let command = match build_command(JobCommandSpec {
+            operation: &operation_for_message,
+            python: &python,
+            node,
+            script: &script,
+            target: &target,
+            source: source.as_deref(),
+            source_format: &source_format,
+            recipe: recipe.as_deref(),
+            bf16_source: bf16_source.as_deref(),
+            bf16_revision: bf16_revision.as_deref(),
+            requal_recipe: requal_recipe.as_deref(),
+            sidecar_dir: &sidecar_dir,
+            output_dir: &output_dir,
+            output: &output,
+            requal_port,
+            requal_tokens,
+            requalification_mode: &requalification_mode,
+            disable_auto_k,
+        }) {
+            Ok(command) => command,
+            Err(error) => {
+                drop(permit);
+                set_failed(&task_snapshot, error.to_string());
+                return;
+            }
         };
-        if requalifying && let Some(root) = script.parent().and_then(Path::parent) {
-            command.current_dir(root);
-        }
-        if validation {
-            command = Command::new(&python);
-            command
-                .arg(script)
-                .arg("validate")
-                .arg("--sidecar")
-                .arg(&output);
-        } else if requalifying {
-            command
-                .arg("--recipe")
-                .arg(requal_recipe.expect("requalification recipe validated before spawn"))
-                .arg("--model")
-                .arg(&target)
-                .arg("--speculative-model")
-                .arg(&sidecar_dir)
-                .arg("--out")
-                .arg(&output_dir)
-                .arg("--port")
-                .arg(
-                    requal_port
-                        .expect("requalification port allocated before spawn")
-                        .to_string(),
-                )
-                .arg("--num-speculative-tokens")
-                .arg(requal_tokens.to_string())
-                .arg("--mode")
-                .arg(&requalification_mode);
-            if let Some(cache) = requalification_hf_cache() {
-                command.arg("--hf-hub-cache").arg(cache);
-            }
-            if disable_auto_k {
-                command.arg("--disable-auto-k");
-            }
-        } else if let Some(bf16_source) = bf16_source {
-            command
-                .arg(script)
-                .arg("--bf16-source")
-                .arg(bf16_source)
-                .arg("--mlx-model")
-                .arg(&target)
-                .arg("--out")
-                .arg(&output_dir)
-                .arg("--python")
-                .arg(&python);
-            if let Some(revision) = bf16_revision {
-                command.arg("--revision").arg(revision);
-            }
-        } else {
-            command
-                .arg(script)
-                .arg("repair")
-                .arg("--target")
-                .arg(&target);
-            if let Some(source) = source {
-                command.arg("--source").arg(source);
-                command.arg("--source-format").arg(&source_format);
-            }
-            if let Some(recipe) = recipe {
-                command.arg("--recipe").arg(recipe);
-            }
-            command.arg("--output").arg(&output);
-        }
         let result = run_bounded(
             command,
             cancel.clone(),
@@ -421,6 +375,7 @@ pub fn start_job(request: RepairRequest, scripts_dir: &Path) -> Result<RepairJob
         .map_err(|_| anyhow!("repair job snapshot poisoned"))
 }
 
+/// Return a snapshot for one managed job, if it is still retained.
 pub fn get_job(job_id: &str) -> Option<RepairJobSnapshot> {
     JOBS.lock()
         .ok()?
@@ -431,6 +386,7 @@ pub fn get_job(job_id: &str) -> Option<RepairJobSnapshot> {
         .map(|value| value.clone())
 }
 
+/// Return retained repair-job snapshots in job-id order.
 pub fn list_jobs() -> Vec<RepairJobSnapshot> {
     JOBS.lock()
         .ok()
@@ -442,6 +398,11 @@ pub fn list_jobs() -> Vec<RepairJobSnapshot> {
         .unwrap_or_default()
 }
 
+/// Request cancellation of a queued or running job and return its current snapshot.
+///
+/// Cancellation is cooperative at the Rust boundary but terminates the managed
+/// subprocess through `kill_on_drop(true)`. A latched `notify_one` signal makes
+/// cancellation safe even when the worker has not acquired the single-job gate.
 pub fn cancel_job(job_id: &str) -> Result<RepairJobSnapshot> {
     let jobs = JOBS
         .lock()
@@ -455,13 +416,146 @@ pub fn cancel_job(job_id: &str) -> Result<RepairJobSnapshot> {
         .map_err(|_| anyhow!("repair job snapshot poisoned"))?
         .clone();
     if matches!(current.status.as_str(), "queued" | "running") {
-        job.cancel.notify_waiters();
+        job.cancel.notify_one();
     }
     Ok(current)
 }
 
 pub fn list_sidecars() -> Result<Vec<SidecarEntry>> {
     discover_sidecars()
+}
+
+fn register_job(
+    job_id: &str,
+    snapshot: Arc<Mutex<RepairJobSnapshot>>,
+    cancel: Arc<Notify>,
+) -> Result<()> {
+    let mut jobs = JOBS
+        .lock()
+        .map_err(|_| anyhow!("repair job registry poisoned"))?;
+    jobs.retain(|_, job| {
+        job.snapshot
+            .lock()
+            .map(|snapshot| {
+                !matches!(
+                    snapshot.status.as_str(),
+                    "completed" | "failed" | "cancelled"
+                )
+            })
+            .unwrap_or(false)
+    });
+    if jobs.len() >= MAX_JOBS {
+        bail!("too many retained MTP repair jobs");
+    }
+    if jobs.contains_key(job_id) {
+        bail!("could not allocate a unique repair job id; please retry");
+    }
+    jobs.insert(job_id.to_string(), RuntimeJob { snapshot, cancel });
+    Ok(())
+}
+
+struct JobCommandSpec<'a> {
+    operation: &'a str,
+    python: &'a str,
+    node: &'a str,
+    script: &'a Path,
+    target: &'a Path,
+    source: Option<&'a Path>,
+    source_format: &'a str,
+    recipe: Option<&'a Path>,
+    bf16_source: Option<&'a str>,
+    bf16_revision: Option<&'a str>,
+    requal_recipe: Option<&'a Path>,
+    sidecar_dir: &'a Path,
+    output_dir: &'a Path,
+    output: &'a Path,
+    requal_port: Option<u16>,
+    requal_tokens: u32,
+    requalification_mode: &'a str,
+    disable_auto_k: bool,
+}
+
+fn build_command(spec: JobCommandSpec<'_>) -> Result<Command> {
+    if spec.operation == VALIDATE_OPERATION {
+        let mut command = Command::new(spec.python);
+        command
+            .arg(spec.script)
+            .arg("validate")
+            .arg("--sidecar")
+            .arg(spec.output);
+        return Ok(command);
+    }
+
+    if spec.operation == REQUALIFY_OPERATION {
+        let recipe = spec
+            .requal_recipe
+            .ok_or_else(|| anyhow!("requalification recipe was not resolved"))?;
+        let port = spec
+            .requal_port
+            .ok_or_else(|| anyhow!("requalification port was not allocated"))?;
+        let mut command = Command::new(spec.node);
+        command.arg(spec.script);
+        if let Some(root) = spec.script.parent().and_then(Path::parent) {
+            command.current_dir(root);
+        }
+        command
+            .arg("--recipe")
+            .arg(recipe)
+            .arg("--model")
+            .arg(spec.target)
+            .arg("--speculative-model")
+            .arg(spec.sidecar_dir)
+            .arg("--out")
+            .arg(spec.output_dir)
+            .arg("--port")
+            .arg(port.to_string())
+            .arg("--num-speculative-tokens")
+            .arg(spec.requal_tokens.to_string())
+            .arg("--mode")
+            .arg(spec.requalification_mode);
+        if let Some(cache) = requalification_hf_cache() {
+            command.arg("--hf-hub-cache").arg(cache);
+        }
+        if spec.disable_auto_k {
+            command.arg("--disable-auto-k");
+        }
+        return Ok(command);
+    }
+
+    let mut command = Command::new(spec.python);
+    if let Some(bf16_source) = spec.bf16_source {
+        command
+            .arg(spec.script)
+            .arg("--bf16-source")
+            .arg(bf16_source)
+            .arg("--mlx-model")
+            .arg(spec.target)
+            .arg("--out")
+            .arg(spec.output_dir)
+            .arg("--python")
+            .arg(spec.python);
+        if let Some(revision) = spec.bf16_revision {
+            command.arg("--revision").arg(revision);
+        }
+    } else {
+        command
+            .arg(spec.script)
+            .arg("repair")
+            .arg("--target")
+            .arg(spec.target);
+        if let Some(source) = spec.source {
+            command
+                .arg("--source")
+                .arg(source)
+                .arg("--source-format")
+                .arg(spec.source_format);
+        }
+        if let Some(recipe) = spec.recipe {
+            command.arg("--recipe").arg(recipe);
+        }
+        command.arg("--output").arg(spec.output);
+    }
+    Ok(command)
 }
 
 fn resolve_script(scripts_dir: &Path, name: &str) -> Result<PathBuf> {
@@ -861,6 +955,11 @@ async fn run_bounded(
     secrets: Vec<String>,
     allow_still_blocked: bool,
 ) -> std::result::Result<String, RunError> {
+    // Create the notification future before spawning. `cancel_job` uses
+    // `notify_one`, which retains one permit when cancellation wins the race
+    // with worker startup.
+    let cancel_signal = cancel.notified();
+    tokio::pin!(cancel_signal);
     command
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -886,7 +985,7 @@ async fn run_bounded(
     });
     let status = tokio::select! {
         status = &mut wait_task => status.map_err(|error| RunError::Failed(format!("repair wait task failed: {error}")))??,
-        _ = cancel.notified() => {
+        _ = &mut cancel_signal => {
             // `kill_on_drop(true)` terminates the child when the wait task is
             // aborted. This avoids borrowing the same child through both
             // `wait()` and the cancellation arm.
@@ -971,10 +1070,14 @@ fn unix_now() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        RepairRequest, promote_validated_sidecar, sha256_file, validate_bf16_source,
-        validate_executable_name, validate_path, validate_revision,
+        JobCommandSpec, RepairRequest, RunError, build_command, promote_validated_sidecar,
+        run_bounded, sha256_file, validate_bf16_source, validate_executable_name, validate_path,
+        validate_revision,
     };
     use serde_json::json;
+    use std::path::Path;
+    use std::sync::Arc;
+    use tokio::sync::Notify;
 
     #[test]
     fn repair_paths_are_absolute_and_non_control() {
@@ -1022,6 +1125,48 @@ mod tests {
         assert_eq!(request.operation, "requalify");
         assert_eq!(request.num_speculative_tokens, Some(3));
         assert!(request.disable_auto_k);
+    }
+
+    #[test]
+    fn command_builder_keeps_validation_on_the_python_lane() {
+        let command = build_command(JobCommandSpec {
+            operation: "validate",
+            python: "python3",
+            node: "node",
+            script: Path::new("/tmp/repair-mtp-mlx.py"),
+            target: Path::new("/tmp/model"),
+            source: None,
+            source_format: "mlx",
+            recipe: None,
+            bf16_source: None,
+            bf16_revision: None,
+            requal_recipe: None,
+            sidecar_dir: Path::new("/tmp/sidecar"),
+            output_dir: Path::new("/tmp/output"),
+            output: Path::new("/tmp/sidecar/mtp.safetensors"),
+            requal_port: None,
+            requal_tokens: 3,
+            requalification_mode: "screen",
+            disable_auto_k: false,
+        })
+        .unwrap();
+        assert_eq!(command.as_std().get_program(), "python3");
+        let args: Vec<_> = command.as_std().get_args().collect();
+        assert_eq!(args[0], "/tmp/repair-mtp-mlx.py");
+        assert_eq!(args[1], "validate");
+        assert_eq!(args[2], "--sidecar");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn bounded_process_honors_cancellation() {
+        let mut command = tokio::process::Command::new("sh");
+        command.args(["-c", "sleep 30"]);
+        let cancel = Arc::new(Notify::new());
+        let task = tokio::spawn(run_bounded(command, cancel.clone(), Vec::new(), false));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        cancel.notify_one();
+        assert!(matches!(task.await.unwrap(), Err(RunError::Cancelled)));
     }
 
     #[test]
