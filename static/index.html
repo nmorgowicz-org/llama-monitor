@@ -3450,8 +3450,8 @@
                                     <label class="pe-label">Available sidecars</label>
                                     <div id="modal-rapid-speculative-sidecars-list" class="pe-field-hint" style="font-size:12px;"></div>
                                     <div id="modal-rapid-speculative-repair-wrap" style="margin-top:8px;">
-                                        <button type="button" class="pe-action-btn" id="modal-rapid-speculative-repair-toggle">Build / repair sidecar</button>
-                                        <div id="modal-rapid-speculative-repair-form" style="display:none; margin-top:8px;">
+                                        <button type="button" class="pe-action-btn" id="modal-rapid-speculative-repair-toggle" aria-expanded="false" aria-controls="modal-rapid-speculative-repair-form">Build / repair sidecar</button>
+                                        <div id="modal-rapid-speculative-repair-form" role="region" aria-labelledby="modal-rapid-speculative-repair-toggle" hidden style="margin-top:8px;">
                                             <div class="pe-field-hint" style="margin-bottom:6px;">Uses the guarded local repair worker. The selected MLX/BF16 source or recipe is validated before a managed sidecar is registered.</div>
                                             <label class="pe-label" for="modal-rapid-speculative-repair-kind">Repair source</label>
                                             <select class="pe-select" id="modal-rapid-speculative-repair-kind">
@@ -7592,10 +7592,10 @@
     <section class="rapid-mlx-development-source" id="rapid-mlx-development-source" hidden aria-label="Rapid-MLX development source">
       <p class="rapid-mlx-development-copy">Use upstream or fork <code>main</code>, a pull request, branch, tag, or exact commit. The reference is resolved to an immutable commit before installation.</p>
       <div class="rapid-mlx-development-grid">
-        <label>Repository
+        <label for="rapid-mlx-development-repository">Repository
           <input id="rapid-mlx-development-repository" type="text" value="nmorgowicz/Rapid-MLX" autocomplete="off" spellcheck="false" placeholder="owner/repository">
         </label>
-        <label>Reference
+        <label for="rapid-mlx-development-reference">Reference
           <input id="rapid-mlx-development-reference" type="text" value="main" autocomplete="off" spellcheck="false" placeholder="main, branch, pr:2140, or SHA">
         </label>
       </div>

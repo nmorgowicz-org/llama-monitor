@@ -12,12 +12,13 @@ let _releases = [];
 let _developmentResolution = null;
 let _mutationInflight = false;
 let _changelogCache = Object.create(null);
+const SHA_SHORT_LENGTH = 12;
 
 function activeRuntimeLabel(active) {
   if (!active) return 'No Rapid-MLX runtime installed.';
   if (active.source_kind === 'git' && active.source_commit) {
     const repository = active.source_repository || 'development source';
-    return `Rapid-MLX ${repository}@${active.source_commit.slice(0, 12)}`;
+    return `Rapid-MLX ${repository}@${active.source_commit.slice(0, SHA_SHORT_LENGTH)}`;
   }
   return `Rapid-MLX v${active.version}`;
 }
@@ -242,7 +243,7 @@ export async function fetchRuntimeStatus() {
     if (pill && supported && active && !mutating) {
       pill.style.display = 'flex';
       if (pillVer) pillVer.textContent = active.source_kind === 'git'
-        ? `Rapid-MLX · ${active.source_commit?.slice(0, 12) || 'development'}`
+        ? `Rapid-MLX · ${active.source_commit?.slice(0, SHA_SHORT_LENGTH) || 'development'}`
         : `Rapid-MLX · v${active.version}`;
       pill.title = `${activeRuntimeLabel(active)}. Click to manage.`;
     } else if (pill) {
@@ -334,7 +335,7 @@ async function resolveDevelopmentSource() {
     _developmentResolution = body.source;
     const source = body.source;
     const title = source.title ? ` · ${source.title}` : '';
-    const base = source.base_commit ? ` · base ${source.base_commit.slice(0, 12)}` : '';
+    const base = source.base_commit ? ` · base ${source.base_commit.slice(0, SHA_SHORT_LENGTH)}` : '';
     renderDevelopmentResolution(
       `Resolved ${source.repository}@${source.requested_ref} → ${source.resolved_commit}${title}${base}`,
       'is-success'
@@ -380,7 +381,7 @@ async function installDevelopmentSource() {
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || 'Development install failed');
-    showToast(`Rapid-MLX ${_developmentResolution.resolved_commit.slice(0, 12)} install started`, 'success');
+    showToast(`Rapid-MLX ${_developmentResolution.resolved_commit.slice(0, SHA_SHORT_LENGTH)} install started`, 'success');
     if (body.job_id) pollJob(body.job_id);
   } catch (error) {
     showToast(`Rapid-MLX development install failed: ${error.message}`, 'error');
@@ -602,12 +603,18 @@ function buildReleaseRow(release, isCurrent, isLatest) {
 // ── Actions (use db-admin-token for mutations) ──────────────────────────────
 
 async function getDbAdminToken() {
-  const tokenResp = await fetch('/api/db/admin-token', {
-    headers: window.authHeaders ? window.authHeaders() : {},
-  });
-  if (!tokenResp.ok) return null;
-  const data = await tokenResp.json().catch(() => ({}));
-  return data.token || null;
+  try {
+    const tokenResp = await fetch('/api/db/admin-token', {
+      headers: window.authHeaders ? window.authHeaders() : {},
+    });
+    if (!tokenResp.ok) return null;
+    const data = await tokenResp.json().catch(() => ({}));
+    return data.token || null;
+  } catch {
+    // Callers use a null token to restore their mutation controls. Never let a
+    // network/authentication failure strand the global mutation guard.
+    return null;
+  }
 }
 
 async function installVersion(btn, release) {

@@ -19,6 +19,10 @@ import {
 } from './chat-template-registry.js';
 import { buildEstimateBody, rapidEstimatePolicyFromConfig } from './vram-estimate.js';
 import { rapidMlxPrefillStepSizeDefault, rapidMlxProfileHasVision } from './rapid-mlx-prefill.js';
+import {
+    findRapidMlxSidecarForTrunk,
+    rapidMlxSidecarProvenance,
+} from '../core/rapid-mlx-sidecars.js';
 import { openEstimateEvidenceDrawer } from './evidence-drawer.js';
 import { initCalibrationUi } from './calibration.js';
 import {
@@ -1897,7 +1901,7 @@ export function openPresetMtpRepairForModel(modelPath, modelName = 'MLX model') 
     const repairToggle = document.getElementById('modal-rapid-speculative-repair-toggle');
     const repairForm = document.getElementById('modal-rapid-speculative-repair-form');
     repairToggle?.closest('details')?.setAttribute('open', '');
-    if (repairToggle && repairForm?.style.display === 'none') repairToggle.click();
+    if (repairToggle && repairForm?.hidden) repairToggle.click();
 }
 
 function _toggleSpecFields(specType) {
@@ -2017,6 +2021,7 @@ function _configureBackendPresetEditor(preset) {
 }
 
 let _speculativeSidecarAutoSelected = false;
+const PRESET_MTP_REPAIR_MAX_DURATION_MS = 2 * 60 * 60 * 1000;
 
 async function _fetchSidecarsForPreset() {
     const listEl = document.getElementById('modal-rapid-speculative-sidecars-list');
@@ -2036,21 +2041,7 @@ async function _fetchSidecarsForPreset() {
         const modelInput = document.getElementById('modal-rapid-speculative-model');
         const trunkInput = document.getElementById('modal-model-path');
         const selectedTrunk = (trunkInput?.value || '').trim();
-        const normalizePath = value => String(value || '').replace(/[\\/]+$/, '');
-        const usableSidecar = (sidecar) => {
-            const provenance = sidecar.provenance || sidecar;
-            return sidecar.hasWeights !== false
-                && sidecar.hasProvenance !== false
-                && provenance.normCheckPassed !== false
-                && ['candidate', 'qualified', 'built_unvalidated_online'].includes(provenance.status);
-        };
-        const matchingSidecar = selectedTrunk.startsWith('/')
-            ? data.sidecars.find((sidecar) => {
-                if (!usableSidecar(sidecar)) return false;
-                const provenance = sidecar.provenance || sidecar;
-                return normalizePath(provenance.trunk) === normalizePath(selectedTrunk);
-            })
-            : null;
+        const matchingSidecar = findRapidMlxSidecarForTrunk(data.sidecars, selectedTrunk);
 
         // A duplicated/saved preset keeps an explicitly persisted sidecar. When
         // the external field is empty, select the validated sidecar registered
@@ -2080,7 +2071,7 @@ async function _fetchSidecarsForPreset() {
             html += '<div class="pe-field-hint" style="color:var(--warn,#e6a41c); margin-bottom:5px;">' + reason + '</div>';
         }
         data.sidecars.forEach((s, i) => {
-            const p = s.provenance || s;
+            const p = rapidMlxSidecarProvenance(s);
             const vram = p.estimatedMemoryBytes != null
                 ? '~' + (p.estimatedMemoryBytes >= 1073741824
                     ? (p.estimatedMemoryBytes / 1073741824).toFixed(1) + ' GB'
@@ -2112,7 +2103,7 @@ async function _fetchSidecarsForPreset() {
             btn.addEventListener('click', async () => {
                 const idx = parseInt(btn.getAttribute('data-sidecar-index'));
                 const sidecar = data.sidecars[idx];
-                const p = sidecar.provenance || sidecar;
+                const p = rapidMlxSidecarProvenance(sidecar);
 
                 // Set the companion model path
                 if (modelInput) {
@@ -2227,6 +2218,11 @@ function _finishPresetMtpRepair(jobId) {
 }
 
 async function _pollPresetMtpRepair(jobId) {
+    if (Date.now() - _presetMtpRepairStartedAt > PRESET_MTP_REPAIR_MAX_DURATION_MS) {
+        _setPresetMtpRepairStatus('Sidecar job timed out. Check the server logs before retrying.', 'error');
+        _finishPresetMtpRepair(jobId);
+        return;
+    }
     try {
         const response = await fetch('/api/rapid-mlx/mtp-repair/' + encodeURIComponent(jobId), {
             headers: window.authHeaders ? window.authHeaders() : {},
@@ -2332,8 +2328,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const form = document.getElementById('modal-rapid-speculative-repair-form');
     toggle?.addEventListener('click', () => {
         if (!form) return;
-        const open = form.style.display !== 'none';
+        const open = !form.hidden;
+        form.hidden = open;
         form.style.display = open ? 'none' : '';
+        toggle.setAttribute('aria-expanded', String(!open));
         toggle.textContent = open ? 'Build / repair sidecar' : 'Hide sidecar builder';
         if (!open) _syncPresetMtpRepairKind();
     });

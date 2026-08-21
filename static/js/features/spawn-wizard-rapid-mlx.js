@@ -18,6 +18,10 @@ import {
     rapidMlxPrefillStepSizeDefault,
     rapidMlxProfileHasVision,
 } from './rapid-mlx-prefill.js';
+import {
+    findRapidMlxSidecarForTrunk,
+    rapidMlxSidecarProvenance,
+} from '../core/rapid-mlx-sidecars.js';
 
 /*
  * Mirrors the two Rapid-MLX mutual-exclusion rules that involve the Phase 7 throughput
@@ -326,21 +330,7 @@ async function _fetchSpawnSidecars() {
     const h = wizardState.hardware;
     const modelInput = document.getElementById('spawn-rapid-speculative-model');
     const selectedTrunk = (wizardState.model.path || '').trim();
-    const normalizePath = value => String(value || '').replace(/[\\/]+$/, '');
-    const usableSidecar = (sidecar) => {
-      const provenance = sidecar.provenance || sidecar;
-      return sidecar.hasWeights !== false
-        && sidecar.hasProvenance !== false
-        && provenance.normCheckPassed !== false
-        && ['candidate', 'qualified', 'built_unvalidated_online'].includes(provenance.status);
-    };
-    const matchingSidecar = selectedTrunk.startsWith('/')
-      ? data.sidecars.find((sidecar) => {
-        if (!usableSidecar(sidecar)) return false;
-        const provenance = sidecar.provenance || sidecar;
-        return normalizePath(provenance.trunk) === normalizePath(selectedTrunk);
-      })
-      : null;
+    const matchingSidecar = findRapidMlxSidecarForTrunk(data.sidecars, selectedTrunk);
 
     // Auto-selection is deliberately one-way: only an empty field or a value we
     // previously selected automatically may be replaced. A typed path or a
@@ -374,7 +364,7 @@ async function _fetchSpawnSidecars() {
       html += '<div class="field-hint" style="color:var(--warn,#e6a41c); margin-bottom:5px;">' + reason + '</div>';
     }
     data.sidecars.forEach((s, i) => {
-      const p = s.provenance || s;
+      const p = rapidMlxSidecarProvenance(s);
       const vram = p.estimatedMemoryBytes != null
           ? '~' + (p.estimatedMemoryBytes >= 1073741824
             ? (p.estimatedMemoryBytes / 1073741824).toFixed(1) + ' GB'
@@ -402,7 +392,7 @@ async function _fetchSpawnSidecars() {
       btn.addEventListener('click', async () => {
         const idx = parseInt(btn.getAttribute('data-sidecar-index'));
         const sidecar = data.sidecars[idx];
-        const p = sidecar.provenance || sidecar;
+        const p = rapidMlxSidecarProvenance(sidecar);
 
         // Set the companion model path
         if (modelInput) {

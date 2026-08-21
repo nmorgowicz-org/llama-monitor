@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import json
 import math
+import numpy as np
 import struct
 import sys
 from datetime import datetime, timezone
@@ -141,16 +142,12 @@ def load_tensor(path: Path, header_size: int, name: str, spec: dict[str, Any], m
         # NumPy has no portable bfloat16 dtype. Decode the raw 16-bit words
         # through MLX so BF16 heads remain loadable without materializing an
         # unrelated multi-GB trunk shard.
-        import numpy as np
-
         values = np.frombuffer(payload, dtype="<u2").copy()
         return mx.array(values).reshape(tuple(shape)).view(mx.bfloat16)
 
     numpy_dtype = NUMPY_DTYPES.get(dtype)
     if numpy_dtype is None:
         raise RepairError(f"unsupported safetensors dtype {dtype!r} for {name!r}")
-    import numpy as np
-
     values = np.frombuffer(payload, dtype=numpy_dtype).copy()
     return mx.array(values).reshape(tuple(shape))
 

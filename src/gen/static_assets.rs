@@ -73,6 +73,8 @@ pub const CORE_APP_STATE_JS: &str = include_str!("../../static/js/core/app-state
 pub const CORE_FORMAT_JS: &str = include_str!("../../static/js/core/format.js");
 pub const CORE_IDENTITY_JS: &str = include_str!("../../static/js/core/identity.js");
 pub const CORE_PLATFORM_INFO_JS: &str = include_str!("../../static/js/core/platform-info.js");
+pub const CORE_RAPID_MLX_SIDECARS_JS: &str =
+    include_str!("../../static/js/core/rapid-mlx-sidecars.js");
 pub const CORE_TOOLTIP_JS: &str = include_str!("../../static/js/core/tooltip.js");
 pub const FEATURES_ANIMATE_JS: &str = include_str!("../../static/js/features/animate.js");
 pub const FEATURES_APP_HOME_MIGRATION_JS: &str =
