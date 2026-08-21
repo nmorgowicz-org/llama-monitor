@@ -2278,10 +2278,10 @@ environments. These endpoints:
 Mutations require `db-admin-token` and an explicit confirmation token.
 Read endpoints (status, releases, jobs) require `api-token`.
 
-Development-source inventory entries additionally include:
+Inventory entries expose `source_kind` as `release` or `git`. The following
+fields are present only for `git` development-source entries:
 
-- `source_kind`: `release` or `git`;
-- `source_repository`: GitHub `owner/repository` for Git runtimes;
+- `source_repository`: GitHub `owner/repository`;
 - `source_ref`: the branch, tag, PR reference, or SHA entered by the user; and
 - `source_commit`: the resolved immutable 40-character commit SHA.
 
