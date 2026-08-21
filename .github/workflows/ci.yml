@@ -210,6 +210,12 @@ jobs:
           cat "$RUNNER_TEMP/local-llm-foundry-ui.log"
           exit 1
 
+      - name: Run Rapid-MLX UI contract gate
+        working-directory: tests/ui
+        env:
+          LLAMA_MONITOR_UI_URL: http://127.0.0.1:7778
+        run: npm run test:rapid-mlx-contract
+
       - name: Run Playwright UI tests
         # Runs all .spec.js files except:
         # - SSH integration test (skips without LLAMA_MONITOR_SSH_TARGET)

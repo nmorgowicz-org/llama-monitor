@@ -18,7 +18,11 @@ import {
     getDefaultTemplateForFamily,
 } from './chat-template-registry.js';
 import { buildEstimateBody, rapidEstimatePolicyFromConfig } from './vram-estimate.js';
-import { rapidMlxPrefillStepSizeDefault, rapidMlxProfileHasVision } from './rapid-mlx-prefill.js';
+import {
+    RAPID_MLX_DEFAULT_SPECULATIVE_TOKENS,
+    rapidMlxPrefillStepSizeDefault,
+    rapidMlxProfileHasVision,
+} from './rapid-mlx-prefill.js';
 import {
     findRapidMlxSidecarForTrunk,
     rapidMlxSidecarProvenance,
@@ -1074,7 +1078,7 @@ function _rapidEstimatePolicyFromForm(fallback = {}) {
         speculative_config: speculativeReady ? {
             method: 'mtp',
             model: speculativeSource === 'external' ? speculativeModel : null,
-            num_speculative_tokens: Number(document.getElementById('modal-rapid-speculative-tokens')?.value || 3),
+            num_speculative_tokens: Number(document.getElementById('modal-rapid-speculative-tokens')?.value || RAPID_MLX_DEFAULT_SPECULATIVE_TOKENS),
             disable_auto_k: !!document.getElementById('modal-rapid-speculative-disable-auto-k')?.checked,
         } : null,
     };
@@ -1488,7 +1492,7 @@ export function openPresetModal(mode, section, seedPreset = null) {
         if (speculativeEnabledEl) speculativeEnabledEl.checked = speculativeEnabled;
         setOpt('modal-rapid-speculative-source', speculativeSource);
         setVal('modal-rapid-speculative-model', speculative?.model || '');
-        setOpt('modal-rapid-speculative-tokens', String(speculative?.num_speculative_tokens || 3));
+        setOpt('modal-rapid-speculative-tokens', String(speculative?.num_speculative_tokens || RAPID_MLX_DEFAULT_SPECULATIVE_TOKENS));
         const disableAutoKEl = document.getElementById('modal-rapid-speculative-disable-auto-k');
         if (disableAutoKEl) disableAutoKEl.checked = !!speculative?.disable_auto_k;
         /* Restore trust_remote_code_consent for MTP companion if previously granted */
@@ -2673,7 +2677,7 @@ function _buildFormPreset(existing) {
                     out.speculative_config = specEnabled ? {
                         method: 'mtp',
                         ...(specSource === 'external' ? { model: specModel } : {}),
-                        num_speculative_tokens: Number(strVal('modal-rapid-speculative-tokens') || 3),
+                        num_speculative_tokens: Number(strVal('modal-rapid-speculative-tokens') || RAPID_MLX_DEFAULT_SPECULATIVE_TOKENS),
                         disable_auto_k: !!document.getElementById('modal-rapid-speculative-disable-auto-k')?.checked,
                     } : null;
                     // Trust remote code consent for MTP companion: only set when required

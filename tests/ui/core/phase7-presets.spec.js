@@ -190,6 +190,7 @@ test.describe('Phase 7 preset serialization', () => {
     await page.waitForSelector('html.modules-ready');
     const result = await page.evaluate(async () => {
       const { buildSpawnPayload, wizardState } = await import('/js/features/spawn-wizard.js');
+      const { RAPID_MLX_DEFAULT_SPECULATIVE_TOKENS } = await import('/js/features/rapid-mlx-prefill.js');
       wizardState.engine.selected = 'rapid_mlx';
       wizardState.model.rapidMlxSource = { kind: 'hugging_face_repo', repo_id: 'mlx-community/model' };
       const off = buildSpawnPayload().rapid_mlx;
@@ -197,11 +198,20 @@ test.describe('Phase 7 preset serialization', () => {
       wizardState.hardware.speculativeSource = 'embedded';
       wizardState.hardware.speculativeModel = 'stale/sidecar';
       const embedded = buildSpawnPayload().rapid_mlx;
-      return { off, embedded };
+      return {
+        off,
+        embedded,
+        defaultTokens: RAPID_MLX_DEFAULT_SPECULATIVE_TOKENS,
+        wizardMarkupDefault: document.getElementById('spawn-rapid-speculative-tokens')?.value,
+        presetMarkupDefault: document.getElementById('modal-rapid-speculative-tokens')?.value,
+      };
     });
     expect(result.off).not.toHaveProperty('speculative_config');
+    expect(result.defaultTokens).toBe(3);
+    expect(result.wizardMarkupDefault).toBe(String(result.defaultTokens));
+    expect(result.presetMarkupDefault).toBe(String(result.defaultTokens));
     expect(result.embedded.speculative_config).toEqual({
-      method: 'mtp', num_speculative_tokens: 2, disable_auto_k: false,
+      method: 'mtp', num_speculative_tokens: result.defaultTokens, disable_auto_k: false,
     });
   });
 });

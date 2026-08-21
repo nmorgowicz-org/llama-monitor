@@ -4,6 +4,7 @@
 
 export const RAPID_MLX_TEXT_PREFILL_STEP_SIZE = 512;
 export const RAPID_MLX_VISION_PREFILL_STEP_SIZE = 1536;
+export const RAPID_MLX_DEFAULT_SPECULATIVE_TOKENS = 3;
 
 export function rapidMlxProfileHasVision(profile) {
     return profile?.extras?.has_vision_tower === true;

@@ -13,6 +13,7 @@ export function setOnMemoryAvailabilityReady(fn) {
 import { buildArchitectureLabel, isMoEEligible } from './setup-view.js';
 import { getPlatformInfo } from '../core/platform-info.js';
 import { readLastStatus } from './template-autoupdater.js';
+import { RAPID_MLX_DEFAULT_SPECULATIVE_TOKENS } from './rapid-mlx-prefill.js';
 import {
   bindRapidMlxAdvancedControls,
   syncRapidSpeculativeFields,
@@ -720,7 +721,7 @@ export const wizardState = {
     speculativeSource: 'embedded',
     speculativeModel: '',
     speculativeModelAutoSelected: false,
-    speculativeTokens: 3,
+    speculativeTokens: RAPID_MLX_DEFAULT_SPECULATIVE_TOKENS,
     speculativeDisableAutoK: false,
     speculativeTrustRequired: false,
     speculativeTrustConsent: false,
@@ -1111,7 +1112,7 @@ function resetWizardState() {
   wizardState.hardware.speculativeSource = 'embedded';
   wizardState.hardware.speculativeModel = '';
   wizardState.hardware.speculativeModelAutoSelected = false;
-  wizardState.hardware.speculativeTokens = 3;
+  wizardState.hardware.speculativeTokens = RAPID_MLX_DEFAULT_SPECULATIVE_TOKENS;
   wizardState.hardware.speculativeDisableAutoK = false;
   wizardState.hardware.autoToolChoice = false;
   wizardState.hardware.workloadScenario = 'interactive_coding_agent';
