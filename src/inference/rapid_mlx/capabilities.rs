@@ -1774,10 +1774,10 @@ fn collect_feature_failures(snapshot: &CapabilitySnapshot) -> Vec<FeatureProbeFa
     failures
 }
 
-/// The three behavioral gates that must all pass before speculative decoding
-/// can be qualified. Each requires a live server and a real model, so none can
-/// be answered by the update-validation probe; the probe's job is to say which
-/// gates are outstanding.
+/// Behavioral gates recorded by the requalification lane. Sampled and
+/// constrained behavior are the production gates; greedy parity is an optional
+/// safety diagnostic. Each requires a live server and a real model, so none can
+/// be answered by the update-validation probe.
 ///
 /// Kept here so the probe message and the harness lane cannot drift apart.
 pub const SPEC_DECODE_GATES: &[&str] = &[
@@ -1794,12 +1794,18 @@ pub const SPEC_DECODE_LANE_SCRIPT: &str = "scripts/rapid-mlx-requalify-spec-deco
 ///
 /// The store checks an ingested report's `gates_defined` against this. Deriving the
 /// names rather than listing them twice is the point: if the two lists could drift, a
-/// report could claim a full sweep of gates this build never asked for.
+/// report could claim a sweep of gates this build never asked for.
 pub fn spec_decode_gate_names() -> Vec<&'static str> {
     SPEC_DECODE_GATES
         .iter()
         .map(|gate| gate.split(':').next().unwrap_or(gate).trim())
         .collect()
+}
+
+/// Production-facing gates. Greedy parity remains an optional safety diagnostic;
+/// sampled and tool-grammar behavior describe the real coding path.
+pub fn spec_decode_required_gate_names() -> Vec<&'static str> {
+    vec!["sampled", "constrained"]
 }
 
 /// Leading sentence for the maintainer detail when the lane has been run on this
@@ -1819,6 +1825,7 @@ fn stale_sweep_note(snapshot: &CapabilitySnapshot) -> String {
         return String::new();
     };
     let found = match previous.outcome {
+        SpecDecodeOutcome::Screened => "screened",
         SpecDecodeOutcome::Qualified if previous.promotes_capability => "qualified",
         SpecDecodeOutcome::Qualified => "passed a partial sweep",
         SpecDecodeOutcome::StillBlocked => "still blocked",
@@ -1897,7 +1904,9 @@ fn collect_spec_decode_failures(
                     .and_then(|repo| repo.file(SPEC_DECODE_LANE_SCRIPT))
                     .map(|lane| {
                         format!(
-                            "{stale}Gates that must all pass: {gates}. Re-test this build \
+                            "{stale}Production gates that must pass are sampled and constrained; \
+                             greedy parity is an optional safety diagnostic. Recorded gates: {gates}. \
+                             Re-test this build \
                              with `node {lane}`, then record the result — a passing sweep \
                              for a version everyone shares belongs in \
                              SPEC_DECODE_VERSION_PRIORS, not only in the local verdict \

@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -23,8 +24,9 @@ use crate::inference::rapid_mlx::model_resolver::{
     AuthoritativeSafetensorsSource, RapidMlxModelSource,
 };
 use crate::inference::rapid_mlx::updater::{
-    ManagedReleaseChannel, ManagedReleaseSelection, ManagedRuntimeExtra, ManagedRuntimeStatus,
-    RapidMlxRuntimeManager, RuntimeInventoryEntry, RuntimeMutationResult, default_runtime_extras,
+    ManagedGitSourceSelection, ManagedReleaseChannel, ManagedReleaseSelection, ManagedRuntimeExtra,
+    ManagedRuntimeSourceKind, ManagedRuntimeStatus, RapidMlxRuntimeManager, RuntimeInventoryEntry,
+    RuntimeMutationResult, default_runtime_extras,
 };
 use crate::inference::rapid_mlx::{RapidMlxConfig, check_mutual_exclusions};
 use crate::state::{DoctorFinding, DoctorFindingType, DoctorSeverity, FixAction};
@@ -32,6 +34,7 @@ use crate::state::{DoctorFinding, DoctorFindingType, DoctorSeverity, FixAction};
 const RELEASES_URL: &str =
     "https://api.github.com/repos/raullenchai/Rapid-MLX/releases?per_page=30";
 const RELEASE_BY_TAG_URL: &str = "https://api.github.com/repos/raullenchai/Rapid-MLX/releases/tags";
+const GITHUB_API_URL: &str = "https://api.github.com/repos";
 const MAX_RELEASE_RESPONSE_BYTES: usize = 512 * 1024;
 const RELEASE_CACHE_TTL: Duration = Duration::from_secs(300);
 const MAX_RETAINED_JOBS: usize = 16;
@@ -57,6 +60,7 @@ struct RuntimeJobs {
 #[serde(rename_all = "snake_case")]
 enum RuntimeOperation {
     Install,
+    InstallDevelopment,
     Upgrade,
     Repair,
     Rollback,
@@ -81,6 +85,12 @@ struct RuntimeJobSnapshot {
     result: Option<PublicRuntimeMutationResult>,
 }
 
+#[derive(Debug, Clone)]
+enum RuntimeJobSpec {
+    Release(ManagedReleaseSelection),
+    Git(ManagedGitSourceSelection),
+}
+
 impl Default for RuntimeJobSnapshot {
     fn default() -> Self {
         Self {
@@ -98,6 +108,10 @@ impl Default for RuntimeJobSnapshot {
 struct PublicRuntimeInventoryEntry {
     environment_id: String,
     version: String,
+    source_kind: ManagedRuntimeSourceKind,
+    source_repository: Option<String>,
+    source_ref: Option<String>,
+    source_commit: Option<String>,
     release_channel: ManagedReleaseChannel,
     extras: Vec<ManagedRuntimeExtra>,
     active: bool,
@@ -110,6 +124,10 @@ impl From<RuntimeInventoryEntry> for PublicRuntimeInventoryEntry {
         Self {
             environment_id: entry.environment_id,
             version: entry.version,
+            source_kind: entry.source_kind,
+            source_repository: entry.source_repository,
+            source_ref: entry.source_ref,
+            source_commit: entry.source_commit,
             release_channel: entry.release_channel,
             extras: entry.extras,
             active: entry.active,
@@ -187,6 +205,29 @@ struct RuntimeMutationRequest {
     confirm: String,
 }
 
+#[derive(Debug, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+struct DevelopmentSourceRequest {
+    repository: String,
+    reference: String,
+    #[serde(default)]
+    resolved_commit: Option<String>,
+    #[serde(default = "default_runtime_extras")]
+    extras: Vec<ManagedRuntimeExtra>,
+    confirm: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DevelopmentSourceResolution {
+    repository: String,
+    requested_ref: String,
+    resolved_commit: String,
+    commit_url: String,
+    title: String,
+    base_commit: Option<String>,
+    extras: Vec<ManagedRuntimeExtra>,
+}
+
 impl Default for RuntimeMutationRequest {
     fn default() -> Self {
         Self {
@@ -255,6 +296,8 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
             state.clone(),
             RuntimeOperation::Install,
         ))
+        .unify()
+        .or(development_source_route(ctx.clone(), state.clone()))
         .unify()
         .or(mutation_route(
             ctx.clone(),
@@ -1259,6 +1302,213 @@ fn releases_route(ctx: ApiCtx, state: RuntimeApiState) -> ApiRoute {
         .boxed()
 }
 
+fn development_source_route(ctx: ApiCtx, state: RuntimeApiState) -> ApiRoute {
+    let config = ctx.config.clone();
+    let resolve = warp::path("api")
+        .and(warp::path("rapid-mlx"))
+        .and(warp::path("runtime"))
+        .and(warp::path("development"))
+        .and(warp::path("resolve"))
+        .and(warp::path::end())
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<DevelopmentSourceRequest>())
+        .and_then({
+            let config = config.clone();
+            let state = state.clone();
+            move |auth: Option<String>, request: DevelopmentSourceRequest| {
+                let config = config.clone();
+                let state = state.clone();
+                async move {
+                    if !check_api_token(&auth, &config) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    match resolve_development_source(&state, &request).await {
+                        Ok((selection, resolution)) => Ok::<ApiReply, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": true,
+                                "source": resolution,
+                                "selection": selection,
+                            })),
+                        )),
+                        Err(error) => Ok(json_error(StatusCode::BAD_REQUEST, error.to_string())),
+                    }
+                }
+            }
+        });
+
+    let install = warp::path("api")
+        .and(warp::path("rapid-mlx"))
+        .and(warp::path("runtime"))
+        .and(warp::path("development"))
+        .and(warp::path("install"))
+        .and(warp::path::end())
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<DevelopmentSourceRequest>())
+        .and_then(
+            move |auth: Option<String>, request: DevelopmentSourceRequest| {
+                let config = config.clone();
+                let state = state.clone();
+                async move {
+                    if !check_db_admin_token(&auth, &config) {
+                        return Ok(unauthorized_db_admin_token());
+                    }
+                    if request.confirm != "INSTALL_RAPID_MLX_DEVELOPMENT" {
+                        return Ok(json_error(
+                            StatusCode::BAD_REQUEST,
+                            "Confirmation must be INSTALL_RAPID_MLX_DEVELOPMENT",
+                        ));
+                    }
+                    if crate::inference::rapid_mlx::ensure_local_platform_supported().is_err() {
+                        return Ok(json_error(
+                            StatusCode::BAD_REQUEST,
+                            "Managed Rapid-MLX runtime changes require Apple Silicon macOS",
+                        ));
+                    }
+                    let selection = match development_selection_from_request(&request) {
+                        Ok(selection) => selection,
+                        Err(error) => {
+                            return Ok(json_error(StatusCode::BAD_REQUEST, error.to_string()));
+                        }
+                    };
+                    start_job(
+                        &state,
+                        RuntimeOperation::InstallDevelopment,
+                        Some(RuntimeJobSpec::Git(selection)),
+                    )
+                    .await
+                }
+            },
+        );
+
+    resolve.or(install).unify().boxed()
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubCommitResponse {
+    sha: String,
+    html_url: String,
+    commit: GitHubCommitDetails,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubCommitDetails {
+    message: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubPullResponse {
+    title: String,
+    html_url: String,
+    head: GitHubPullRef,
+    base: GitHubPullRef,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubPullRef {
+    sha: String,
+}
+
+fn development_selection_from_request(
+    request: &DevelopmentSourceRequest,
+) -> anyhow::Result<ManagedGitSourceSelection> {
+    validate_development_input(&request.repository, &request.reference)?;
+    let resolved_commit = request
+        .resolved_commit
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("Resolve the development source before installing it"))?;
+    ManagedGitSourceSelection::from_resolved(
+        request.repository.clone(),
+        request.reference.clone(),
+        resolved_commit.to_string(),
+        request.extras.clone(),
+    )
+}
+
+async fn resolve_development_source(
+    state: &RuntimeApiState,
+    request: &DevelopmentSourceRequest,
+) -> anyhow::Result<(ManagedGitSourceSelection, DevelopmentSourceResolution)> {
+    validate_development_input(&request.repository, &request.reference)?;
+    let (resolved_commit, commit_url, title, base_commit) =
+        if let Some(number) = request.reference.strip_prefix("pr:") {
+            let number: u64 = number
+                .parse()
+                .context("PR reference must use pr:<number>")?;
+            if number == 0 {
+                anyhow::bail!("PR reference must use a positive number");
+            }
+            let url = format!("{GITHUB_API_URL}/{}/pulls/{number}", request.repository);
+            let body = fetch_bounded_release_body(&state.client, &url).await?;
+            let pull: GitHubPullResponse = serde_json::from_slice(&body)
+                .context("GitHub returned invalid pull request metadata")?;
+            (
+                pull.head.sha,
+                pull.html_url,
+                pull.title,
+                Some(pull.base.sha),
+            )
+        } else {
+            let url = format!(
+                "{GITHUB_API_URL}/{}/commits/{}",
+                request.repository, request.reference
+            );
+            let body = fetch_bounded_release_body(&state.client, &url).await?;
+            let commit: GitHubCommitResponse =
+                serde_json::from_slice(&body).context("GitHub returned invalid commit metadata")?;
+            let title = commit
+                .commit
+                .message
+                .lines()
+                .next()
+                .unwrap_or("Development source")
+                .to_string();
+            (commit.sha, commit.html_url, title, None)
+        };
+    let selection = ManagedGitSourceSelection::from_resolved(
+        request.repository.clone(),
+        request.reference.clone(),
+        resolved_commit.clone(),
+        request.extras.clone(),
+    )?;
+    let resolution = DevelopmentSourceResolution {
+        repository: request.repository.clone(),
+        requested_ref: request.reference.clone(),
+        resolved_commit,
+        commit_url,
+        title,
+        base_commit,
+        extras: selection.extras().to_vec(),
+    };
+    Ok((selection, resolution))
+}
+
+fn validate_development_input(repository: &str, reference: &str) -> anyhow::Result<()> {
+    let mut parts = repository.split('/');
+    let owner = parts.next().unwrap_or_default();
+    let name = parts.next().unwrap_or_default();
+    if owner.is_empty()
+        || name.is_empty()
+        || parts.next().is_some()
+        || !repository
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'/'))
+    {
+        anyhow::bail!("Repository must be a GitHub owner/repository identifier");
+    }
+    if reference.is_empty()
+        || reference.len() > 256
+        || reference.contains("..")
+        || !reference.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'/' | b':')
+        })
+    {
+        anyhow::bail!("Reference must be a branch, tag, commit SHA, or pr:<number>");
+    }
+    Ok(())
+}
+
 fn changelog_route(ctx: ApiCtx, state: RuntimeApiState) -> ApiRoute {
     let config = ctx.config;
     warp::path!("api" / "rapid-mlx" / "runtime" / "changelog")
@@ -1366,7 +1616,12 @@ fn mutation_route(ctx: ApiCtx, state: RuntimeApiState, operation: RuntimeOperati
                             ));
                         }
                     };
-                    start_job(&state, operation, Some(release)).await
+                    start_job(
+                        &state,
+                        operation,
+                        Some(RuntimeJobSpec::Release(release)),
+                    )
+                    .await
                 }
             },
         )
@@ -1413,20 +1668,34 @@ fn simple_mutation_route(
                             "Managed Rapid-MLX runtime changes require Apple Silicon macOS",
                         ));
                     }
-                    let release = if operation == RuntimeOperation::Repair {
-                        match published_selection_for_active_runtime(&state).await {
-                            Ok(release) => Some(release),
-                            Err(_) => {
-                                return Ok(json_error(
-                                    StatusCode::BAD_REQUEST,
-                                    "The active managed Rapid-MLX runtime could not be verified against published release metadata",
-                                ));
+                    let spec = if operation == RuntimeOperation::Repair {
+                        let active_source = match manager(&state) {
+                            Ok(manager) => {
+                                tokio::task::spawn_blocking(move || manager.active_git_source())
+                                    .await
+                                    .ok()
+                                    .and_then(Result::ok)
+                                    .flatten()
+                            }
+                            Err(_) => None,
+                        };
+                        if let Some(source) = active_source {
+                            Some(RuntimeJobSpec::Git(source))
+                        } else {
+                            match published_selection_for_active_runtime(&state).await {
+                                Ok(release) => Some(RuntimeJobSpec::Release(release)),
+                                Err(_) => {
+                                    return Ok(json_error(
+                                        StatusCode::BAD_REQUEST,
+                                        "The active managed Rapid-MLX runtime could not be verified against its source metadata",
+                                    ));
+                                }
                             }
                         }
                     } else {
                         None
                     };
-                    start_job(&state, operation, release).await
+                    start_job(&state, operation, spec).await
                 }
             },
         )
@@ -1482,7 +1751,7 @@ fn job_route(ctx: ApiCtx, state: RuntimeApiState) -> ApiRoute {
 async fn start_job(
     state: &RuntimeApiState,
     operation: RuntimeOperation,
-    release: Option<ManagedReleaseSelection>,
+    spec: Option<RuntimeJobSpec>,
 ) -> Result<ApiReply, warp::Rejection> {
     let manager = match manager(state) {
         Ok(manager) => manager,
@@ -1507,7 +1776,10 @@ async fn start_job(
             ));
         }
     };
-    let version = release.as_ref().map(|item| item.version().to_string());
+    let version = spec.as_ref().map(|item| match item {
+        RuntimeJobSpec::Release(release) => release.version().to_string(),
+        RuntimeJobSpec::Git(source) => format!("git:{}", source.resolved_commit()),
+    });
     let version_for_log = version.clone();
     if !try_insert_job(
         state,
@@ -1535,10 +1807,22 @@ async fn start_job(
             "Installing and validating an isolated runtime",
             None,
         );
-        let result = match (operation, release) {
-            (RuntimeOperation::Install, Some(release)) => manager.install_release(release).await,
-            (RuntimeOperation::Upgrade, Some(release)) => manager.upgrade_release(release).await,
-            (RuntimeOperation::Repair, Some(release)) => manager.repair_release(release).await,
+        let result = match (operation, spec) {
+            (RuntimeOperation::Install, Some(RuntimeJobSpec::Release(release))) => {
+                manager.install_release(release).await
+            }
+            (RuntimeOperation::InstallDevelopment, Some(RuntimeJobSpec::Git(source))) => {
+                manager.install_git_source(source).await
+            }
+            (RuntimeOperation::Upgrade, Some(RuntimeJobSpec::Release(release))) => {
+                manager.upgrade_release(release).await
+            }
+            (RuntimeOperation::Repair, Some(RuntimeJobSpec::Release(release))) => {
+                manager.repair_release(release).await
+            }
+            (RuntimeOperation::Repair, Some(RuntimeJobSpec::Git(source))) => {
+                manager.upgrade_git_source(source).await
+            }
             (RuntimeOperation::Rollback, None) => manager.rollback().await,
             _ => Err(anyhow::anyhow!("Invalid runtime operation state")),
         };
@@ -2494,6 +2778,29 @@ mod tests {
     }
 
     #[test]
+    fn development_request_accepts_pinned_resolution_and_defaults_extras() {
+        let request: DevelopmentSourceRequest = serde_json::from_str(
+            r#"{"repository":"nmorgowicz/Rapid-MLX","reference":"main","resolved_commit":"0123456789abcdef0123456789abcdef01234567","confirm":"x"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            request.resolved_commit.as_deref(),
+            Some("0123456789abcdef0123456789abcdef01234567")
+        );
+        assert_eq!(request.extras, default_runtime_extras());
+    }
+
+    #[test]
+    fn development_install_requires_the_resolved_commit() {
+        let request: DevelopmentSourceRequest = serde_json::from_str(
+            r#"{"repository":"nmorgowicz/Rapid-MLX","reference":"main","confirm":"INSTALL_RAPID_MLX_DEVELOPMENT"}"#,
+        )
+        .unwrap();
+        let error = development_selection_from_request(&request).unwrap_err();
+        assert!(error.to_string().contains("Resolve the development source"));
+    }
+
+    #[test]
     fn release_request_rejects_duplicate_extras() {
         let request: RuntimeMutationRequest = serde_json::from_str(
             r#"{"version":"0.10.10","channel":"stable","extras":["vision","vision"],"confirm":"x"}"#,
@@ -2576,6 +2883,10 @@ mod tests {
         let internal = RuntimeInventoryEntry {
             environment_id: "rapid-mlx-0.10.10-test".into(),
             version: "0.10.10".into(),
+            source_kind: ManagedRuntimeSourceKind::Release,
+            source_repository: None,
+            source_ref: None,
+            source_commit: None,
             release_channel: ManagedReleaseChannel::Stable,
             extras: Vec::new(),
             executable_path: "/Users/person/.config/llama-monitor/private/rapid-mlx".into(),

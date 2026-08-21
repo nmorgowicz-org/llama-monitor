@@ -98,6 +98,15 @@ export default async function(ctx, options) {
             // Dark desktop
             await captureShot(page, 'rapid-mlx-runtime-manager-dark.png', { fullPage: true });
 
+            const developmentTab = await page.$('#rapid-mlx-source-development');
+            if (developmentTab) {
+                await developmentTab.click();
+                await sleep(250);
+                await captureShot(page, 'rapid-mlx-runtime-manager-development-dark.png', { fullPage: true });
+                await page.click('#rapid-mlx-source-official');
+                await sleep(150);
+            }
+
             // Light desktop
             await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
             await sleep(250);

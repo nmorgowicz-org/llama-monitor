@@ -4465,6 +4465,88 @@ button:disabled {
 
 /* ── Rapid-MLX Runtime Modal ──────────────────────────────────────────── */
 
+.rapid-mlx-source-switcher {
+  display: flex;
+  gap: 4px;
+  padding: 8px 14px 0;
+}
+
+.rapid-mlx-source-tab {
+  border: 1px solid color-mix(in srgb, var(--color-fg-subtle) 20%, transparent);
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: transparent;
+  color: var(--color-fg-soft);
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.rapid-mlx-source-tab.active {
+  border-color: color-mix(in srgb, var(--color-primary) 38%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  color: var(--color-primary);
+}
+
+.rapid-mlx-development-source {
+  margin: 8px 14px 0;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 22%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-primary) 4%, transparent);
+}
+
+.rapid-mlx-development-copy {
+  margin: 0 0 8px;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.rapid-mlx-development-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.rapid-mlx-development-grid label {
+  display: grid;
+  gap: 3px;
+  color: var(--color-fg-soft);
+  font-size: 10px;
+}
+
+.rapid-mlx-development-grid input {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--color-fg-subtle) 24%, transparent);
+  border-radius: 5px;
+  padding: 5px 6px;
+  background: color-mix(in srgb, var(--color-bg) 80%, transparent);
+  color: var(--color-fg);
+  font: 10px var(--font-mono, monospace);
+}
+
+.rapid-mlx-development-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.rapid-mlx-development-actions button:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
+.rapid-mlx-development-resolution {
+  margin-top: 8px;
+  color: var(--color-text-muted);
+  font: 10px/1.4 var(--font-mono, monospace);
+  overflow-wrap: anywhere;
+}
+
+.rapid-mlx-development-resolution.is-good {
+  color: var(--color-success, #76c893);
+}
+
 #rapid-mlx-modal {
   position: fixed;
   inset: 0;

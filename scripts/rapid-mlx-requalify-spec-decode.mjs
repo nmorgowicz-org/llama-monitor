@@ -71,6 +71,9 @@ Inputs come from ${DEFAULT_RECIPE}; flags below override it.
   --tool-call-parser NAME        needed by the 'constrained' gate
   --reasoning-parser NAME
   --profile-alias REPO           HF alias to read parsers from
+  --num-speculative-tokens N     requested speculative ceiling (default 3)
+  --disable-auto-k               pin the requested ceiling instead of adaptive K
+  --mode MODE                    screen, full, or full-diagnostic (adds greedy parity)
   --out DIR                      receipts (default: tmp/requalify-<version>-<date>)
   --port N                       (default 8110)
   --rapid-mlx-bin PATH
@@ -122,6 +125,10 @@ function parseArgs(argv) {
       flags.ingest = false;
       continue;
     }
+    if (key === '--disable-auto-k') {
+      flags.disableAutoK = true;
+      continue;
+    }
     const value = rest[index + 1];
     if (value === undefined) die(`Missing value for ${key}`);
     index += 1;
@@ -136,6 +143,8 @@ function parseArgs(argv) {
     else if (key === '--tool-call-parser') flags.toolCallParser = value;
     else if (key === '--reasoning-parser') flags.reasoningParser = value;
     else if (key === '--profile-alias') flags.profileAlias = value;
+    else if (key === '--num-speculative-tokens') flags.numSpeculativeTokens = Number(value);
+    else if (key === '--mode') flags.mode = value;
     else if (key === '--gate') (flags.gates ??= []).push(value);
     else die(`Unknown option: ${key}`);
   }
@@ -159,8 +168,20 @@ function parseArgs(argv) {
     out: flags.out,
     rapidMlxBin: flags.rapidMlxBin ?? recipe.rapidMlxBin,
     hfHubCache: expandHome(flags.hfHubCache ?? recipe.hfHubCache ?? DEFAULT_HF_HUB_CACHE),
+    numSpeculativeTokens: flags.numSpeculativeTokens ?? recipe.numSpeculativeTokens ?? 3,
+    disableAutoK: flags.disableAutoK ?? recipe.disableAutoK ?? false,
+    mode: flags.mode ?? recipe.mode ?? 'full',
     gates: flags.gates,
   };
+
+  if (!['screen', 'full', 'full-diagnostic'].includes(options.mode)) {
+    die('--mode must be screen, full, or full-diagnostic.');
+  }
+
+  if (!Number.isInteger(options.numSpeculativeTokens)
+      || options.numSpeculativeTokens < 1 || options.numSpeculativeTokens > 8) {
+    die('--num-speculative-tokens must be an integer from 1 through 8.');
+  }
 
   const missing = (field, flag) => `${field} is not set. Pass ${flag}, or add it to `
     + `${recipePath}.`;
@@ -237,10 +258,12 @@ const GATES = [
     name: 'constrained',
     question: 'Is speculation active with a tool grammar installed?',
     // The warm suite is the one that installs tools with tool_choice=required,
-    // which is what puts a logits processor in the decode path.
+    // which is what puts a logits processor in the decode path. Keep it on the
+    // same non-greedy temperature as the production coding route.
     suite: 'spec-decode-warm',
     cells: ['spec-warm-off-8000-int8', 'spec-warm-control-mtp-8000-int8'],
-    sampling: 'greedy',
+    sampling: 'explicit',
+    temperature: 0.6,
     evaluate: (facts) => {
       if (facts.attempts <= 0) {
         return {
@@ -421,8 +444,10 @@ function runSuite(args, hfHubCache) {
 // must not be reported as the thing we requested.
 async function gateFacts(outputDir) {
   const suiteIndex = JSON.parse(await readFile(join(outputDir, 'suite-index.json'), 'utf8'));
-  let accepts = 0;
-  let attempts = 0;
+  let controlAccepts = 0;
+  let controlAttempts = 0;
+  let subjectAccepts = 0;
+  let subjectAttempts = 0;
   for (const entry of suiteIndex.receipts ?? []) {
     let receipt;
     try {
@@ -431,17 +456,34 @@ async function gateFacts(outputDir) {
       continue;
     }
     for (const cell of receipt.cells ?? []) {
-      if (cell.configuration?.speculative_role !== 'control') continue;
+      const role = cell.configuration?.speculative_role;
+      if (!['control', 'subject'].includes(role)) continue;
       for (const attempt of cell.attempts ?? []) {
-        accepts += sumByPrefix(attempt.metrics_delta, 'rapid_mlx_spec_decode_accepts_total');
-        attempts += sumByPrefix(attempt.metrics_delta, 'rapid_mlx_spec_decode_attempts_total');
+        const accepts = sumByPrefix(attempt.metrics_delta, 'rapid_mlx_spec_decode_accepts_total');
+        const attempts = sumByPrefix(attempt.metrics_delta, 'rapid_mlx_spec_decode_attempts_total');
+        if (role === 'control') {
+          controlAccepts += accepts;
+          controlAttempts += attempts;
+        } else {
+          subjectAccepts += accepts;
+          subjectAttempts += attempts;
+        }
       }
     }
   }
+  // The control separates a broken harness from a bad subject. Once it clears,
+  // the subject is the evidence that this exact managed sidecar works.
+  const primary = subjectAttempts > 0 || subjectAccepts > 0
+    ? { accepts: subjectAccepts, attempts: subjectAttempts }
+    : { accepts: 0, attempts: 0 };
   return {
     suiteIndex,
-    accepts,
-    attempts,
+    accepts: primary.accepts,
+    attempts: primary.attempts,
+    controlAccepts,
+    controlAttempts,
+    subjectAccepts,
+    subjectAttempts,
     temperature: suiteIndex.sampling_lane?.temperature ?? 0,
   };
 }
@@ -453,6 +495,39 @@ function sumByPrefix(metrics, prefix) {
     if (key.startsWith(prefix) && Number.isFinite(value)) total += value;
   }
   return total;
+}
+
+// A malformed head is a negative qualification result, not a broken harness. The
+// runtime may fail before it can emit metrics, so perform the cheap safetensors
+// structural check first and record that finding as StillBlocked. This also keeps a
+// corrupt managed sidecar from being rendered as an unqualified mystery failure.
+function subjectSidecarFailure(subjectModel) {
+  if (!subjectModel || !isAbsolute(subjectModel)) return null;
+  let artifact = subjectModel;
+  try {
+    if (statSync(artifact).isDirectory()) {
+      for (const name of ['mtp.safetensors', 'model-mtp.safetensors']) {
+        const candidate = join(artifact, name);
+        if (existsSync(candidate)) { artifact = candidate; break; }
+      }
+    }
+    const bytes = readFileSync(artifact);
+    if (bytes.length < 16) return `Subject sidecar is too small to be a safetensors file: ${artifact}`;
+    const headerLength = Number(bytes.readBigUInt64LE(0));
+    if (!Number.isSafeInteger(headerLength) || headerLength <= 2 || headerLength > bytes.length - 8) {
+      return `Subject sidecar has an invalid safetensors header length: ${artifact}`;
+    }
+    const header = JSON.parse(bytes.subarray(8, 8 + headerLength).toString('utf8'));
+    const keys = Object.keys(header)
+      .filter((key) => key !== '__metadata__')
+      .map((key) => key.startsWith('mtp.') ? key.slice(4) : key);
+    if (!keys.length || !keys.some((key) => key.startsWith('pre_fc_norm'))) {
+      return `Subject sidecar has no MTP pre_fc_norm tensors: ${artifact}`;
+    }
+  } catch (error) {
+    return `Subject sidecar is malformed or unreadable: ${artifact} (${error.message})`;
+  }
+  return null;
 }
 
 const parsedOptions = parseArgs(process.argv);
@@ -471,9 +546,17 @@ if (!options.out) {
 const outRoot = resolve(options.out);
 await mkdir(outRoot, { recursive: true });
 
+const sidecarFailure = subjectSidecarFailure(options.subjectModel);
+
 const selected = options.gates?.length
   ? GATES.filter((gate) => options.gates.includes(gate.name))
-  : GATES;
+  : options.mode === 'screen'
+    ? GATES.filter((gate) => gate.name === 'sampled')
+    : options.mode === 'full'
+      ? GATES.filter((gate) => ['sampled', 'constrained'].includes(gate.name))
+      : GATES;
+
+const completionTokens = options.mode === 'screen' ? 1024 : 8192;
 
 if (selected.some((gate) => gate.name === 'constrained') && !options.toolCallParser) {
   die('The `constrained` gate needs a tool-call parser, and none could be resolved '
@@ -492,6 +575,7 @@ process.stderr.write(`Subject head: ${options.subjectModel ?? 'none (trunk-embed
 process.stderr.write(`Control: ${options.controlModel}\n`);
 process.stderr.write(`HF hub cache: ${options.hfHubCache}\n`);
 process.stderr.write(`Receipts: ${outRoot}\n`);
+process.stderr.write(`Mode: ${options.mode} (${options.mode === 'screen' ? 'short live probe' : options.mode === 'full' ? 'production gates' : 'production gates plus greedy safety diagnostic'})\n`);
 process.stderr.write(`Parsers: tool=${options.toolCallParser ?? 'none'} `
   + `reasoning=${options.reasoningParser ?? 'none'} (source: ${options.parserSource})\n`);
 
@@ -520,17 +604,31 @@ for (const gate of selected) {
       ? ['--temperature', String(options.sampledTemperature ?? gate.temperature)]
       : []),
     ...(options.subjectModel ? ['--speculative-model', options.subjectModel] : []),
+    '--speculative-tokens', String(options.numSpeculativeTokens),
+    ...(options.disableAutoK ? ['--disable-speculative-auto-k'] : []),
     ...(gate.trials ? ['--trials', String(gate.trials)] : []),
     ...(options.toolCallParser ? ['--tool-call-parser', options.toolCallParser] : []),
     ...(options.reasoningParser ? ['--reasoning-parser', options.reasoningParser] : []),
-    ...gate.cells.flatMap((cell) => ['--cell', cell]),
+    '--spec-completion-tokens', String(completionTokens),
+    ...(() => {
+      const cells = [...gate.cells];
+      if (options.subjectModel && options.subjectModel !== options.controlModel) {
+        for (const cell of gate.cells) {
+          if (cell.includes('-control-')) cells.push(cell.replace('-control-', '-subject-'));
+        }
+      }
+      return cells.flatMap((cell) => ['--cell', cell]);
+    })(),
   ];
 
-  const run = await runSuite(args, options.hfHubCache);
   let result;
-  if (run.error) {
-    result = { verdict: 'error', reason: `Suite failed to start: ${run.error}` };
+  if (sidecarFailure) {
+    result = { verdict: 'blocked', reason: sidecarFailure };
   } else {
+    const run = await runSuite(args, options.hfHubCache);
+    if (run.error) {
+    result = { verdict: 'error', reason: `Suite failed to start: ${run.error}` };
+    } else {
     let facts = null;
     try {
       facts = await gateFacts(gateDir);
@@ -568,6 +666,7 @@ for (const gate of selected) {
       result.attempts = facts.attempts;
       result.temperature = facts.temperature;
     }
+    }
   }
   result.gate = gate.name;
   result.question = gate.question;
@@ -576,18 +675,23 @@ for (const gate of selected) {
   process.stderr.write(`--- ${gate.name}: ${result.verdict.toUpperCase()} — ${result.reason}\n`);
 }
 
-const verdicts = new Set(results.map((result) => result.verdict));
-const overall = verdicts.has('error') || verdicts.has('fail')
+const productionResults = results.filter((result) => ['sampled', 'constrained'].includes(result.gate));
+const productionVerdicts = new Set(productionResults.map((result) => result.verdict));
+const overall = productionVerdicts.has('error') || productionVerdicts.has('fail')
   ? 'uninterpretable'
-  : verdicts.has('blocked')
+  : productionVerdicts.has('blocked')
     ? 'still-blocked'
-    : 'qualified';
+    : options.mode === 'screen' ? 'screened' : 'qualified';
 
 const report = {
   rapid_mlx_version: version,
   model: options.model,
   speculative_control_model: options.controlModel,
   speculative_model: options.subjectModel ?? null,
+  num_speculative_tokens: options.numSpeculativeTokens,
+  disable_auto_k: options.disableAutoK,
+  qualification_mode: options.mode,
+  screen_completion_tokens: options.mode === 'screen' ? completionTokens : null,
   // A gate verdict is only readable alongside the parsers that were installed:
   // "tools did not slow speculation down" means nothing if no tool parser ran.
   tool_call_parser: options.toolCallParser ?? null,
@@ -599,7 +703,8 @@ const report = {
   overall,
   // Only a full sweep with every gate passing can promote the capability;
   // a partial run is evidence, not qualification.
-  promotes_capability: overall === 'qualified' && selected.length === GATES.length,
+  promotes_capability: overall === 'qualified' && ['full', 'full-diagnostic'].includes(options.mode)
+    && productionResults.length === 2,
   results,
   generated_at: new Date().toISOString(),
 };
@@ -633,6 +738,11 @@ if (report.promotes_capability) {
     + 'src/inference/rapid_mlx/capabilities.rs as SchedulerEvidence::Engages and record '
     + 'the evidence in docs/reference/rapid-mlx-mtp-evidence.md, so users who never run '
     + 'this lane benefit too.\n',
+  );
+} else if (overall === 'screened') {
+  process.stderr.write(
+    'The fast screen passed. This is live evidence for this sidecar, but it does not '
+    + 'test constrained decoding or greedy parity; run full mode before treating it as qualified.\n',
   );
 } else if (overall === 'still-blocked') {
   process.stderr.write(

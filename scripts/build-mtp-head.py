@@ -71,7 +71,7 @@ STALE_EXTRACTOR_MEAN = -0.44
 # inferred from a bad acceptance rate a day later. See
 # scripts/vendor/rapid-mlx/PROVENANCE.md.
 VENDORED_EXTRACTOR_SHA256 = (
-    "0776ecb720de1b2c6228cd2d6f37abad26ce8c198cde07e1babc7db05616d5a8"
+    "5debca6d49f33c4961237399f01c0e5ea110bc34dbce92ae6efa158396f421e3"
 )
 
 

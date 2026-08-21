@@ -957,13 +957,15 @@ async function resolveSidecarReference(reference) {
     root = join(repoPath, revision);
   }
 
-  for (const name of ['model-mtp.safetensors', 'model.safetensors']) {
+  // Foundry-managed sidecars deliberately use mtp.safetensors so mlx-lm's
+  // model*.safetensors trunk glob cannot ingest the head as a trunk shard.
+  for (const name of ['mtp.safetensors', 'model-mtp.safetensors', 'model.safetensors']) {
     const candidate = join(root, name);
     try {
       if ((await stat(candidate)).isFile()) return { file: candidate, root, revision };
     } catch { /* try the next well-known filename */ }
   }
-  die(`Sidecar ${reference} has neither model-mtp.safetensors nor model.safetensors.`);
+  die(`Sidecar ${reference} has neither mtp.safetensors, model-mtp.safetensors, nor model.safetensors.`);
 }
 
 function fp16ToNumber(bits) {

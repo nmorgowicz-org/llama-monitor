@@ -3466,6 +3466,16 @@
                                             <div style="display:flex; gap:6px; margin-top:8px;">
                                                 <button type="button" class="pe-action-btn" id="modal-rapid-speculative-repair-start">Start repair</button>
                                                 <button type="button" class="pe-action-btn" id="modal-rapid-speculative-repair-validate">Validate current sidecar</button>
+                                                <button type="button" class="pe-action-btn" id="modal-rapid-speculative-repair-requalify">Requalify sidecar</button>
+                                            </div>
+                                            <div class="pe-field" style="margin-top:8px;">
+                                                <label class="pe-label" for="modal-rapid-speculative-requalification-mode">Live validation depth</label>
+                                                <select class="pe-select" id="modal-rapid-speculative-requalification-mode">
+                                                    <option value="screen" selected>Fast screen — short sampled probe (about 2–5 min)</option>
+                                                    <option value="full">Full qualification — sampled and tool grammar (about 40–60 min)</option>
+                                                    <option value="full-diagnostic">Full + greedy safety diagnostic (about 60–90 min)</option>
+                                                </select>
+                                                <div class="pe-field-hint">Fast screen confirms that this sidecar loads and produces live speculative activity. Full qualification is required before the runtime capability can be promoted.</div>
                                             </div>
                                             <div class="pe-field-hint" id="modal-rapid-speculative-repair-status" style="margin-top:6px; display:none;"></div>
                                         </div>
@@ -7575,6 +7585,26 @@
             </button>
         </div>
     <div class="rapid-mlx-modal-status" id="rapid-mlx-status-text">Checking runtime…</div>
+    <div class="rapid-mlx-source-switcher" role="tablist" aria-label="Rapid-MLX runtime source">
+      <button type="button" class="rapid-mlx-source-tab active" id="rapid-mlx-source-official" role="tab" aria-selected="true">Official releases</button>
+      <button type="button" class="rapid-mlx-source-tab" id="rapid-mlx-source-development" role="tab" aria-selected="false">Development source</button>
+    </div>
+    <section class="rapid-mlx-development-source" id="rapid-mlx-development-source" hidden aria-label="Rapid-MLX development source">
+      <p class="rapid-mlx-development-copy">Use upstream or fork <code>main</code>, a pull request, branch, tag, or exact commit. The reference is resolved to an immutable commit before installation.</p>
+      <div class="rapid-mlx-development-grid">
+        <label>Repository
+          <input id="rapid-mlx-development-repository" type="text" value="nmorgowicz/Rapid-MLX" autocomplete="off" spellcheck="false" placeholder="owner/repository">
+        </label>
+        <label>Reference
+          <input id="rapid-mlx-development-reference" type="text" value="main" autocomplete="off" spellcheck="false" placeholder="main, branch, pr:2140, or SHA">
+        </label>
+      </div>
+      <div class="rapid-mlx-development-actions">
+        <button type="button" class="rapid-mlx-action-btn rapid-mlx-action-btn-soft" id="rapid-mlx-development-resolve">Resolve revision</button>
+        <button type="button" class="rapid-mlx-action-btn" id="rapid-mlx-development-install" disabled>Install and activate</button>
+      </div>
+      <div class="rapid-mlx-development-resolution" id="rapid-mlx-development-resolution" aria-live="polite">No development revision resolved.</div>
+    </section>
     <fieldset class="rapid-mlx-profile" id="rapid-mlx-profile">
       <legend>Optional capabilities</legend>
       <label><input type="checkbox" id="rapid-mlx-extra-guided" value="guided" checked> Guided generation</label>

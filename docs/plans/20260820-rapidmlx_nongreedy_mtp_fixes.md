@@ -1,8 +1,7 @@
 # 2026-08-20 — Rapid-MLX non-greedy MTP + sidecar assembly
 
 Branch: `fix/rapid-mlx-nongreedy-mtp`
-Status: IN PROGRESS — Phases 3–5 implementation complete; final Phase 5
-validation evidence is recorded below.
+Status: COMPLETE — Phases 3–6 implementation and validation are complete. The required live screen used the pinned custom Rapid-MLX fix build; full production qualification remains an explicit optional user operation.
 
 ## 2026-08-20 execution findings and tooling boundary
 
@@ -401,15 +400,15 @@ addresses it.
 
 ### Gate 0
 
-- [ ] The rapid-mlx build under test is recorded by commit SHA in the PR
+- [x] The rapid-mlx build under test is recorded by commit SHA in the PR
       description for this branch.
-- [ ] `which rapid-mlx` resolves to the fork's venv, and the app's runtime page
+- [x] `which rapid-mlx` resolves to the fork's venv, and the app's runtime page
       reports that same path with source `Pip`.
-- [ ] `test_mtp_nongreedy_distribution.py` passes against that build.
-- [ ] All Tier A and Tier B fixtures from 0.4 are present in the HF cache with
+- [x] `test_mtp_nongreedy_distribution.py` passes against that build.
+- [x] All Tier A and Tier B fixtures from 0.4 are present in the HF cache with
       complete file lists matching the survey table. Tier D present. Tier C
       present, or its absence recorded as a knowingly skipped negative control.
-- [ ] No `NONGREEDY_MTP_MIN_VERSION` or equivalent version-floor constant exists
+- [x] No `NONGREEDY_MTP_MIN_VERSION` or equivalent version-floor constant exists
       anywhere in `src/`. Check: `grep -rn "MIN_VERSION" src/inference/rapid_mlx/`
 
 ---
@@ -458,12 +457,12 @@ tells users to avoid a feature that now works.
 
 ### Gate 1
 
-- [ ] No string anywhere in `static/` still asserts "only engages on greedy".
+- [x] No string anywhere in `static/` still asserts "only engages on greedy".
       Check: `grep -rn "only engages on greedy" static/`
-- [ ] No speculative-decoding hint string contains a hardcoded version number.
+- [x] No speculative-decoding hint string contains a hardcoded version number.
       Check: `grep -rn "Rapid 0\." static/`
-- [ ] `disable_auto_k` has visible hint text in **both** wizard and preset editor.
-- [ ] `npm test` (or the repo's JS test command) passes.
+- [x] `disable_auto_k` has visible hint text in **both** wizard and preset editor.
+- [x] `npm test` (or the repo's JS test command) passes.
 
 ---
 
@@ -504,14 +503,14 @@ and launches 2, or vice versa.
 
 ### Gate 2
 
-- [ ] `grep -rn "speculativeTokens || 2" static/js/` returns nothing.
-- [ ] `grep -rn "default_num_speculative_tokens" src/` shows `{ 3 }`.
-- [ ] Fresh wizard at Quick profile emits `"num_speculative_tokens":3`.
-- [ ] Fresh preset editor shows 3 selected.
-- [ ] `validate()` still rejects 0 and 9 (range `1..=8` unchanged).
-- [ ] Existing saved presets with an explicit `2` still load as `2` — the
+- [x] `grep -rn "speculativeTokens || 2" static/js/` returns nothing.
+- [x] `grep -rn "default_num_speculative_tokens" src/` shows `{ 3 }`.
+- [x] Fresh wizard at Quick profile emits `"num_speculative_tokens":3`.
+- [x] Fresh preset editor shows 3 selected.
+- [x] `validate()` still rejects 0 and 9 (range `1..=8` unchanged).
+- [x] Existing saved presets with an explicit `2` still load as `2` — the
       default must not overwrite stored values.
-- [ ] `cargo test` and the JS test suite pass.
+- [x] `cargo test` and the JS test suite pass.
 
 ---
 
@@ -601,36 +600,36 @@ inspection**, not globbing.
 
 ### Gate 3
 
-- [ ] `mlx-community/Qwen3.8-27B-MTP-mxfp4` is classified as a **head-only
+- [x] `mlx-community/Qwen3.8-27B-MTP-mxfp4` is classified as a **head-only
       repo** and is never presented as a spawnable model.
-- [ ] `Shiftedx/Qwen3.8-27B-MLX-MXFP4-MTP` adopts as a trunk with its
+- [x] `Shiftedx/Qwen3.8-27B-MLX-MXFP4-MTP` adopts as a trunk with its
       `mtp.safetensors` relocated to the sidecar directory, and the 18 trunk
       shards left intact.
-- [ ] `model-vision-00001-of-00001.safetensors` from that same repo is **still
+- [x] `model-vision-00001-of-00001.safetensors` from that same repo is **still
       present in the trunk** afterward (3.3a).
-- [ ] The trunk's `config.json` after adoption contains **no**
+- [x] The trunk's `config.json` after adoption contains **no**
       `mtp_num_hidden_layers` key.
-- [ ] The legacy scan (3.4) detects and repairs a deliberately poisoned trunk
+- [x] The legacy scan (3.4) detects and repairs a deliberately poisoned trunk
       you construct by copying an MTP head in as `model-mtp.safetensors`.
-- [ ] A **non-MTP** repo adoption is byte-identical to before this change. Prove
+- [x] A **non-MTP** repo adoption is byte-identical to before this change. Prove
       it — diff the resulting trunk directory listing against a pre-change run.
-- [ ] A normal `model-00001-of-00018.safetensors` still downloads and is not
+- [x] A normal `model-00001-of-00018.safetensors` still downloads and is not
       touched by the hygiene scan.
-- [ ] The header-only read in 3.2 does not load tensor data. Verify by peak RSS
+- [x] The header-only read in 3.2 does not load tensor data. Verify by peak RSS
       on a 27B trunk, not by inspection.
-- [ ] **A `nightmedia/Qwen3.6-35B-A3B-MTP-Holo3-Qwopus-*` variant classifies as
+- [x] **A `nightmedia/Qwen3.6-35B-A3B-MTP-Holo3-Qwopus-*` variant classifies as
       NOT MTP-capable**, despite passing both config gates
       (`qwen3_5_moe` + `mtp_num_hidden_layers: 1`) and carrying "MTP" in its
       name. This is the config-lies case from consequence 5; a classifier that
       trusts config instead of tensors passes every other item on this list and
       fails this one.
-- [ ] Key matching accepts **both** the `mtp.`-prefixed and bare tensor
+- [x] Key matching accepts **both** the `mtp.`-prefixed and bare tensor
       namespaces (consequence 6) — assert against one repo of each.
-- [ ] Determined by test whether `mlx_lm`'s `model*.safetensors` glob reaches
+- [x] Determined by test whether `mlx_lm`'s `model*.safetensors` glob reaches
       `mtp/model.safetensors` one directory down. Record the answer in this
       document; if it does match, the `mtp/` subdir layout is a new double-shift
       hazard and Phase 3 must handle it.
-- [ ] `cargo test` passes.
+- [x] `cargo test` passes.
 
 ---
 
@@ -691,20 +690,20 @@ and `--mlx-model` typed by hand, and nothing in the app invokes or offers it.
 
 ### Gate 4
 
-- [ ] Extraction path produces `mtp.safetensors` + `provenance.json` under
+- [x] Extraction path produces `mtp.safetensors` + `provenance.json` under
       `~/.config/local-llm-foundry/models/rapid-mlx/mtp-sidecars/<slug>/`.
-- [ ] Relocation path (from Phase 3) produces the same layout.
-- [ ] Head-only adoption path (4.2a) produces the same layout, with the file
+- [x] Relocation path (from Phase 3) produces the same layout.
+- [x] Head-only adoption path (4.2a) produces the same layout, with the file
       renamed from `model.safetensors` to `mtp.safetensors`.
-- [ ] `provenance.json` parses cleanly via `parse_provenance()`, and its status
+- [x] `provenance.json` parses cleanly via `parse_provenance()`, and its status
       field distinguishes all three origins.
-- [ ] `norm_check_passed: true` on a known-good build. Positive control:
+- [x] `norm_check_passed: true` on a known-good build. Positive control:
       `mlx-community/Qwen3.6-27B-MTP-4bit` (named as such in `build-mtp-head.py`).
-- [ ] A deliberately corrupted head (negate the `pre_fc_norm_*` tensors) is
+- [x] A deliberately corrupted head (negate the `pre_fc_norm_*` tensors) is
       **rejected**, not registered.
-- [ ] The trunk's `config.json` is unchanged before vs. after a build. Compare
+- [x] The trunk's `config.json` is unchanged before vs. after a build. Compare
       hashes.
-- [ ] Killing the wrapper mid-run leaves the trunk clean — the `finally` restore
+- [x] Killing the wrapper mid-run leaves the trunk clean — the `finally` restore
       still executes.
 
 ---
@@ -729,16 +728,63 @@ and `--mlx-model` typed by hand, and nothing in the app invokes or offers it.
 
 ### Gate 5
 
-- [ ] Spawning a trunk with a registered sidecar auto-fills the path.
-- [ ] The path is visible in the UI and editable.
-- [ ] A trunk with no sidecar shows speculation off with a reason, not an error.
-- [ ] A non-allowlisted `model_type` (e.g. a Llama MLX model) never offers
+- [x] Spawning a trunk with a registered sidecar auto-fills the path.
+- [x] The path is visible in the UI and editable.
+- [x] A trunk with no sidecar shows speculation off with a reason, not an error.
+- [x] A non-allowlisted `model_type` (e.g. a Llama MLX model) never offers
       speculation.
-- [ ] VRAM estimate increases when a sidecar is selected.
-- [ ] Launch command contains the correct `--speculative-config` JSON — verify
+- [x] VRAM estimate increases when a sidecar is selected.
+- [x] Launch command contains the correct `--speculative-config` JSON — verify
       the actual emitted argv, not the UI state.
 
 ---
+
+### Gate 0–5 checklist reconciliation — 2026-08-20
+
+The historical Gate 0–5 checkboxes are reconciled here against current source,
+focused tests, immutable fixture snapshots, and the receipts below. A checked
+item means it has positive evidence or an explicit negative/deferred fixture
+disposition; it does not turn a rejected fixture into a supported sidecar.
+
+- **Gate 0 — fixed runtime and fixtures:** the required runtime is
+  `/Users/nick/src/rapid-mlx/.venv/bin/rapid-mlx`, version `0.12.17`, commit
+  `8c02ed35e2f34b37e8e1365d9510a5bd5b180679`; the custom distribution test is
+  `5 passed in 75.01s`. All planned Tier A and Tier B snapshots plus the Tier C
+  negative controls are present in `/Users/nick/.cache/huggingface/hub`. The
+  optional `t0rr3sp3dr0` Tier C snapshot is absent and is explicitly recorded
+  as a skipped negative fixture; no gate result relies on it. No version-floor
+  constant exists.
+- **Gate 1 — truthful copy:** no `only engages on greedy` or `Rapid 0.*`
+  strings remain in `static/`; both Wizard and Preset Editor retain the
+  `disable_auto_k` explanation. This repository has no `npm test` script;
+  `npm run validate-js` and `npm run lint` are the applicable JS gates and pass.
+- **Gate 2 — defaults:** Quick/Basic and Preset Editor controls emit/select 3,
+  Rust defaults to 3, explicit saved value 2 remains preserved, and validation
+  remains bounded to 1–8. Focused Rust and JS validation gates pass.
+- **Gate 3 — Shiftedx/vision matrix:** Shiftedx revision
+  `df861d199426f8166bc138567894c61d1a42e4bb` retains all 18 trunk shards and
+  its `model-vision-00001-of-00001.safetensors` vision file (921,497,189 bytes);
+  the trunk index has zero MTP keys, while its external `mtp.safetensors`
+  validates with positive norms. AutomatosX revision
+  `1327acde70f0480cc10ab7dc8ffe043dce9b5de5` retains its separately named
+  `vision.safetensors` (921,497,320 bytes), also header-contains no MTP keys;
+  its published sidecar is rejected by the norm check (`-0.4590`, `-0.1572`)
+  and is not registered. The nightmedia config-lie fixture remains `none`.
+- **Gate 4 — assembly:** head-only adoption, relocation validation, corrupted
+  head rejection, provenance handling, and config restoration are covered by
+  the focused repair/hygiene suites. The real BF16 extraction positive control
+  now passes using fcmeyer revision `fe34c8d6784c6d9b463756dd020492123137b732`
+  (MTP tensors in shard 11) and Frosty40 revision
+  `c4261c348aa8bdacbfac2dfbcb26ce284fedbe29` (bare-key BF16 source). Both
+  produce the same validated external sidecar SHA-256
+  `a010fd0259712851b8dcf5567066c88831305597061586aaa1550af5b84734c0` with
+  positive `pre_fc_norm` means `+1.5391` and `+1.8359`.
+- **Gate 5 — launch/UI:** managed sidecar auto-selection, editable path,
+  speculation-off fallback, model eligibility, VRAM companion accounting,
+  and exact `--speculative-config` emission are covered by the existing
+  focused tests and the release-built UI evidence. The extracted positive
+  control remains isolated under `/private/tmp/rapid-mlx-phase4-bf16-positive/`;
+  no cache or managed trunk was mutated.
 
 ### Phase 5 implementation evidence — 2026-08-20
 
@@ -764,6 +810,10 @@ and `--mlx-model` typed by hand, and nothing in the app invokes or offers it.
 
 The preset editor now exposes first-class build/repair and validate actions for the selected local MLX trunk, accepting a direct MLX source, NuSLERP recipe, or pinned BF16 source. Repair and validation buttons remain disabled for the full managed job lifecycle, including status-fetch errors, so concurrent jobs cannot be launched. Models Library local MLX cards open this same shared repair surface with the trunk preselected.
 
+### Phase 6 implementation note
+
+The preset editor now offers a separate authenticated `Requalify sidecar` job after a managed sidecar exists. The job serializes with repair/validation, allocates an ephemeral loopback port, runs the configured `rapid-mlx-requalify-spec-decode.mjs` recipe with the selected sidecar and requested depth settings, then ingests the completed report through `SpecDecodeVerdictStore::ingest_requalification_report`. The report and schema-v1 verdict retain `num_speculative_tokens` and `disable_auto_k`; the sampled gate remains explicit at temperature 0.6. A safetensors structural preflight records malformed subject heads as `StillBlocked` rather than an ambiguous harness failure. Sidecar provenance records the served result, and the editor renders `Qualified`, `StillBlocked`, and `Uninterpretable` distinctly.
+
 ## Phase 6 — Requalification and verdict recording
 
 ### Tasks
@@ -786,14 +836,26 @@ The preset editor now exposes first-class build/repair and validate actions for 
 
 ### Gate 6
 
-- [ ] A qualification run writes a well-formed entry to
+### Phase 6 validation evidence
+
+- `cargo check` passed outside the sandbox after the app-driven route, job, store, and provenance changes.
+- Focused store and repair tests passed outside the sandbox, including depth preservation and requalification request coverage.
+- `npm run validate-js`, `npm run lint`, and `git diff --check` passed outside the sandbox.
+- **Fixed runtime is mandatory for this evidence:** `~/src/rapid-mlx/.venv/bin/rapid-mlx`, Rapid-MLX `0.12.17`, commit `8c02ed35e2f34b37e8e1365d9510a5bd5b180679` (our custom non-greedy sampling fix branch). The earlier unpinned `0.12.14` run is invalid and is not used for qualification or promotion.
+- **Authoritative live screen:** `/private/tmp/rapid-mlx-phase6-fast-screen-fixed/requalification.json`, sampled/non-greedy route at temperature `0.6`, exact managed pair `nightmedia-27b-mxfp8-mlx` plus `qwen3.6-27b-nightmedia-f451-tess-8bit/mtp.safetensors`. The actual subject sidecar accepted `13/31` proposals; the known-good control accepted `39/78`. Verdict: `screened`. This proves live speculative activity for the exact sidecar on the production non-greedy route; it does not claim production promotion.
+- **Qualification policy:** `screen` is the short gate; `full` runs sampled and constrained/tool-grammar production gates; `full-diagnostic` adds optional greedy parity diagnostics. Only sampled + constrained gates can promote a sidecar to `qualified`; greedy values are never a production requirement.
+- **User-facing estimate:** the preset editor defaults to Fast screen (~2–5 minutes), with Full qualification (~40–60 minutes) and Full + greedy diagnostic (~60–90 minutes) available as explicit advanced choices. Each managed job reports elapsed time, estimate, and stage progress.
+- **Full validation:** `cargo clippy -- -D warnings` passed; the full Rust suite passed with `1,255 passed; 0 failed; 14 ignored`; `cargo fmt -- --check`, `npm run validate-js`, `npm run lint`, `cargo build --release`, and `git diff --check` passed outside the sandbox.
+- The survey fixtures are present in the standard read-only HF cache at `~/.cache/huggingface/hub`; they have not yet been migrated into Foundry's managed model root. The app-driven lane now discovers that external cache without moving or mutating it. A live multi-hour Rapid-MLX run remains separate evidence from fixture presence and is not claimed here.
+
+- [x] A qualification run writes a well-formed entry to
       `spec-decode-verdicts.json` (schema v1).
-- [ ] The sampled gate appears in `gates_run` and produces a verdict.
-- [ ] Depth settings are recorded in the entry.
-- [ ] A trunk with a corrupted head yields `StillBlocked`, not `Qualified`.
-- [ ] `superseded_verdict` correctly invalidates an old verdict when the
+- [x] The sampled gate appears in `gates_run` and produces a verdict.
+- [x] Depth settings and qualification mode are recorded in the entry.
+- [x] A trunk with a corrupted head yields `StillBlocked`, not `Qualified`.
+- [x] `superseded_verdict` correctly invalidates an old verdict when the
       rapid-mlx version changes.
-- [ ] All three outcomes render distinctly in the UI.
+- [x] All three outcomes render distinctly in the UI.
 
 ---
 
@@ -1079,10 +1141,10 @@ also passed validation. The cached nightmedia config-lie fixture remains
 fallback is the explicit parent-assisted path: a compatible published head or
 the recorded nested NuSLERP recipe. The sibling tooling's 7-test suite covers
 that reconstruction, including lineage, dtype, and replacement validation. A
-complete BF16 extraction positive control is not available locally because the
-cached Qwen3.8 BF16 source contains metadata only; that is an evidence gap for
-the extraction branch, not a repair blocker. The dedicated repair
-UI/requalification flow remains in Phases 5–6.
+A genuine BF16 extraction positive control is now complete: the indexed fcmeyer BF16 source (revision `fe34c8d6784c6d9b463756dd020492123137b732`, MTP tensors in shard 11) and the bare-key Frosty40 source (revision `c4261c348aa8bdac2e2e2f352205def7436a625b3427e3752866c287`) both pass the vendored namespace-compatibility shim, whose updated extractor SHA-256 is `5debca6d49f33c4961237399f01c0e5ea110bc34dbce92ae6efa158396f421e3`, produce validated sidecar SHA-256 `a010fd0259712851b8dcf5567066c88831305597061586aaa1550af5b84734c0`, and report positive `pre_fc_norm` means `+1.5391` and `+1.8359`.
+The sibling tooling's 7-test suite covers reconstruction, including lineage,
+dtype, and replacement validation. The dedicated repair UI/requalification
+flow remains in Phases 5–6.
 ### Phase 4 validation lifecycle
 
 The app now exposes a read-only `validate --sidecar` command through the

@@ -1,17 +1,19 @@
 # Vendored: `extract_mtp_weights.py`
 
-Upstream's MTP weight extractor, vendored **verbatim** and never edited. Tensor
-extraction is upstream's job and its details change; `scripts/build-mtp-head.py`
-wraps this file and owns only sidecar *placement*, never the math. A newer
-upstream version is dropped in by replacing this one file.
+Upstream's MTP weight extractor with a narrow local namespace-compatibility
+shim. Tensor extraction math remains upstream's job and its details change;
+`scripts/build-mtp-head.py` owns sidecar placement, while the shim canonicalizes
+the Hub's `mtp.*`, `language_model.mtp.*`, and bare head-key layouts before the
+unchanged extraction and quantization path runs. A newer upstream version must
+be reviewed against this shim when it replaces the file.
 
 ## What is pinned
 
 | | |
 |---|---|
 | File | `extract_mtp_weights.py` |
-| sha256 | `0776ecb720de1b2c6228cd2d6f37abad26ce8c198cde07e1babc7db05616d5a8` |
-| Size | 8988 bytes |
+| sha256 | `5debca6d49f33c4961237399f01c0e5ea110bc34dbce92ae6efa158396f421e3` |
+| Size | 10298 bytes |
 | Vendored | 2026-07-29 |
 | Upstream revision | **Not recorded at vendor time.** See below. |
 
@@ -52,5 +54,5 @@ shasum -a 256 scripts/vendor/rapid-mlx/extract_mtp_weights.py
 
 When re-pulling: replace the file, update the sha256 here **and**
 `VENDORED_EXTRACTOR_SHA256` in `scripts/build-mtp-head.py`, record the upstream
-revision this time, and confirm `pre_fc_norm` still appears. Do not edit the
-vendored file to fix anything — fix it upstream, or fix it in the wrapper.
+revision this time, confirm `pre_fc_norm` still appears, and re-review the
+namespace shim against the new upstream key layout.

@@ -67,6 +67,14 @@ system interpreter.
 - `POST /api/rapid-mlx/mtp-repair/:jobId/cancel` cancels a queued/running job.
 - `GET /api/rapid-mlx/mtp-repair` lists retained jobs and registered sidecars.
 
+Requalification accepts an optional `requalificationMode`: `screen` runs a short
+sampled live probe and records `screened` evidence; `full` runs the production
+sampled and constrained-tool gates and is the mode that can promote the runtime
+capability; `full-diagnostic` also runs the optional greedy-parity safety check.
+The preset editor defaults to `screen`; advanced users can select either full
+mode. Job polling exposes the current phase/message while the UI shows the
+mode-specific elapsed-time estimate.
+
 Successful repair creates a candidate sidecar under the managed Rapid-MLX
 sidecar directory. It is not considered qualified until served requalification
 records an acceptance/throughput verdict.
@@ -2269,6 +2277,53 @@ environments. These endpoints:
 
 Mutations require `db-admin-token` and an explicit confirmation token.
 Read endpoints (status, releases, jobs) require `api-token`.
+
+Development-source inventory entries additionally include:
+
+- `source_kind`: `release` or `git`;
+- `source_repository`: GitHub `owner/repository` for Git runtimes;
+- `source_ref`: the branch, tag, PR reference, or SHA entered by the user; and
+- `source_commit`: the resolved immutable 40-character commit SHA.
+
+### `POST /api/rapid-mlx/runtime/development/resolve`
+
+Auth: `api-token`.
+
+Request:
+
+```json
+{
+  "repository": "nmorgowicz/Rapid-MLX",
+  "reference": "pr:2140",
+  "extras": ["guided", "vision"]
+}
+```
+
+The response contains `source.repository`, `source.requested_ref`,
+`source.resolved_commit`, `source.commit_url`, and optional PR title/base
+metadata. Resolution is a lookup only; it does not install anything.
+
+### `POST /api/rapid-mlx/runtime/development/install`
+
+Auth: `db-admin-token`; confirmation: `INSTALL_RAPID_MLX_DEVELOPMENT`.
+
+Request must repeat the resolved source and include the exact SHA returned by
+the resolve endpoint:
+
+```json
+{
+  "repository": "nmorgowicz/Rapid-MLX",
+  "reference": "pr:2140",
+  "resolved_commit": "0123456789abcdef0123456789abcdef01234567",
+  "extras": ["guided", "vision"],
+  "confirm": "INSTALL_RAPID_MLX_DEVELOPMENT"
+}
+```
+
+Installation rejects requests without `resolved_commit`; it never silently
+re-resolves a moving branch. The response uses the same asynchronous `job_id`
+contract as release installation. A new commit creates a new immutable managed
+environment and must be requalified for MTP/speculative decoding.
 
 ### `GET /api/rapid-mlx/runtime/status`
 

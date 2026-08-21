@@ -40,6 +40,14 @@ const MAX_COMMAND_OUTPUT_BYTES: usize = 256 * 1024;
 pub struct RuntimeInventoryEntry {
     pub environment_id: String,
     pub version: String,
+    #[serde(default)]
+    pub source_kind: ManagedRuntimeSourceKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_repository: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_commit: Option<String>,
     pub release_channel: ManagedReleaseChannel,
     #[serde(default)]
     pub extras: Vec<ManagedRuntimeExtra>,
@@ -58,6 +66,10 @@ impl Default for RuntimeInventoryEntry {
         Self {
             environment_id: String::new(),
             version: String::new(),
+            source_kind: ManagedRuntimeSourceKind::Release,
+            source_repository: None,
+            source_ref: None,
+            source_commit: None,
             release_channel: ManagedReleaseChannel::Stable,
             extras: Vec::new(),
             executable_path: PathBuf::new(),
@@ -68,6 +80,14 @@ impl Default for RuntimeInventoryEntry {
             last_probe_result: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ManagedRuntimeSourceKind {
+    #[default]
+    Release,
+    Git,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -215,6 +235,114 @@ impl ManagedReleaseSelection {
     }
 }
 
+/// A server-resolved development source. The caller may provide a branch, PR,
+/// or tag for lookup, but installation only accepts the immutable commit SHA
+/// captured here.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ManagedGitSourceSelection {
+    repository: String,
+    requested_ref: String,
+    resolved_commit: String,
+    extras: Vec<ManagedRuntimeExtra>,
+}
+
+type RuntimeSelectionMetadata = (
+    String,
+    Vec<ManagedRuntimeExtra>,
+    ManagedRuntimeSourceKind,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    ManagedReleaseChannel,
+);
+
+#[derive(Debug, Clone)]
+enum ManagedRuntimeSelection {
+    Release(ManagedReleaseSelection),
+    Git(ManagedGitSourceSelection),
+}
+
+impl ManagedRuntimeSelection {
+    fn metadata(&self) -> RuntimeSelectionMetadata {
+        match self {
+            Self::Release(release) => (
+                release.version.clone(),
+                release.extras.clone(),
+                ManagedRuntimeSourceKind::Release,
+                None,
+                None,
+                None,
+                release.channel,
+            ),
+            Self::Git(source) => (
+                format!("git-{}", &source.resolved_commit[..12]),
+                source.extras.clone(),
+                ManagedRuntimeSourceKind::Git,
+                Some(source.repository.clone()),
+                Some(source.requested_ref.clone()),
+                Some(source.resolved_commit.clone()),
+                ManagedReleaseChannel::Stable,
+            ),
+        }
+    }
+
+    fn is_git(&self) -> bool {
+        matches!(self, Self::Git(_))
+    }
+}
+
+impl ManagedGitSourceSelection {
+    pub(crate) fn from_resolved(
+        repository: impl Into<String>,
+        requested_ref: impl Into<String>,
+        resolved_commit: impl Into<String>,
+        extras: Vec<ManagedRuntimeExtra>,
+    ) -> Result<Self> {
+        let selection = Self {
+            repository: repository.into(),
+            requested_ref: requested_ref.into(),
+            resolved_commit: resolved_commit.into(),
+            extras: normalize_runtime_extras(extras)?,
+        };
+        validate_git_source(&selection)?;
+        Ok(selection)
+    }
+
+    pub fn repository(&self) -> &str {
+        &self.repository
+    }
+
+    pub fn requested_ref(&self) -> &str {
+        &self.requested_ref
+    }
+
+    pub fn resolved_commit(&self) -> &str {
+        &self.resolved_commit
+    }
+
+    pub fn extras(&self) -> &[ManagedRuntimeExtra] {
+        &self.extras
+    }
+
+    fn git_requirement(&self) -> String {
+        let extras = self
+            .extras
+            .iter()
+            .map(|extra| extra.package_name())
+            .collect::<Vec<_>>()
+            .join(",");
+        let package = if extras.is_empty() {
+            "rapid-mlx".to_string()
+        } else {
+            format!("rapid-mlx[{extras}]")
+        };
+        format!(
+            "{package} @ git+https://github.com/{}.git@{}",
+            self.repository, self.resolved_commit
+        )
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct ActivePointer {
@@ -229,6 +357,14 @@ struct EnvironmentManifest {
     schema_version: u32,
     environment_id: String,
     version: String,
+    #[serde(default)]
+    source_kind: ManagedRuntimeSourceKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_repository: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_commit: Option<String>,
     binary_relative_path: String,
     binary_sha256: String,
     runtime_source: RuntimeSource,
@@ -355,6 +491,10 @@ impl RapidMlxRuntimeManager {
                 entries.push(RuntimeInventoryEntry {
                     environment_id: id,
                     version: manifest.version,
+                    source_kind: manifest.source_kind,
+                    source_repository: manifest.source_repository,
+                    source_ref: manifest.source_ref,
+                    source_commit: manifest.source_commit,
                     release_channel: manifest.release_channel,
                     extras: manifest.extras,
                     executable_path: binary,
@@ -370,18 +510,52 @@ impl RapidMlxRuntimeManager {
         Ok(entries)
     }
 
+    pub fn active_git_source(&self) -> Result<Option<ManagedGitSourceSelection>> {
+        let Some(pointer) = self.load_pointer()? else {
+            return Ok(None);
+        };
+        let (manifest, _) = self.validate_environment(&pointer.active_environment_id)?;
+        if manifest.source_kind != ManagedRuntimeSourceKind::Git {
+            return Ok(None);
+        }
+        Ok(Some(ManagedGitSourceSelection::from_resolved(
+            manifest.source_repository.unwrap_or_default(),
+            manifest.source_ref.unwrap_or_default(),
+            manifest.source_commit.unwrap_or_default(),
+            manifest.extras,
+        )?))
+    }
+
     pub async fn install_release(
         &self,
         release: ManagedReleaseSelection,
     ) -> Result<RuntimeMutationResult> {
-        self.stage_and_activate(release).await
+        self.stage_and_activate(ManagedRuntimeSelection::Release(release))
+            .await
     }
 
     pub async fn upgrade_release(
         &self,
         release: ManagedReleaseSelection,
     ) -> Result<RuntimeMutationResult> {
-        self.stage_and_activate(release).await
+        self.stage_and_activate(ManagedRuntimeSelection::Release(release))
+            .await
+    }
+
+    pub async fn install_git_source(
+        &self,
+        source: ManagedGitSourceSelection,
+    ) -> Result<RuntimeMutationResult> {
+        self.stage_and_activate(ManagedRuntimeSelection::Git(source))
+            .await
+    }
+
+    pub async fn upgrade_git_source(
+        &self,
+        source: ManagedGitSourceSelection,
+    ) -> Result<RuntimeMutationResult> {
+        self.stage_and_activate(ManagedRuntimeSelection::Git(source))
+            .await
     }
 
     pub async fn repair_release(
@@ -398,7 +572,8 @@ impl RapidMlxRuntimeManager {
         if release.version != manifest.version || release.channel != manifest.release_channel {
             bail!("Rediscovered Rapid-MLX release does not match the active managed runtime");
         }
-        self.stage_and_activate_locked(release).await
+        self.stage_and_activate_locked(ManagedRuntimeSelection::Release(release))
+            .await
     }
 
     #[cfg(test)]
@@ -428,7 +603,8 @@ impl RapidMlxRuntimeManager {
             .runtime_probe
             .probe(
                 &binary,
-                manifest.release_channel == ManagedReleaseChannel::Prerelease,
+                manifest.source_kind == ManagedRuntimeSourceKind::Git
+                    || manifest.release_channel == ManagedReleaseChannel::Prerelease,
             )
             .await
             .map_err(|_| {
@@ -450,23 +626,30 @@ impl RapidMlxRuntimeManager {
 
     async fn stage_and_activate(
         &self,
-        release: ManagedReleaseSelection,
+        selection: ManagedRuntimeSelection,
     ) -> Result<RuntimeMutationResult> {
         self.ensure_platform()
             .context("Managed Rapid-MLX platform check failed")?;
         let _permit = self.try_mutation_permit()?;
-        self.stage_and_activate_locked(release)
+        self.stage_and_activate_locked(selection)
             .await
             .context("Managed Rapid-MLX stage-and-activate failed")
     }
 
     async fn stage_and_activate_locked(
         &self,
-        release: ManagedReleaseSelection,
+        selection: ManagedRuntimeSelection,
     ) -> Result<RuntimeMutationResult> {
-        let parsed_release = validate_release_selection(&release)?;
-        let exact_version = release.version.as_str();
-        let environment_id = unique_environment_id(exact_version, &self.root)
+        let (
+            environment_label,
+            extras,
+            source_kind,
+            source_repository,
+            source_ref,
+            source_commit,
+            release_channel,
+        ) = selection.metadata();
+        let environment_id = unique_environment_id(&environment_label, &self.root)
             .context("Could not allocate managed Rapid-MLX environment ID")?;
         let environment = create_checked_child(
             &self.root,
@@ -487,7 +670,7 @@ impl RapidMlxRuntimeManager {
             let python_dir = create_checked_child(&self.root, Path::new("uv-python"))
                 .context("Could not create managed Rapid-MLX uv Python directory")?;
 
-            self.run_uv_install(&release, &tool_dir, &bin_dir, &cache_dir, &python_dir)
+            self.run_uv_install(&selection, &tool_dir, &bin_dir, &cache_dir, &python_dir)
                 .await
                 .with_context(|| format!("uv install failed for {}", environment.display()))?;
             let binary_relative = managed_tool_binary_relative();
@@ -509,7 +692,7 @@ impl RapidMlxRuntimeManager {
 
             let profile = self
                 .runtime_probe
-                .probe(&binary, parsed_release.prerelease)
+                .probe(&binary, selection.is_git())
                 .await
                 .with_context(|| {
                     format!(
@@ -517,12 +700,13 @@ impl RapidMlxRuntimeManager {
                         binary.display()
                     )
                 })?;
-            require_verified_profile(exact_version, &profile).context(
+            let runtime_version = profile.version.clone();
+            require_verified_profile(&runtime_version, &profile).context(
                 "The staged Rapid-MLX runtime did not satisfy its compatibility profile",
             )?;
 
             // Capture resolved dependency receipt from the installed environment.
-            let resolved_receipt = match capture_resolved_receipt(&binary, exact_version) {
+            let resolved_receipt = match capture_resolved_receipt(&binary, &runtime_version) {
                 Ok(receipt) => receipt,
                 Err(error) => {
                     // A dependency receipt is diagnostic metadata, not a reason to
@@ -538,7 +722,7 @@ impl RapidMlxRuntimeManager {
 
             // Run the on-device update-validation probe.
             // User-driven (triggered by install/upgrade), bounded (30s total, 8s per sub-check).
-            let probe_result = run_update_validation_probe(&binary, exact_version)
+            let probe_result = run_update_validation_probe(&binary, &runtime_version)
                 .await
                 .with_context(|| {
                     format!(
@@ -550,13 +734,17 @@ impl RapidMlxRuntimeManager {
             let manifest = EnvironmentManifest {
                 schema_version: MANIFEST_SCHEMA_VERSION,
                 environment_id: environment_id.clone(),
-                version: exact_version.to_string(),
+                version: runtime_version,
+                source_kind,
+                source_repository,
+                source_ref,
+                source_commit,
                 binary_relative_path: path_to_manifest_string(&binary_relative)?,
                 binary_sha256,
                 runtime_source: RuntimeSource::Managed,
                 compatibility_state: CompatibilityState::Verified.label().to_string(),
-                release_channel: release.channel,
-                extras: release.extras.clone(),
+            release_channel,
+            extras,
                 resolved_receipt,
                 last_probe_result: Some(probe_result),
             };
@@ -647,22 +835,27 @@ impl RapidMlxRuntimeManager {
 
     async fn run_uv_install(
         &self,
-        release: &ManagedReleaseSelection,
+        selection: &ManagedRuntimeSelection,
         tool_dir: &Path,
         bin_dir: &Path,
         cache_dir: &Path,
         python_dir: &Path,
     ) -> Result<()> {
-        let extras = release
-            .extras
-            .iter()
-            .map(|extra| extra.package_name())
-            .collect::<Vec<_>>()
-            .join(",");
-        let requirement = if extras.is_empty() {
-            format!("rapid-mlx=={}", release.version)
-        } else {
-            format!("rapid-mlx[{extras}]=={}", release.version)
+        let requirement = match selection {
+            ManagedRuntimeSelection::Release(release) => {
+                let extras = release
+                    .extras
+                    .iter()
+                    .map(|extra| extra.package_name())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                if extras.is_empty() {
+                    format!("rapid-mlx=={}", release.version)
+                } else {
+                    format!("rapid-mlx[{extras}]=={}", release.version)
+                }
+            }
+            ManagedRuntimeSelection::Git(source) => source.git_requirement(),
         };
         let mut command = Command::new(&self.uv_program);
         command
@@ -740,8 +933,28 @@ impl RapidMlxRuntimeManager {
             bail!("Managed runtime manifest does not match its environment");
         }
         let parsed = parse_managed_version(&manifest.version)?;
-        if parsed.prerelease != (manifest.release_channel == ManagedReleaseChannel::Prerelease) {
-            bail!("Managed runtime manifest release channel is invalid");
+        if manifest.source_kind == ManagedRuntimeSourceKind::Release {
+            if manifest.source_repository.is_some()
+                || manifest.source_ref.is_some()
+                || manifest.source_commit.is_some()
+            {
+                bail!("Release runtime manifest contains development-source metadata");
+            }
+            if parsed.prerelease != (manifest.release_channel == ManagedReleaseChannel::Prerelease)
+            {
+                bail!("Managed runtime manifest release channel is invalid");
+            }
+        } else {
+            let source = ManagedGitSourceSelection::from_resolved(
+                manifest.source_repository.clone().unwrap_or_default(),
+                manifest.source_ref.clone().unwrap_or_default(),
+                manifest.source_commit.clone().unwrap_or_default(),
+                manifest.extras.clone(),
+            )?;
+            if parsed.prerelease && manifest.release_channel != ManagedReleaseChannel::Stable {
+                bail!("Development runtime manifest release channel is invalid");
+            }
+            validate_git_source(&source)?;
         }
         if normalize_runtime_extras(manifest.extras.clone())? != manifest.extras {
             bail!("Managed runtime manifest extras are not canonical");
@@ -780,6 +993,10 @@ impl RapidMlxRuntimeManager {
         Ok(RuntimeInventoryEntry {
             environment_id: id.to_string(),
             version: manifest.version,
+            source_kind: manifest.source_kind,
+            source_repository: manifest.source_repository,
+            source_ref: manifest.source_ref,
+            source_commit: manifest.source_commit,
             release_channel: manifest.release_channel,
             extras: manifest.extras,
             executable_path: binary,
@@ -914,6 +1131,44 @@ fn managed_tool_binary_relative() -> PathBuf {
 fn require_verified_profile(requested: &str, profile: &CompatibilityProfile) -> Result<()> {
     if profile.state != CompatibilityState::Verified || profile.version != requested {
         bail!("The staged Rapid-MLX runtime did not verify as the exact requested release");
+    }
+    Ok(())
+}
+
+fn validate_git_source(source: &ManagedGitSourceSelection) -> Result<()> {
+    let mut parts = source.repository.split('/');
+    let owner = parts.next().unwrap_or_default();
+    let repo = parts.next().unwrap_or_default();
+    if owner.is_empty()
+        || repo.is_empty()
+        || parts.next().is_some()
+        || !source
+            .repository
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'/'))
+    {
+        bail!("Development source repository must be a GitHub owner/repository identifier");
+    }
+    if source.requested_ref.is_empty()
+        || source.requested_ref.len() > 256
+        || source.requested_ref.contains("..")
+        || source
+            .requested_ref
+            .chars()
+            .any(|character| character.is_control() || character.is_whitespace())
+    {
+        bail!("Development source reference is invalid");
+    }
+    if source.resolved_commit.len() != 40
+        || !source
+            .resolved_commit
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        bail!("Development source must be pinned to a 40-character commit SHA");
+    }
+    if normalize_runtime_extras(source.extras.clone())? != source.extras {
+        bail!("Development source extras are not canonical");
     }
     Ok(())
 }
@@ -1926,5 +2181,82 @@ mod tests {
         let reactivated = manager.rollback().await.unwrap();
         assert_eq!(reactivated.active.version, "0.10.10");
         assert_eq!(manager.inventory().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn git_source_selection_requires_canonical_immutable_identity() {
+        let source = ManagedGitSourceSelection::from_resolved(
+            "nmorgowicz/Rapid-MLX",
+            "pr:2140",
+            "0123456789abcdef0123456789abcdef01234567",
+            default_runtime_extras(),
+        )
+        .unwrap();
+        assert_eq!(source.repository(), "nmorgowicz/Rapid-MLX");
+        assert_eq!(source.requested_ref(), "pr:2140");
+        assert!(
+            source
+                .git_requirement()
+                .contains("@0123456789abcdef0123456789abcdef01234567")
+        );
+    }
+
+    #[test]
+    fn git_source_selection_rejects_unsafe_or_unpinned_values() {
+        for (repository, requested_ref, commit) in [
+            (
+                "nmorgowicz/../Rapid-MLX",
+                "main",
+                "0123456789abcdef0123456789abcdef01234567",
+            ),
+            (
+                "nmorgowicz/Rapid-MLX",
+                "feature..branch",
+                "0123456789abcdef0123456789abcdef01234567",
+            ),
+            ("nmorgowicz/Rapid-MLX", "main", "not-a-commit"),
+        ] {
+            assert!(
+                ManagedGitSourceSelection::from_resolved(
+                    repository,
+                    requested_ref,
+                    commit,
+                    default_runtime_extras(),
+                )
+                .is_err(),
+                "unsafe Git source unexpectedly accepted: {repository}@{requested_ref}@{commit}"
+            );
+        }
+    }
+
+    #[test]
+    fn git_source_manifest_round_trips_source_metadata() {
+        let source = ManagedGitSourceSelection::from_resolved(
+            "raullenchai/Rapid-MLX",
+            "main",
+            "fedcba9876543210fedcba9876543210fedcba98",
+            default_runtime_extras(),
+        )
+        .unwrap();
+        let manifest = EnvironmentManifest {
+            schema_version: MANIFEST_SCHEMA_VERSION,
+            environment_id: "git-fedcba987654".into(),
+            version: "git-fedcba987654".into(),
+            source_kind: ManagedRuntimeSourceKind::Git,
+            source_repository: Some(source.repository().into()),
+            source_ref: Some(source.requested_ref().into()),
+            source_commit: Some(source.resolved_commit().into()),
+            binary_relative_path: "bin/rapid-mlx".into(),
+            binary_sha256: "a".repeat(64),
+            runtime_source: RuntimeSource::Managed,
+            compatibility_state: "verified".into(),
+            release_channel: ManagedReleaseChannel::Stable,
+            extras: source.extras().to_vec(),
+            resolved_receipt: None,
+            last_probe_result: None,
+        };
+        let encoded = serde_json::to_vec(&manifest).unwrap();
+        let decoded: EnvironmentManifest = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded, manifest);
     }
 }

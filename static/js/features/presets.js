@@ -2093,8 +2093,12 @@ async function _fetchSidecarsForPreset() {
             html += '<strong>' + DOMPurify.sanitize(s.slug) + '</strong> ';
             html += '<span style="color:var(--text-muted,#888);">' + vram + '</span>';
             if (p.trunk) html += ' <span style="color:var(--text-muted,#888);">for ' + DOMPurify.sanitize(trunkShort) + '</span>';
-            if (p.repairMode === 'recipe_reconstruction') html += ' <span style="color:var(--accent,#8cc8ff);">' + (p.requalificationStatus === 'passed' ? 'Recipe reconstructed · qualified' : 'Recipe reconstructed · awaiting requalification') + '</span>';
+            if (p.repairMode === 'recipe_reconstruction') html += ' <span style="color:var(--accent,#8cc8ff);">Recipe reconstructed</span>';
             else if (p.repairMode === 'direct_parent') html += ' <span style="color:var(--text-muted,#888);">Direct parent</span>';
+            if (p.requalificationStatus === 'qualified') html += ' <span style="color:var(--success,#5ce68a);">Qualified</span>';
+            else if (p.requalificationStatus === 'screened') html += ' <span style="color:var(--success,#5ce68a);">Screened</span>';
+            else if (p.requalificationStatus === 'still-blocked') html += ' <span style="color:var(--warn,#e6a41c);">StillBlocked</span>';
+            else if (p.requalificationStatus === 'uninterpretable') html += ' <span style="color:var(--err,#e65c5c);">Uninterpretable</span>';
             if (p.builtAt) html += ' <span style="color:var(--text-muted,#888);">(' + (function(dt) { if (!dt) return ''; const d = new Date(dt); const diff = (Date.now() - d.getTime()) / 1000; if (diff < 60) return 'just now'; if (diff < 3600) return Math.floor(diff / 60) + 'm ago'; if (diff < 86400) return Math.floor(diff / 3600) + 'h ago'; return Math.floor(diff / 86400) + 'd ago'; })(p.builtAt) + ')</span>';
             if (!p.normCheckPassed) html += ' <span style="color:var(--err,#e65c5c);">⚠ norm check failed</span>';
             html += '</button>';
@@ -2174,21 +2178,51 @@ function _setPresetMtpRepairStatus(message, tone = 'muted') {
     status.style.display = message ? '' : 'none';
     status.style.color = tone === 'error'
         ? 'var(--err,#e65c5c)'
-        : tone === 'success' ? 'var(--success,#5ce68a)' : 'var(--text-muted,#888)';
+        : tone === 'success' ? 'var(--success,#5ce68a)'
+            : tone === 'warn' ? 'var(--warn,#e6a41c)' : 'var(--text-muted,#888)';
 }
 
 let _presetMtpRepairJobId = null;
+let _presetMtpRepairOperation = null;
+let _presetMtpRepairStartedAt = 0;
+
+function _formatPresetMtpRepairDuration(seconds) {
+    const total = Math.max(0, Math.floor(seconds));
+    const minutes = Math.floor(total / 60);
+    if (minutes < 60) return `${minutes}m elapsed`;
+    return `${Math.floor(minutes / 60)}h ${minutes % 60}m elapsed`;
+}
+
+function _renderPresetRequalificationOutcome(result) {
+    const outcome = result?.outcome;
+    const reason = result?.reason || 'No explanation was recorded.';
+    if (outcome === 'qualified') {
+        _setPresetMtpRepairStatus('Qualified — sampled and tool-grammar gates passed.', 'success');
+    } else if (outcome === 'screened') {
+        _setPresetMtpRepairStatus('Screened — live sampled probe passed. Run Full qualification before relying on runtime promotion.', 'success');
+    } else if (outcome === 'still-blocked') {
+        _setPresetMtpRepairStatus('StillBlocked — ' + reason, 'warn');
+    } else if (outcome === 'uninterpretable') {
+        _setPresetMtpRepairStatus('Uninterpretable — ' + reason, 'error');
+    } else {
+        _setPresetMtpRepairStatus('Uninterpretable — the requalification result was missing or invalid.', 'error');
+    }
+}
 
 function _setPresetMtpRepairButtonsDisabled(disabled) {
     const startButton = document.getElementById('modal-rapid-speculative-repair-start');
     const validateButton = document.getElementById('modal-rapid-speculative-repair-validate');
+    const requalifyButton = document.getElementById('modal-rapid-speculative-repair-requalify');
     if (startButton) startButton.disabled = disabled;
     if (validateButton) validateButton.disabled = disabled;
+    if (requalifyButton) requalifyButton.disabled = disabled;
 }
 
 function _finishPresetMtpRepair(jobId) {
     if (_presetMtpRepairJobId !== jobId) return;
     _presetMtpRepairJobId = null;
+    _presetMtpRepairOperation = null;
+    _presetMtpRepairStartedAt = 0;
     _setPresetMtpRepairButtonsDisabled(false);
 }
 
@@ -2200,9 +2234,22 @@ async function _pollPresetMtpRepair(jobId) {
         const data = await response.json().catch(() => ({}));
         const job = data.job;
         if (!response.ok || !job) throw new Error(data.error || 'repair job status unavailable');
-        _setPresetMtpRepairStatus(job.message || `${job.phase || 'working'}…`);
+        if (_presetMtpRepairOperation === 'requalify' && job.status === 'running') {
+            const mode = document.getElementById('modal-rapid-speculative-requalification-mode')?.value || 'screen';
+            const estimate = mode === 'full-diagnostic'
+                ? 'ETA about 60–90 min'
+                : mode === 'full' ? 'ETA about 40–60 min' : 'ETA about 2–5 min';
+            const steps = job.totalSteps ? ` ${job.completedSteps || 0}/${job.totalSteps} stages` : '';
+            _setPresetMtpRepairStatus(`${job.message || 'Running live sidecar validation…'} —${steps} ${_formatPresetMtpRepairDuration((Date.now() - _presetMtpRepairStartedAt) / 1000)}; ${estimate}`);
+        } else {
+            _setPresetMtpRepairStatus(job.message || `${job.phase || 'working'}…`);
+        }
         if (job.status === 'completed') {
-            _setPresetMtpRepairStatus('Sidecar candidate registered. Served requalification is still required.', 'success');
+            if (_presetMtpRepairOperation === 'requalify') {
+                _renderPresetRequalificationOutcome(job.result);
+            } else {
+                _setPresetMtpRepairStatus('Sidecar candidate registered. Served requalification is still required.', 'success');
+            }
             await _fetchSidecarsForPreset();
             _syncRapidSpeculativeEditor();
             updatePresetVram();
@@ -2232,7 +2279,11 @@ async function _startPresetMtpRepair(operation = 'repair') {
         return;
     }
     const payload = { target, operation };
-    if (operation === 'repair') {
+    if (operation === 'requalify') {
+        payload.numSpeculativeTokens = Number(document.getElementById('modal-rapid-speculative-tokens')?.value || 3);
+        payload.disableAutoK = !!document.getElementById('modal-rapid-speculative-disable-auto-k')?.checked;
+        payload.requalificationMode = document.getElementById('modal-rapid-speculative-requalification-mode')?.value || 'screen';
+    } else if (operation === 'repair') {
         const kind = document.getElementById('modal-rapid-speculative-repair-kind')?.value || 'source';
         const source = document.getElementById('modal-rapid-speculative-repair-source')?.value.trim() || '';
         if (!source) {
@@ -2253,7 +2304,10 @@ async function _startPresetMtpRepair(operation = 'repair') {
     _setPresetMtpRepairButtonsDisabled(true);
     _setPresetMtpRepairStatus(operation === 'validate' ? 'Starting sidecar validation…' : 'Starting sidecar repair…');
     try {
-        const response = await fetch('/api/rapid-mlx/mtp-repair', {
+        const endpoint = operation === 'requalify'
+            ? '/api/rapid-mlx/mtp-requalification'
+            : '/api/rapid-mlx/mtp-repair';
+        const response = await fetch(endpoint, {
             method: 'POST',
             headers: {
                 ...(window.authHeaders ? window.authHeaders() : {}),
@@ -2264,6 +2318,8 @@ async function _startPresetMtpRepair(operation = 'repair') {
         const data = await response.json().catch(() => ({}));
         if (!response.ok || !data.job?.jobId) throw new Error(data.error || 'could not start repair');
         _presetMtpRepairJobId = data.job.jobId;
+        _presetMtpRepairOperation = operation;
+        _presetMtpRepairStartedAt = Date.now();
         _pollPresetMtpRepair(data.job.jobId);
     } catch (error) {
         _setPresetMtpRepairStatus('Could not start sidecar job: ' + error.message, 'error');
@@ -2287,6 +2343,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ?.addEventListener('click', () => _startPresetMtpRepair('repair'));
     document.getElementById('modal-rapid-speculative-repair-validate')
         ?.addEventListener('click', () => _startPresetMtpRepair('validate'));
+    document.getElementById('modal-rapid-speculative-repair-requalify')
+        ?.addEventListener('click', () => _startPresetMtpRepair('requalify'));
     _syncPresetMtpRepairKind();
 });
 

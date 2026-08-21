@@ -21,7 +21,8 @@
 //! a promise that some other model has a usable MTP head.
 
 use crate::inference::rapid_mlx::capabilities::{
-    CapabilitySnapshot, FeatureQualification, spec_decode_gate_names, version_matches,
+    CapabilitySnapshot, FeatureQualification, spec_decode_gate_names,
+    spec_decode_required_gate_names, version_matches,
 };
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -44,6 +45,8 @@ const MAX_STORE_BYTES: u64 = 1024 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SpecDecodeOutcome {
+    /// A short sampled live probe passed; the full gate sweep was not run.
+    Screened,
     /// Every gate that ran passed.
     Qualified,
     /// Gates ran cleanly and the scheduler still does not engage.
@@ -81,6 +84,16 @@ pub struct MeasuredSpecDecode {
     pub tool_call_parser: Option<String>,
     pub reasoning_parser: Option<String>,
     pub parser_source: String,
+    /// Requested draft-depth ceiling used by the qualification suite. This is not
+    /// the observed K; the receipts' histogram remains authoritative for that.
+    #[serde(default = "default_num_speculative_tokens")]
+    pub num_speculative_tokens: u32,
+    /// Whether the adaptive K controller was disabled for this measurement.
+    #[serde(default)]
+    pub disable_auto_k: bool,
+    /// `screen` is a short live probe; `full` is the complete qualification sweep.
+    #[serde(default = "default_qualification_mode")]
+    pub qualification_mode: String,
     /// Directory holding the lane's raw run output.
     pub receipts: PathBuf,
     /// The lane's `generated_at`, ISO-8601. Not an expiry: the fingerprint changes if
@@ -96,6 +109,10 @@ impl MeasuredSpecDecode {
     /// with every gate passing.
     pub fn qualification(&self) -> FeatureQualification {
         match self.outcome {
+            SpecDecodeOutcome::Screened => FeatureQualification::Indeterminate(format!(
+                "Fast live screen passed on Rapid-MLX {version}; run the full sampled and tool-grammar gates before enabling speculation",
+                version = self.rapid_mlx_version,
+            )),
             SpecDecodeOutcome::Qualified if self.promotes_capability => {
                 FeatureQualification::Available
             }
@@ -151,6 +168,19 @@ impl MeasuredSpecDecode {
             failing.join("; ")
         }
     }
+
+    /// Human-readable explanation for the outcome, suitable for the authenticated UI.
+    pub fn reason(&self) -> String {
+        self.blocked_reasons()
+    }
+}
+
+fn default_num_speculative_tokens() -> u32 {
+    3
+}
+
+fn default_qualification_mode() -> String {
+    "full".to_string()
 }
 
 /// On-disk shape. A map rather than a single record because one machine can have
@@ -271,6 +301,7 @@ impl SpecDecodeVerdictStore {
         }
 
         let outcome = match report.overall.as_str() {
+            "screened" => SpecDecodeOutcome::Screened,
             "qualified" => SpecDecodeOutcome::Qualified,
             "still-blocked" => SpecDecodeOutcome::StillBlocked,
             "uninterpretable" => SpecDecodeOutcome::Uninterpretable,
@@ -279,8 +310,14 @@ impl SpecDecodeVerdictStore {
 
         // The lane computes this as "qualified AND full sweep". Recompute rather than
         // trusting the field, so a hand-edited report cannot promote the capability.
-        let promotes_capability =
-            outcome == SpecDecodeOutcome::Qualified && report.gates_run == expected;
+        let required = spec_decode_required_gate_names();
+        let promotes_capability = matches!(
+            report.qualification_mode.as_str(),
+            "full" | "full-diagnostic"
+        ) && outcome == SpecDecodeOutcome::Qualified
+            && required
+                .iter()
+                .all(|name| report.gates_run.iter().any(|run| run == name));
 
         let verdict = MeasuredSpecDecode {
             fingerprint: snapshot.fingerprint(),
@@ -301,6 +338,9 @@ impl SpecDecodeVerdictStore {
             tool_call_parser: report.tool_call_parser,
             reasoning_parser: report.reasoning_parser,
             parser_source: report.parser_source,
+            num_speculative_tokens: report.num_speculative_tokens,
+            disable_auto_k: report.disable_auto_k,
+            qualification_mode: report.qualification_mode,
             receipts: report_path
                 .parent()
                 .map(Path::to_path_buf)
@@ -395,6 +435,12 @@ struct LaneReport {
     reasoning_parser: Option<String>,
     #[serde(default)]
     parser_source: String,
+    #[serde(default = "default_num_speculative_tokens")]
+    num_speculative_tokens: u32,
+    #[serde(default)]
+    disable_auto_k: bool,
+    #[serde(default = "default_qualification_mode")]
+    qualification_mode: String,
     #[serde(default)]
     gates_run: Vec<String>,
     #[serde(default)]
@@ -469,6 +515,21 @@ mod tests {
         let path = dir.join("requalification.json");
         std::fs::write(&path, body).unwrap();
         path
+    }
+
+    #[test]
+    fn requalification_preserves_requested_depth_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SpecDecodeVerdictStore::at(dir.path());
+        let snap = snapshot("0.12.0");
+        let body = report_json("still-blocked", &spec_decode_gate_names(), "0.12.0").replace(
+            "\"generated_at\"",
+            "\"num_speculative_tokens\":3,\"disable_auto_k\":true,\"generated_at\"",
+        );
+        let path = write_report(dir.path(), &body);
+        let verdict = store.ingest_requalification_report(&snap, &path).unwrap();
+        assert_eq!(verdict.num_speculative_tokens, 3);
+        assert!(verdict.disable_auto_k);
     }
 
     #[test]
