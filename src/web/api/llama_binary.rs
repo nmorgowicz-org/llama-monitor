@@ -35,8 +35,12 @@ fn normalized_arch(arch: &str) -> &str {
 fn selectable_backends_for_os(os: &str) -> &'static [&'static str] {
     match os {
         "macos" => &["metal"],
-        "linux" => &["cpu", "cuda12", "cuda13", "vulkan", "rocm", "sycl"],
-        "windows" => &["avx2", "vulkan", "cuda12", "cuda13", "sycl", "rocm"],
+        "linux" => &[
+            "cpu", "cuda12", "cuda13", "vulkan", "rocm", "sycl", "openvino",
+        ],
+        "windows" => &[
+            "avx2", "vulkan", "cuda12", "cuda13", "sycl", "rocm", "openvino",
+        ],
         _ => &["cpu"],
     }
 }
@@ -498,7 +502,7 @@ fn api_llama_binary_platform_info(
                         serde_json::json!({
                             "id": "vulkan",
                             "label": "Vulkan — AMD / Intel / NVIDIA",
-                            "note": "Best for AMD Radeon or Intel Arc. Also works on NVIDIA without CUDA.",
+                    "note": "Cross-vendor GPU acceleration via Vulkan; includes many AMD integrated GPUs when the Vulkan driver is available.",
                             "recommended": false
                         }),
                         serde_json::json!({
@@ -513,13 +517,19 @@ fn api_llama_binary_platform_info(
                             "note": "Requires a compatible CUDA 13.x runtime and NVIDIA driver; Maxwell, Pascal, and Volta are not supported.",
                             "recommended": false
                         }),
-                        serde_json::json!({
-                            "id": "sycl",
-                            "label": "SYCL / oneAPI — Intel Arc & Xe GPUs",
-                            "note": "Requires Intel oneAPI runtime. For Arc A-series and Xe-HPC.",
-                            "recommended": false
-                        }),
-                    ],
+                serde_json::json!({
+                    "id": "sycl",
+                    "label": "SYCL / oneAPI — Intel Arc & Xe GPUs",
+                    "note": "Requires Intel oneAPI runtime. For Arc A-series and Xe-HPC.",
+                    "recommended": false
+                }),
+                serde_json::json!({
+                    "id": "openvino",
+                    "label": "OpenVINO — Intel CPU / GPU / NPU",
+                    "note": "Requires the Intel OpenVINO runtime; GPU/NPU use also requires the device to be available to this system.",
+                    "recommended": false
+                }),
+            ],
                     "linux" => vec![
                         serde_json::json!({
                             "id": "cpu",
@@ -539,25 +549,31 @@ fn api_llama_binary_platform_info(
                             "note": "Requires NVIDIA CUDA 13.x runtime.",
                             "recommended": false
                         }),
-                        serde_json::json!({
-                            "id": "vulkan",
-                            "label": "Vulkan — AMD / Intel / NVIDIA",
-                            "note": "GPU acceleration via Vulkan driver.",
-                            "recommended": false
-                        }),
-                        serde_json::json!({
-                            "id": "rocm",
-                            "label": "ROCm — AMD GPU",
-                            "note": "Requires AMD ROCm runtime.",
-                            "recommended": false
-                        }),
-                        serde_json::json!({
-                            "id": "sycl",
-                            "label": "SYCL / oneAPI — Intel GPU",
-                            "note": "Requires Intel oneAPI runtime.",
-                            "recommended": false
-                        }),
-                    ],
+                serde_json::json!({
+                    "id": "vulkan",
+                    "label": "Vulkan — AMD / Intel / NVIDIA",
+                    "note": "Cross-vendor GPU acceleration via Vulkan; includes many AMD integrated GPUs when the Vulkan driver is available.",
+                    "recommended": false
+                }),
+                serde_json::json!({
+                    "id": "rocm",
+                    "label": "ROCm — AMD GPU",
+                    "note": "Requires the AMD ROCm runtime and a supported AMD GPU.",
+                    "recommended": false
+                }),
+                serde_json::json!({
+                    "id": "sycl",
+                    "label": "SYCL / oneAPI — Intel GPU",
+                    "note": "Requires Intel oneAPI runtime.",
+                    "recommended": false
+                }),
+                serde_json::json!({
+                    "id": "openvino",
+                    "label": "OpenVINO — Intel CPU / GPU / NPU",
+                    "note": "Requires the Intel OpenVINO runtime; GPU/NPU use also requires the device to be available to this system.",
+                    "recommended": false
+                }),
+            ],
                     // macOS: Metal only — no choice needed
                     _ => vec![
                         serde_json::json!({
@@ -1259,6 +1275,16 @@ fn api_llama_restart(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn intel_and_amd_accelerator_choices_remain_available() {
+        assert!(selectable_backends_for_os("linux").contains(&"cpu"));
+        assert!(selectable_backends_for_os("linux").contains(&"openvino"));
+        assert!(selectable_backends_for_os("linux").contains(&"sycl"));
+        assert!(selectable_backends_for_os("linux").contains(&"vulkan"));
+        assert!(selectable_backends_for_os("linux").contains(&"rocm"));
+        assert!(selectable_backends_for_os("windows").contains(&"openvino"));
+    }
 
     #[test]
     fn llama_update_does_not_restart_rapid_mlx_backend() {

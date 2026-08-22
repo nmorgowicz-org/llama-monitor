@@ -73,14 +73,34 @@ Returns:
 - `auto_backend`: backend chosen automatically for this platform
 - `label`: short human-readable platform label (e.g. "Apple Silicon Metal")
 - `backends`: array of available backend choices, each with:
-  - `id`: backend identifier (e.g. "cuda12", "vulkan", "rocm")
+- `id`: backend identifier (e.g. "cuda12", "vulkan", "rocm", "sycl", "openvino")
   - `label`: display label
   - `note`: short description of requirements
   - `recommended`: whether it is the recommended option
 - `multi_backend`: true when the platform offers multiple selectable backends (Linux and Windows)
 
 The UI uses this to pre-select the correct backend and to render backend-choice UI on
-multi-backend platforms.
+multi-backend platforms. Linux and Windows default to their generic CPU runtime;
+selecting an accelerator backend is an explicit request and does not probe or
+install that platform's driver/runtime.
+
+The Intel choices have different purposes:
+
+- `openvino` selects llama.cpp's OpenVINO archive. OpenVINO can execute on an
+  Intel CPU, GPU, or NPU; GPU/NPU acceleration requires the corresponding
+  OpenVINO device and driver to be available to the host or container.
+- `sycl` selects llama.cpp's oneAPI/SYCL archive for Intel GPU execution,
+  including supported integrated GPUs.
+- `vulkan` is another possible Intel iGPU path when a Vulkan driver is
+  available. It is not an OpenVINO or oneAPI runtime.
+
+For AMD systems, `rocm` is the dedicated AMD GPU backend when the GPU and
+ROCm version are supported. `vulkan` is the broader cross-vendor option and
+can also use many AMD integrated GPUs when the Vulkan driver is available.
+The generic CPU fallback remains valid when neither runtime is available.
+
+The generic `cpu`/`avx2` choice remains available as the portable fallback and
+does not mean that all Intel-optimized CPU execution is disabled.
 
 ### `POST /api/llama-binary/update`
 

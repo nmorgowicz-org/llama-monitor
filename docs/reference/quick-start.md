@@ -123,8 +123,13 @@ Click the chip to cycle modes, or use it when you want the server running but ne
     - llama.cpp: Metal is automatic.
   - Linux with NVIDIA GPU: install the matching CUDA runtime and select the
     CUDA backend when installing llama.cpp.
-  - Linux with AMD GPU: install ROCm and select the ROCm backend.
-  - Windows: choose the backend that matches your GPU (CUDA, Vulkan, SYCL) in
+  - AMD GPU: select ROCm for a supported GPU with the ROCm runtime. Vulkan is
+    another option for many AMD discrete or integrated GPUs when the Vulkan
+    driver is available; otherwise use the generic CPU backend.
+  - Intel Linux or Windows: use OpenVINO for an Intel CPU/GPU/NPU runtime, or
+    SYCL/oneAPI for supported Intel GPU/iGPU acceleration. GPU/NPU acceleration
+    requires the device and matching host/container drivers to be available.
+  - Windows: choose the backend that matches your GPU (CUDA, Vulkan, SYCL, OpenVINO) in
     the llama.cpp version modal or setup wizard.
 - Config directory: most settings and files live under `~/.config/llama-monitor`:
   - API token, HF token, models directory, llama.cpp binary, and Rapid-MLX

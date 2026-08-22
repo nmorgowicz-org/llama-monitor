@@ -37,6 +37,7 @@ fn backend_matches(name: &str, backend: &str) -> bool {
                 || name.contains("cuda_13")
         }
         "sycl" => name.contains("sycl") || name.contains("oneapi"),
+        "openvino" => name.contains("openvino"),
         "vulkan" => name.contains("vulkan"),
         "rocm" | "hip" => name.contains("rocm") || name.contains("hip"),
         "metal" => name.contains("metal") || name.contains("mac"),
@@ -529,6 +530,32 @@ mod tests {
         let selected = select_assets(&release, "cpu", "x64");
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].name, "llama-b6000-bin-ubuntu-x64.tar.gz");
+    }
+
+    #[test]
+    fn test_select_assets_openvino_linux_x64() {
+        let release = LlamaCppRelease {
+            tag_name: "b6000".into(),
+            assets: vec![
+                LlamaCppAsset {
+                    name: "llama-b6000-bin-ubuntu-openvino-2026.3-x64.tar.gz".into(),
+                    browser_download_url: "https://example.com/openvino-linux".into(),
+                },
+                LlamaCppAsset {
+                    name: "llama-b6000-bin-ubuntu-x64.tar.gz".into(),
+                    browser_download_url: "https://example.com/cpu".into(),
+                },
+            ],
+            published_at: String::new(),
+            body: String::new(),
+        };
+
+        let selected = select_assets(&release, "openvino", "x64");
+        assert_eq!(selected.len(), 1);
+        assert_eq!(
+            selected[0].name,
+            "llama-b6000-bin-ubuntu-openvino-2026.3-x64.tar.gz"
+        );
     }
 
     #[test]
