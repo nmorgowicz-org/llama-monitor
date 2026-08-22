@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.4](https://github.com/nmorgowicz-org/local-llm-foundry/compare/v2.0.3...v2.0.4) (2026-08-22)
+
+
+### Bug Fixes
+
+* **binary:** remove dead Linux CUDA options and harden notifications ([b582a90](https://github.com/nmorgowicz-org/local-llm-foundry/commit/b582a90f4dcc62005c67c488caa78aff82092460))
+* **ui:** harden notification menu modal layering ([b582a90](https://github.com/nmorgowicz-org/local-llm-foundry/commit/b582a90f4dcc62005c67c488caa78aff82092460))
+
 ## [2.0.3](https://github.com/nmorgowicz-org/local-llm-foundry/compare/v2.0.2...v2.0.3) (2026-08-21)
 
 
