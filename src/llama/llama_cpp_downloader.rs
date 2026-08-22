@@ -239,52 +239,60 @@ pub async fn download_and_extract(
     for asset in assets {
         let out_path = binaries_dir.join(&asset.name);
         let tmp_path = out_path.with_extension("part");
-
-        // Download
-        let resp = client
-            .get(&asset.browser_download_url)
-            .send()
-            .await
-            .context(format!("Failed to start download for {}", asset.name))?;
-
-        if !resp.status().is_success() {
-            anyhow::bail!("Download failed for {}: HTTP {}", asset.name, resp.status());
-        }
-
-        let total = resp.content_length().unwrap_or(0);
-        let mut downloaded: u64 = 0;
-        let mut file = fs::File::create(&tmp_path)
-            .await
-            .context("Failed to create temp file")?;
-
-        let mut stream = resp.bytes_stream();
-        use futures_util::StreamExt;
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.context("Stream error")?;
-            file.write_all(&chunk)
+        let result: Result<()> = async {
+            // Download
+            let resp = client
+                .get(&asset.browser_download_url)
+                .send()
                 .await
-                .context("Failed to write chunk")?;
-            downloaded += chunk.len() as u64;
-            if total > 0 {
-                progress.insert(asset.name.clone(), (downloaded as f64) / (total as f64));
+                .context(format!("Failed to start download for {}", asset.name))?;
+
+            if !resp.status().is_success() {
+                anyhow::bail!("Download failed for {}: HTTP {}", asset.name, resp.status());
             }
-        }
 
-        // Move temp -> final
-        fs::rename(&tmp_path, &out_path)
-            .await
-            .context("Failed to finalize download file")?;
-
-        // Extract if archive
-        if asset.name.ends_with(".zip")
-            || asset.name.ends_with(".tar.gz")
-            || asset.name.ends_with(".tgz")
-        {
-            let _ = extract_archive(&out_path, binaries_dir)
+            let total = resp.content_length().unwrap_or(0);
+            let mut downloaded: u64 = 0;
+            let mut file = fs::File::create(&tmp_path)
                 .await
-                .inspect_err(|e| {
-                    eprintln!("[warn] Failed to extract {}: {}", asset.name, e);
-                });
+                .context("Failed to create temp file")?;
+
+            let mut stream = resp.bytes_stream();
+            use futures_util::StreamExt;
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.context("Stream error")?;
+                file.write_all(&chunk)
+                    .await
+                    .context("Failed to write chunk")?;
+                downloaded += chunk.len() as u64;
+                if total > 0 {
+                    progress.insert(asset.name.clone(), (downloaded as f64) / (total as f64));
+                }
+            }
+
+            // Move temp -> final
+            fs::rename(&tmp_path, &out_path)
+                .await
+                .context("Failed to finalize download file")?;
+
+            // Extract if archive
+            if asset.name.ends_with(".zip")
+                || asset.name.ends_with(".tar.gz")
+                || asset.name.ends_with(".tgz")
+            {
+                let _ = extract_archive(&out_path, binaries_dir)
+                    .await
+                    .inspect_err(|e| {
+                        eprintln!("[warn] Failed to extract {}: {}", asset.name, e);
+                    });
+            }
+            Ok(())
+        }
+        .await;
+
+        if let Err(error) = result {
+            let _ = fs::remove_file(&tmp_path).await;
+            return Err(error);
         }
     }
 

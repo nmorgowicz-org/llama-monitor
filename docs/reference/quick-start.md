@@ -121,8 +121,10 @@ Click the chip to cycle modes, or use it when you want the server running but ne
   - macOS on Apple Silicon:
   - Rapid-MLX: automatic (Metal); managed runtime handled by Local LLM Foundry.
     - llama.cpp: Metal is automatic.
-  - Linux with NVIDIA GPU: install the matching CUDA runtime and select the
-    CUDA backend when installing llama.cpp.
+  - Linux with NVIDIA GPU: use the Vulkan backend when the Vulkan driver is
+    available, or install a custom CUDA-enabled llama.cpp build. The
+    downloadable llama.cpp release archives currently publish CUDA binaries
+    for Windows, not Linux.
   - AMD GPU: select ROCm for a supported GPU with the ROCm runtime. Vulkan is
     another option for many AMD discrete or integrated GPUs when the Vulkan
     driver is available; otherwise use the generic CPU backend.

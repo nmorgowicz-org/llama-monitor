@@ -892,7 +892,7 @@ Returns the latest available release version (cached, fetched from GitHub). Used
 Download and install a llama.cpp release binary.
 
 ```json
-// Request (optional backend override)
+// Request (optional backend override; CUDA overrides are for Windows release archives)
 { "backend": "cuda13" }
 
 // Response

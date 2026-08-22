@@ -358,7 +358,10 @@ fn api_llama_binary_releases(
                         {
                             None
                         } else {
-                            get_latest_stable_release(&client).await.ok()
+                            get_latest_stable_release(&client)
+                                .await
+                                .ok()
+                                .filter(|release| is_versioned_tag(&release.tag_name))
                         };
 
                         let release_item = |r: &LlamaCppRelease| {
@@ -562,18 +565,6 @@ fn api_llama_binary_platform_info(
                             "id": "cpu",
                             "label": "CPU — universal",
                             "note": "No GPU driver required.",
-                            "recommended": false
-                        }),
-                        serde_json::json!({
-                            "id": "cuda12",
-                            "label": "CUDA 12.x — NVIDIA GPU",
-                            "note": "Requires NVIDIA CUDA 12.x runtime.",
-                            "recommended": false
-                        }),
-                        serde_json::json!({
-                            "id": "cuda13",
-                            "label": "CUDA 13.x — NVIDIA GPU",
-                            "note": "Requires NVIDIA CUDA 13.x runtime.",
                             "recommended": false
                         }),
                 serde_json::json!({

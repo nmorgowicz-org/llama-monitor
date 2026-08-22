@@ -813,7 +813,7 @@
  * a fallback for WebKit builds without :has() support (macOS 13–14.1). */
 .top-nav-bar:has(.nav-notifications-btn[aria-expanded="true"]),
 .top-nav-bar.nav-notifications-open {
-  z-index: 600;
+  z-index: 400;
 }
 
 .top-nav-bar::after,
