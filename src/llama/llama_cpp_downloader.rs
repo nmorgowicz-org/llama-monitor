@@ -221,6 +221,29 @@ pub fn select_assets<'a>(
     selected
 }
 
+/// Select assets for a specific host operating system, backend, and
+/// architecture. This is the install-path selector: unlike `select_assets`,
+/// it excludes otherwise matching archives for another operating system.
+pub fn select_assets_for_os<'a>(
+    release: &'a LlamaCppRelease,
+    backend: &str,
+    arch: &str,
+    os: &str,
+) -> Vec<&'a LlamaCppAsset> {
+    select_assets(release, backend, arch)
+        .into_iter()
+        .filter(|asset| {
+            let name = asset.name.to_ascii_lowercase();
+            match os {
+                "macos" => name.contains("macos") || name.contains("darwin"),
+                "linux" => name.contains("ubuntu") || name.contains("linux"),
+                "windows" => name.contains("win-") || name.contains("windows"),
+                _ => true,
+            }
+        })
+        .collect()
+}
+
 /// Download and extract llama.cpp assets into binaries_dir.
 ///
 /// For simplicity, this downloads each selected asset into binaries_dir
@@ -570,6 +593,29 @@ mod tests {
 
         let selected = select_assets(&release, "cpu", "x64");
         assert_eq!(selected.len(), 1);
+    }
+
+    #[test]
+    fn test_select_assets_for_os_excludes_other_platform_archives() {
+        let release = LlamaCppRelease {
+            tag_name: "b6000".into(),
+            assets: vec![
+                LlamaCppAsset {
+                    name: "llama-b6000-bin-ubuntu-x64.tar.gz".into(),
+                    browser_download_url: "https://example.com/linux".into(),
+                },
+                LlamaCppAsset {
+                    name: "llama-b6000-bin-win-cpu-x64.zip".into(),
+                    browser_download_url: "https://example.com/windows".into(),
+                },
+            ],
+            published_at: String::new(),
+            body: String::new(),
+        };
+
+        let selected = select_assets_for_os(&release, "cpu", "x64", "linux");
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].name, "llama-b6000-bin-ubuntu-x64.tar.gz");
     }
 
     #[test]

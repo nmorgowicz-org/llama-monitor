@@ -9,7 +9,7 @@ use crate::inference::llama_cpp::ServerConfig;
 use crate::llama::llama_cpp_downloader::{
     LlamaCppRelease, ReleaseQuery, cleanup_old_binaries, download_and_extract,
     get_latest_stable_release, get_release_by_tag, list_releases, release_has_binary_assets,
-    select_assets, sort_releases_by_published_at,
+    select_assets_for_os, sort_releases_by_published_at,
 };
 use crate::llama::server::{start_server, stop_server};
 use crate::state::AppState;
@@ -33,16 +33,6 @@ fn normalized_arch(arch: &str) -> &str {
     }
 }
 
-fn asset_matches_os(asset_name: &str, os: &str) -> bool {
-    let name = asset_name.to_ascii_lowercase();
-    match os {
-        "macos" => name.contains("macos") || name.contains("darwin"),
-        "linux" => name.contains("ubuntu") || name.contains("linux"),
-        "windows" => name.contains("win-") || name.contains("windows"),
-        _ => true,
-    }
-}
-
 /// True when the release publishes an asset for the given backend and arch
 /// that also matches the given OS.
 fn release_has_matching_assets(
@@ -51,9 +41,7 @@ fn release_has_matching_assets(
     arch: &str,
     os: &str,
 ) -> bool {
-    select_assets(release, backend, arch)
-        .iter()
-        .any(|asset| asset_matches_os(&asset.name, os))
+    !select_assets_for_os(release, backend, arch, os).is_empty()
 }
 
 /// True when the release can be installed on the current machine with the
@@ -796,7 +784,7 @@ fn api_llama_binary_update(
                 let tag = release.tag_name.clone();
 
                 let assets =
-                    select_assets(&release, backend, arch_str);
+                    select_assets_for_os(&release, backend, arch_str, os);
 
                 if assets.is_empty() {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
