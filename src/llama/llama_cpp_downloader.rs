@@ -454,6 +454,21 @@ mod tests {
     }
 
     #[test]
+    fn test_select_assets_ignores_metadata_only_release() {
+        let release = LlamaCppRelease {
+            tag_name: "v0.2.0".into(),
+            assets: vec![LlamaCppAsset {
+                name: "nightly-tag.txt".into(),
+                browser_download_url: "https://example.com/nightly-tag.txt".into(),
+            }],
+            published_at: String::new(),
+            body: String::new(),
+        };
+
+        assert!(select_assets(&release, "metal", "arm64").is_empty());
+    }
+
+    #[test]
     fn test_select_assets_cuda_x64() {
         let release = LlamaCppRelease {
             tag_name: "b6000".into(),

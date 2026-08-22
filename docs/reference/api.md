@@ -2224,7 +2224,7 @@ Return the latest available llama.cpp release.
 - Auth: `api-token`.
 
 ### `GET /api/llama-binary/releases`
-Return a list of recent llama.cpp releases.
+Return recent llama.cpp releases, newest first by GitHub publication timestamp. Each item includes `installable`, indicating whether the current platform has a selectable binary asset for that release.
 
 - Auth: `api-token`.
 

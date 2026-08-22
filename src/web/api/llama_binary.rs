@@ -7,14 +7,28 @@ use crate::config::AppConfig;
 use crate::inference::launch::launch_local;
 use crate::inference::llama_cpp::ServerConfig;
 use crate::llama::llama_cpp_downloader::{
-    ReleaseQuery, cleanup_old_binaries, download_and_extract, get_release_by_tag, list_releases,
-    select_assets, sort_releases_by_published_at,
+    LlamaCppRelease, ReleaseQuery, cleanup_old_binaries, download_and_extract, get_release_by_tag,
+    list_releases, select_assets, sort_releases_by_published_at,
 };
 use crate::llama::server::{start_server, stop_server};
 use crate::state::AppState;
 use crate::web::safe_json_body;
 
 use super::{ApiCtx, ApiRoute, box_reply, check_api_token, unauthorized_api_token};
+
+fn release_is_installable(release: &LlamaCppRelease) -> bool {
+    let backend = match std::env::consts::OS {
+        "macos" => "metal",
+        "linux" => "cpu",
+        _ => "avx2",
+    };
+    let arch = match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        "x86_64" => "x64",
+        other => other,
+    };
+    !select_assets(release, backend, arch).is_empty()
+}
 
 pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
     let state = ctx.state;
@@ -278,11 +292,13 @@ fn api_llama_binary_releases(
                             .map(|r| {
                                 let build: Option<u64> =
                                     r.tag_name.trim_start_matches('b').parse().ok();
+                                let installable = release_is_installable(&r);
                                 serde_json::json!({
                                     "tag": r.tag_name,
                                     "build": build,
                                     "published_at": r.published_at,
                                     "body": r.body,
+                                    "installable": installable,
                                 })
                             })
                             .collect();
@@ -363,6 +379,7 @@ fn api_llama_binary_release(
                             "build": build,
                             "published_at": release.published_at,
                             "body": release.body,
+                            "installable": release_is_installable(&release),
                         });
                         {
                             let mut guard = RELEASE_SINGLE_CACHE.lock().await;
@@ -643,6 +660,8 @@ fn api_llama_binary_update(
                             ));
                         }
                     };
+
+                sort_releases_by_published_at(&mut releases);
 
                 if releases.is_empty() {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(

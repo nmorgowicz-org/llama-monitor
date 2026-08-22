@@ -3779,6 +3779,12 @@ button:disabled {
   color: var(--color-success);
 }
 
+.llama-version-badge--notes {
+  background: color-mix(in srgb, var(--color-text-muted) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-text-muted) 25%, transparent);
+  color: var(--color-text-muted);
+}
+
 .llama-version-row-right {
   display: flex;
   align-items: center;

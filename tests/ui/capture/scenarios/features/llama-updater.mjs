@@ -51,7 +51,19 @@ export default async function(ctx, options) {
             tag: document.getElementById('llama-version-notes-tag')?.textContent || '',
             changelogItems: document.querySelectorAll('#llama-version-notes-body li').length,
         }));
-        if (stableNotes.tag !== stableTag || stableNotes.changelogItems === 0) {
+        const stableRowState = await page.evaluate((tag) => {
+            const row = [...document.querySelectorAll('.llama-version-row')].find(item => item.dataset.tag === tag);
+            return {
+                hasInstallButton: Boolean(row?.querySelector('.llama-version-install-btn')),
+                hasNotesOnlyBadge: row?.textContent.includes('Notes only') || false,
+            };
+        }, stableTag);
+        if (
+            stableNotes.tag !== stableTag ||
+            stableNotes.changelogItems === 0 ||
+            stableRowState.hasInstallButton ||
+            !stableRowState.hasNotesOnlyBadge
+        ) {
             throw new Error(`Versioned release notes were not rendered as a list: ${stableTag}`);
         }
         await captureShot(page, 'llama-updater-stable-release-notes.png', { fullPage: true });

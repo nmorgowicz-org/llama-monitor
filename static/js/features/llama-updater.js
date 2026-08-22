@@ -172,8 +172,9 @@ async function loadReleaseList() {
     }
 
     listEl.innerHTML = '';
+    const latestInstallableIndex = releases.findIndex(r => r.installable !== false);
     releases.forEach((r, i) => {
-      const row = buildReleaseRow(r, i === 0);
+      const row = buildReleaseRow(r, i === latestInstallableIndex);
       listEl.appendChild(row);
     });
 
@@ -256,6 +257,7 @@ function normalizeReleaseNotes(body) {
 
 function buildReleaseRow(release, isLatest) {
   const isCurrent = _currentBuild !== null && release.build === _currentBuild;
+  const isInstallable = release.installable !== false;
   const age = release.published_at ? relativeAge(release.published_at) : '';
   const tag = release.tag ?? `b${release.build}`;
 
@@ -279,7 +281,7 @@ function buildReleaseRow(release, isLatest) {
   const badges = buildReleaseBadges({
     wrapperClass: 'llama-version-row-badges',
     badgeClass: 'llama-version-badge',
-    isLatest,
+    isLatest: isLatest && isInstallable,
     isCurrent,
   });
 
@@ -293,7 +295,7 @@ function buildReleaseRow(release, isLatest) {
   right.className = 'llama-version-row-right';
   right.appendChild(meta);
 
-  if (!isCurrent) {
+  if (!isCurrent && isInstallable) {
     const btn = document.createElement('button');
     btn.className = 'llama-version-install-btn';
     btn.textContent = 'Install';
@@ -301,6 +303,11 @@ function buildReleaseRow(release, isLatest) {
     btn.dataset.build = release.build ?? '';
     btn.addEventListener('click', () => installRelease(btn, release));
     right.appendChild(btn);
+  } else if (!isInstallable) {
+    const notesOnly = document.createElement('span');
+    notesOnly.className = 'llama-version-badge llama-version-badge--notes';
+    notesOnly.textContent = 'Notes only';
+    right.appendChild(notesOnly);
   }
 
   row.append(info, right);
