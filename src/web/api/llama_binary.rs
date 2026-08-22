@@ -503,14 +503,14 @@ fn api_llama_binary_platform_info(
                         }),
                         serde_json::json!({
                             "id": "cuda12",
-                            "label": "CUDA 12.x — NVIDIA RTX 20/30/40 series",
-                            "note": "Requires CUDA 12.x runtime. Typical for GTX 10xx through RTX 40xx.",
+                            "label": "CUDA 12.x — NVIDIA GPU",
+                            "note": "Requires a compatible CUDA 12.x runtime and NVIDIA driver.",
                             "recommended": false
                         }),
                         serde_json::json!({
                             "id": "cuda13",
-                            "label": "CUDA 13.x — NVIDIA RTX 50 series (Blackwell)",
-                            "note": "Requires CUDA 13.x runtime. For RTX 5070, 5080, 5090.",
+                            "label": "CUDA 13.x — NVIDIA GPU (Turing and newer)",
+                            "note": "Requires a compatible CUDA 13.x runtime and NVIDIA driver; Maxwell, Pascal, and Volta are not supported.",
                             "recommended": false
                         }),
                         serde_json::json!({
@@ -534,6 +534,12 @@ fn api_llama_binary_platform_info(
                             "recommended": false
                         }),
                         serde_json::json!({
+                            "id": "cuda13",
+                            "label": "CUDA 13.x — NVIDIA GPU",
+                            "note": "Requires NVIDIA CUDA 13.x runtime.",
+                            "recommended": false
+                        }),
+                        serde_json::json!({
                             "id": "vulkan",
                             "label": "Vulkan — AMD / Intel / NVIDIA",
                             "note": "GPU acceleration via Vulkan driver.",
@@ -543,6 +549,12 @@ fn api_llama_binary_platform_info(
                             "id": "rocm",
                             "label": "ROCm — AMD GPU",
                             "note": "Requires AMD ROCm runtime.",
+                            "recommended": false
+                        }),
+                        serde_json::json!({
+                            "id": "sycl",
+                            "label": "SYCL / oneAPI — Intel GPU",
+                            "note": "Requires Intel oneAPI runtime.",
                             "recommended": false
                         }),
                     ],

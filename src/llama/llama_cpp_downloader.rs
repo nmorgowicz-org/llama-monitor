@@ -10,11 +10,17 @@ use tokio::io::AsyncWriteExt;
 fn backend_matches(name: &str, backend: &str) -> bool {
     match backend {
         "cpu" => {
-            name.contains("cpu")
-                || name.contains("base")
-                || name.contains("avx2")
-                || name.contains("ubuntu")
-                || name.contains("linux")
+            let accelerator_qualified = [
+                "cuda", "vulkan", "rocm", "hip", "sycl", "oneapi", "openvino", "opencl", "metal",
+            ]
+            .iter()
+            .any(|marker| name.contains(marker));
+            !accelerator_qualified
+                && (name.contains("cpu")
+                    || name.contains("base")
+                    || name.contains("avx2")
+                    || name.contains("ubuntu")
+                    || name.contains("linux"))
         }
         "avx2" => name.contains("avx2") || name.contains("cpu") || name.contains("base"),
         "cuda" => name.contains("cuda"),
@@ -488,6 +494,41 @@ mod tests {
 
         let selected = select_assets(&release, "cpu", "x64");
         assert_eq!(selected.len(), 1);
+    }
+
+    #[test]
+    fn test_select_assets_cpu_linux_excludes_accelerated_archives() {
+        let release = LlamaCppRelease {
+            tag_name: "b6000".into(),
+            assets: vec![
+                LlamaCppAsset {
+                    name: "llama-b6000-bin-ubuntu-x64.tar.gz".into(),
+                    browser_download_url: "https://example.com/cpu".into(),
+                },
+                LlamaCppAsset {
+                    name: "llama-b6000-bin-ubuntu-vulkan-x64.tar.gz".into(),
+                    browser_download_url: "https://example.com/vulkan".into(),
+                },
+                LlamaCppAsset {
+                    name: "llama-b6000-bin-ubuntu-rocm-x64.tar.gz".into(),
+                    browser_download_url: "https://example.com/rocm".into(),
+                },
+                LlamaCppAsset {
+                    name: "llama-b6000-bin-ubuntu-sycl-x64.tar.gz".into(),
+                    browser_download_url: "https://example.com/sycl".into(),
+                },
+                LlamaCppAsset {
+                    name: "llama-b6000-bin-ubuntu-openvino-x64.tar.gz".into(),
+                    browser_download_url: "https://example.com/openvino".into(),
+                },
+            ],
+            published_at: String::new(),
+            body: String::new(),
+        };
+
+        let selected = select_assets(&release, "cpu", "x64");
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].name, "llama-b6000-bin-ubuntu-x64.tar.gz");
     }
 
     #[test]
