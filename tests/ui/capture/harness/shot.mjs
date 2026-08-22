@@ -40,9 +40,9 @@ export async function captureShot(page, rawFilename, options = {}) {
     const filename = tagFilename(rawFilename, options.runtimeTag);
     const { fullPage = true, expandSelector, runtimeTag, ...screenshotOptions } = options;
 
-    // Non-full-page captures are disabled by default.
-    // To temporarily enable for debugging, change this guard or remove fullPage: false.
-    if (!fullPage) {
+    // Non-full-page captures are disabled by default, except when a scenario
+    // explicitly supplies an expansion selector for a real viewport capture.
+    if (!fullPage && !expandSelector) {
         console.log(`[CAPTURE] Skipped non-full-page: ${filename}`);
         return;
     }

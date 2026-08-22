@@ -91,8 +91,24 @@ function createNotificationButton(label, className, handler) {
 }
 
 function invokeNotificationAction(record, action) {
+    closeNotificationMenu();
     const handler = notificationHandlers.get(notificationHandlerKey(record.id, action.id));
     if (handler) handler();
+}
+
+export function closeNotificationMenu() {
+    const menu = document.getElementById('nav-notifications-menu');
+    const button = document.getElementById('nav-notifications-btn');
+    if (!menu || !button) return;
+    menu.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+    button.closest('.top-nav-bar')?.classList.remove('nav-notifications-open');
+}
+
+function isOpenModalOverlay(element) {
+    return element.classList.contains('open')
+        || element.classList.contains('active')
+        || (element.style.display && element.style.display !== 'none');
 }
 
 function renderNotificationCenter() {
@@ -418,12 +434,42 @@ export function initToast() {
     const notificationsMenu = document.getElementById('nav-notifications-menu');
     const clearArchived = document.getElementById('nav-notifications-clear');
     if (notifications && notificationsButton && notificationsMenu) {
+        const navBar = notificationsButton.closest('.top-nav-bar');
+        const setMenuOpen = (open) => {
+            if (!open) {
+                closeNotificationMenu();
+                return;
+            }
+            notificationsMenu.hidden = !open;
+            notificationsButton.setAttribute('aria-expanded', String(open));
+            // Class fallback for the nav z-index elevation: :has() is not
+            // supported on older WebKit builds (e.g. macOS 13–14.1 via wry).
+            navBar?.classList.toggle('nav-notifications-open', open);
+        };
         notificationsButton.addEventListener('click', (event) => {
             event.stopPropagation();
             const open = notificationsMenu.hidden;
-            notificationsMenu.hidden = !open;
-            notificationsButton.setAttribute('aria-expanded', String(open));
+            setMenuOpen(open);
             if (open) renderNotificationCenter();
+        });
+        const modalObserver = new MutationObserver((records) => {
+            const modalOpened = records.some(record => {
+                const candidates = [record.target, ...record.addedNodes];
+                return candidates.some(candidate => {
+                    const element = candidate instanceof Element ? candidate : null;
+                    const target = element?.matches('.modal-overlay')
+                        ? element
+                        : element?.closest('.modal-overlay');
+                    return target && isOpenModalOverlay(target);
+                });
+            });
+            if (modalOpened) setMenuOpen(false);
+        });
+        modalObserver.observe(document.body, {
+            subtree: true,
+            attributes: true,
+            childList: true,
+            attributeFilter: ['class', 'style', 'aria-hidden', 'inert'],
         });
         clearArchived?.addEventListener('click', clearArchivedNotifications);
         notificationsMenu.querySelectorAll('[data-notification-tab]').forEach(tab => {
@@ -434,14 +480,12 @@ export function initToast() {
         });
         document.addEventListener('click', (event) => {
             if (!notifications.contains(event.target)) {
-                notificationsMenu.hidden = true;
-                notificationsButton.setAttribute('aria-expanded', 'false');
+                setMenuOpen(false);
             }
         });
         document.addEventListener('keydown', (event) => {
             if (event.key === 'Escape' && !notificationsMenu.hidden) {
-                notificationsMenu.hidden = true;
-                notificationsButton.setAttribute('aria-expanded', 'false');
+                setMenuOpen(false);
                 notificationsButton.focus();
             }
         });

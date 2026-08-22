@@ -892,7 +892,7 @@ Returns the latest available release version (cached, fetched from GitHub). Used
 Download and install a llama.cpp release binary.
 
 ```json
-// Request (optional backend override)
+// Request (optional backend override; CUDA overrides are for Windows release archives)
 { "backend": "cuda13" }
 
 // Response
@@ -900,7 +900,8 @@ Download and install a llama.cpp release binary.
 ```
 
 - Requires: `api-token`
-- Copies the full release archive (not just `llama-server`) to `~/.config/llama-monitor/bin/` — CUDA/Vulkan/SYCL builds require their shared libraries to be co-located
+- Copies the full release archive (not just `llama-server`) to `~/.config/llama-monitor/bin/` — CUDA/Vulkan/SYCL/OpenVINO builds require their shared libraries to be co-located
+- On Linux and Windows, the backend selector includes the generic CPU fallback plus llama.cpp accelerator archives. OpenVINO is an Intel CPU/GPU/NPU backend; SYCL/oneAPI is the Intel GPU path, including supported integrated GPUs. The selector does not install host drivers or probe container device passthrough.
 - All extracted files get `chmod 755` on Unix
 - Default install path: `~/.config/llama-monitor/bin/llama-server` (configurable in Settings)
 

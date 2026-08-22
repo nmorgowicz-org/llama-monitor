@@ -2219,12 +2219,24 @@ Return current platform and backend information.
   gate local configure actions. This does not prohibit attaching to a remote endpoint.
 
 ### `GET /api/llama-binary/latest`
-Return the latest available llama.cpp release.
+Return the latest installable nightly (`b<digits>`) llama.cpp release for the
+current platform.
 
 - Auth: `api-token`.
+- Metadata-only versioned releases (e.g. `v0.2.0`, which ships only
+  `nightly-tag.txt`) are skipped.
+- Successful responses are cached for 30 minutes; error responses are not
+  cached, so a nightly published after an error is visible on the next poll.
 
 ### `GET /api/llama-binary/releases`
-Return a list of recent llama.cpp releases.
+Return recent llama.cpp releases, newest first by GitHub publication timestamp. Each item includes:
+
+- `installable` — a binary asset exists for the current platform's default backend (the backend the version picker installs with).
+- `has_binaries` — the release publishes at least one binary archive, as opposed to metadata-only versioned releases. When `installable` is false and `has_binaries` is true, no build exists for this platform.
+
+When the newest-8 window contains no versioned (stable) release, the latest
+stable release is appended with `stable: true` so the UI can pin it below the
+window.
 
 - Auth: `api-token`.
 
@@ -2237,7 +2249,9 @@ Return the currently installed llama-server binary version.
 Download and install a specific llama.cpp release.
 
 - Auth: `api-token`.
-- Request: `{ "version": "b5700", "backend": "metal" }`
+- Request: `{ "tag": "b5700", "backend": "metal" }` — `tag` selects a specific
+  release; omit it to auto-select the newest release that ships an asset for
+  the requested `backend` (the platform default when `backend` is omitted).
 - Behavior:
   - Downloads release archive to `bin/`.
   - Applies `chmod 755` on Unix.

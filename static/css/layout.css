@@ -807,6 +807,15 @@
   overflow: visible;
 }
 
+/* A child z-index cannot escape the sticky nav's stacking context. Elevate
+ * that context only while the notification menu is open so it stays above
+ * setup content without competing with modal overlays. The class selector is
+ * a fallback for WebKit builds without :has() support (macOS 13–14.1). */
+.top-nav-bar:has(.nav-notifications-btn[aria-expanded="true"]),
+.top-nav-bar.nav-notifications-open {
+  z-index: 400;
+}
+
 .top-nav-bar::after,
 .nav-cockpit::after,
 .sidebar-nav::before {
@@ -2442,10 +2451,17 @@ body.sidebar-collapsed .content-area {
 .endpoint-health-strip,
 .top-nav-bar {
   max-height: 200px;
-  overflow: hidden;
   opacity: 1;
   transition: max-height 0.28s cubic-bezier(0.4, 0, 0.2, 1),
               opacity 0.22s ease;
+}
+
+.endpoint-health-strip {
+  overflow: hidden;
+}
+
+.top-nav-bar {
+  overflow: visible;
 }
 
 body.chat-focus-mode .endpoint-health-strip,
@@ -2458,6 +2474,10 @@ body.chat-focus-mode .top-nav-bar {
   border-bottom-width: 0;
   opacity: 0;
   pointer-events: none;
+}
+
+body.chat-focus-mode .top-nav-bar {
+  overflow: hidden;
 }
 
 body.chat-focus-mode .sidebar-nav {

@@ -7,14 +7,61 @@ use crate::config::AppConfig;
 use crate::inference::launch::launch_local;
 use crate::inference::llama_cpp::ServerConfig;
 use crate::llama::llama_cpp_downloader::{
-    ReleaseQuery, cleanup_old_binaries, download_and_extract, get_release_by_tag, list_releases,
-    select_assets,
+    LlamaCppRelease, ReleaseQuery, cleanup_old_binaries, download_and_extract,
+    get_latest_stable_release, get_release_by_tag, list_releases, release_has_binary_assets,
+    select_assets_for_os, sort_releases_by_published_at,
 };
 use crate::llama::server::{start_server, stop_server};
 use crate::state::AppState;
 use crate::web::safe_json_body;
 
 use super::{ApiCtx, ApiRoute, box_reply, check_api_token, unauthorized_api_token};
+
+fn default_backend_for_os(os: &str) -> &'static str {
+    match os {
+        "macos" => "metal",
+        "linux" => "cpu",
+        _ => "avx2",
+    }
+}
+
+fn normalized_arch(arch: &str) -> &str {
+    match arch {
+        "aarch64" => "arm64",
+        "x86_64" => "x64",
+        other => other,
+    }
+}
+
+/// True when the release publishes an asset for the given backend and arch
+/// that also matches the given OS.
+fn release_has_matching_assets(
+    release: &LlamaCppRelease,
+    backend: &str,
+    arch: &str,
+    os: &str,
+) -> bool {
+    !select_assets_for_os(release, backend, arch, os).is_empty()
+}
+
+/// True when the release can be installed on the current machine with the
+/// platform's default backend — the backend the updater UI installs with.
+fn release_is_installable(release: &LlamaCppRelease) -> bool {
+    let os = std::env::consts::OS;
+    release_has_matching_assets(
+        release,
+        default_backend_for_os(os),
+        normalized_arch(std::env::consts::ARCH),
+        os,
+    )
+}
+
+/// True for versioned (stable) tags such as `v0.2.0`, as opposed to nightly
+/// build tags like `b10576`.
+fn is_versioned_tag(tag: &str) -> bool {
+    tag.strip_prefix('v')
+        .is_some_and(|rest| rest.chars().next().is_some_and(|c| c.is_ascii_digit()))
+}
 
 pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
     let state = ctx.state;
@@ -156,7 +203,7 @@ fn api_llama_binary_latest(
                     }
                 };
 
-                let url = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest";
+                let url = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=20";
                 let resp = match client.get(url).send().await {
                     Ok(r) => r,
                     Err(e) => {
@@ -177,7 +224,7 @@ fn api_llama_binary_latest(
                     ));
                 }
 
-                let release: serde_json::Value = match resp.json().await {
+                let mut releases: Vec<LlamaCppRelease> = match resp.json().await {
                     Ok(v) => v,
                     Err(e) => {
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -188,25 +235,43 @@ fn api_llama_binary_latest(
                     }
                 };
 
-                let tag = release["tag_name"].as_str().unwrap_or("").to_string();
-                let published_at = release["published_at"].as_str().unwrap_or("").to_string();
-                let asset_names: Vec<String> = release["assets"]
-                    .as_array()
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|a| a["name"].as_str().map(str::to_string))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let any_releases = !releases.is_empty();
+                sort_releases_by_published_at(&mut releases);
+                let release = releases.into_iter().find(|release| {
+                    release
+                        .tag_name
+                        .strip_prefix('b')
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .is_some()
+                        && release_is_installable(release)
+                });
 
-                // Parse build number from tag like "b4567"
-                let build_num: Option<u64> = tag.trim_start_matches('b').parse().ok();
+                let Some(release) = release else {
+                    // Deliberately not cached: a nightly published after this
+                    // response should be visible on the next poll instead of
+                    // being hidden for 30 minutes.
+                    let error = if any_releases {
+                        "No installable nightly llama.cpp release found for this platform"
+                    } else {
+                        "No llama.cpp releases found on GitHub"
+                    };
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "error": error })),
+                    ));
+                };
+
+                let tag = release.tag_name;
+                let build_num: Option<u64> =
+                    tag.strip_prefix('b').and_then(|value| value.parse().ok());
+                let asset_names: Vec<String> =
+                    release.assets.into_iter().map(|asset| asset.name).collect();
 
                 let result = serde_json::json!({
                     "tag": tag,
                     "build": build_num,
                     "assets": asset_names,
-                    "published_at": published_at
+                    "published_at": release.published_at,
+                    "installable": true,
                 });
 
                 // Store in cache
@@ -270,21 +335,43 @@ fn api_llama_binary_releases(
                 };
 
                 match list_releases(&client).await {
-                    Ok(releases) => {
-                        let items: Vec<serde_json::Value> = releases
-                            .into_iter()
-                            .take(8)
-                            .map(|r| {
-                                let build: Option<u64> =
-                                    r.tag_name.trim_start_matches('b').parse().ok();
-                                serde_json::json!({
-                                    "tag": r.tag_name,
-                                    "build": build,
-                                    "published_at": r.published_at,
-                                    "body": r.body,
-                                })
+                    Ok(mut releases) => {
+                        sort_releases_by_published_at(&mut releases);
+                        let window: Vec<LlamaCppRelease> = releases.into_iter().take(8).collect();
+
+                        // Keep the latest versioned (stable) release visible even once it
+                        // ages out of the newest-8 window; the UI pins it below the
+                        // window so its release notes stay reachable.
+                        let pinned_stable = if window.iter().any(|r| is_versioned_tag(&r.tag_name))
+                        {
+                            None
+                        } else {
+                            get_latest_stable_release(&client)
+                                .await
+                                .ok()
+                                .filter(|release| is_versioned_tag(&release.tag_name))
+                        };
+
+                        let release_item = |r: &LlamaCppRelease| {
+                            let build: Option<u64> =
+                                r.tag_name.trim_start_matches('b').parse().ok();
+                            serde_json::json!({
+                                "tag": r.tag_name,
+                                "build": build,
+                                "published_at": r.published_at,
+                                "body": r.body,
+                                "installable": release_is_installable(r),
+                                "has_binaries": release_has_binary_assets(r),
                             })
-                            .collect();
+                        };
+
+                        let mut items: Vec<serde_json::Value> =
+                            window.iter().map(release_item).collect();
+                        if let Some(stable) = &pinned_stable {
+                            let mut item = release_item(stable);
+                            item["stable"] = serde_json::json!(true);
+                            items.push(item);
+                        }
                         let result = serde_json::json!({ "releases": items });
                         {
                             let mut guard = RELEASES_CACHE.lock().await;
@@ -362,6 +449,8 @@ fn api_llama_binary_release(
                             "build": build,
                             "published_at": release.published_at,
                             "body": release.body,
+                            "installable": release_is_installable(&release),
+                            "has_binaries": release_has_binary_assets(&release),
                         });
                         {
                             let mut guard = RELEASE_SINGLE_CACHE.lock().await;
@@ -406,11 +495,7 @@ fn api_llama_binary_platform_info(
                 };
 
                 // The backend this machine will auto-select on download
-                let auto_backend = match os {
-                    "macos"   => "metal",
-                    "linux"   => "cpu",
-                    _         => "avx2",  // Windows default
-                };
+                let auto_backend = default_backend_for_os(os);
 
                 // Human-readable label shown before the download button
                 let label = match (os, arch) {
@@ -435,28 +520,34 @@ fn api_llama_binary_platform_info(
                         serde_json::json!({
                             "id": "vulkan",
                             "label": "Vulkan — AMD / Intel / NVIDIA",
-                            "note": "Best for AMD Radeon or Intel Arc. Also works on NVIDIA without CUDA.",
+                    "note": "Cross-vendor GPU acceleration via Vulkan; includes many AMD integrated GPUs when the Vulkan driver is available.",
                             "recommended": false
                         }),
                         serde_json::json!({
                             "id": "cuda12",
-                            "label": "CUDA 12.x — NVIDIA RTX 20/30/40 series",
-                            "note": "Requires CUDA 12.x runtime. Typical for GTX 10xx through RTX 40xx.",
+                            "label": "CUDA 12.x — NVIDIA GPU",
+                            "note": "Requires a compatible CUDA 12.x runtime and NVIDIA driver.",
                             "recommended": false
                         }),
                         serde_json::json!({
                             "id": "cuda13",
-                            "label": "CUDA 13.x — NVIDIA RTX 50 series (Blackwell)",
-                            "note": "Requires CUDA 13.x runtime. For RTX 5070, 5080, 5090.",
+                            "label": "CUDA 13.x — NVIDIA GPU (Turing and newer)",
+                            "note": "Requires a compatible CUDA 13.x runtime and NVIDIA driver; Maxwell, Pascal, and Volta are not supported.",
                             "recommended": false
                         }),
-                        serde_json::json!({
-                            "id": "sycl",
-                            "label": "SYCL / oneAPI — Intel Arc & Xe GPUs",
-                            "note": "Requires Intel oneAPI runtime. For Arc A-series and Xe-HPC.",
-                            "recommended": false
-                        }),
-                    ],
+                serde_json::json!({
+                    "id": "sycl",
+                    "label": "SYCL / oneAPI — Intel Arc & Xe GPUs",
+                    "note": "Requires Intel oneAPI runtime. For Arc A-series and Xe-HPC.",
+                    "recommended": false
+                }),
+                serde_json::json!({
+                    "id": "openvino",
+                    "label": "OpenVINO — Intel CPU / GPU / NPU",
+                    "note": "Requires the Intel OpenVINO runtime; GPU/NPU use also requires the device to be available to this system.",
+                    "recommended": false
+                }),
+            ],
                     "linux" => vec![
                         serde_json::json!({
                             "id": "cpu",
@@ -464,25 +555,31 @@ fn api_llama_binary_platform_info(
                             "note": "No GPU driver required.",
                             "recommended": false
                         }),
-                        serde_json::json!({
-                            "id": "cuda12",
-                            "label": "CUDA 12.x — NVIDIA GPU",
-                            "note": "Requires NVIDIA CUDA 12.x runtime.",
-                            "recommended": false
-                        }),
-                        serde_json::json!({
-                            "id": "vulkan",
-                            "label": "Vulkan — AMD / Intel / NVIDIA",
-                            "note": "GPU acceleration via Vulkan driver.",
-                            "recommended": false
-                        }),
-                        serde_json::json!({
-                            "id": "rocm",
-                            "label": "ROCm — AMD GPU",
-                            "note": "Requires AMD ROCm runtime.",
-                            "recommended": false
-                        }),
-                    ],
+                serde_json::json!({
+                    "id": "vulkan",
+                    "label": "Vulkan — AMD / Intel / NVIDIA",
+                    "note": "Cross-vendor GPU acceleration via Vulkan; includes many AMD integrated GPUs when the Vulkan driver is available.",
+                    "recommended": false
+                }),
+                serde_json::json!({
+                    "id": "rocm",
+                    "label": "ROCm — AMD GPU",
+                    "note": "Requires the AMD ROCm runtime and a supported AMD GPU.",
+                    "recommended": false
+                }),
+                serde_json::json!({
+                    "id": "sycl",
+                    "label": "SYCL / oneAPI — Intel GPU",
+                    "note": "Requires Intel oneAPI runtime.",
+                    "recommended": false
+                }),
+                serde_json::json!({
+                    "id": "openvino",
+                    "label": "OpenVINO — Intel CPU / GPU / NPU",
+                    "note": "Requires the Intel OpenVINO runtime; GPU/NPU use also requires the device to be available to this system.",
+                    "recommended": false
+                }),
+            ],
                     // macOS: Metal only — no choice needed
                     _ => vec![
                         serde_json::json!({
@@ -587,11 +684,7 @@ fn api_llama_binary_update(
 
                 // Caller may override the backend (e.g. "cuda13" on Windows).
                 // Fall back to the platform default if not provided.
-                let default_backend = match os {
-                    "macos" => "metal",
-                    "linux" => "cpu",
-                    _ => "avx2",
-                };
+                let default_backend = default_backend_for_os(os);
                 let backend_owned: String = _body
                     .get("backend")
                     .and_then(|v| v.as_str())
@@ -643,6 +736,8 @@ fn api_llama_binary_update(
                         }
                     };
 
+                sort_releases_by_published_at(&mut releases);
+
                 if releases.is_empty() {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
@@ -665,12 +760,31 @@ fn api_llama_binary_update(
                         }
                     }
                 } else {
-                    releases.remove(0)
+                    // Auto-select the newest release that actually ships an
+                    // asset for the backend we are about to install with, so a
+                    // non-default backend never lands on a release it cannot use.
+                    match releases
+                        .into_iter()
+                        .find(|r| release_has_matching_assets(r, backend, arch_str, os))
+                    {
+                        Some(release) => release,
+                        None => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": format!(
+                                        "No llama.cpp release found with a {} asset for OS={} arch={}",
+                                        backend, os, arch_str
+                                    )
+                                })),
+                            ));
+                        }
+                    }
                 };
                 let tag = release.tag_name.clone();
 
                 let assets =
-                    select_assets(&release, backend, arch_str);
+                    select_assets_for_os(&release, backend, arch_str, os);
 
                 if assets.is_empty() {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -1176,6 +1290,40 @@ fn api_llama_restart(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn is_versioned_tag_distinguishes_stable_and_nightly_tags() {
+        assert!(is_versioned_tag("v0.2.0"));
+        assert!(is_versioned_tag("v1.10.3"));
+        assert!(!is_versioned_tag("b10576"));
+        assert!(!is_versioned_tag("nightly-20260822"));
+        assert!(!is_versioned_tag("v-next"));
+    }
+
+    #[test]
+    fn release_has_matching_assets_requires_backend_arch_and_os() {
+        let release = LlamaCppRelease {
+            tag_name: "b6000".into(),
+            assets: vec![crate::llama::llama_cpp_downloader::LlamaCppAsset {
+                name: "llama-b6000-bin-ubuntu-cuda-12.4-x64.tar.gz".into(),
+                browser_download_url: "https://example.com/cuda".into(),
+            }],
+            published_at: String::new(),
+            body: String::new(),
+        };
+        assert!(release_has_matching_assets(
+            &release, "cuda12", "x64", "linux"
+        ));
+        assert!(!release_has_matching_assets(
+            &release, "cpu", "x64", "linux"
+        ));
+        assert!(!release_has_matching_assets(
+            &release, "cuda12", "x64", "windows"
+        ));
+        assert!(!release_has_matching_assets(
+            &release, "cuda12", "arm64", "linux"
+        ));
+    }
 
     #[test]
     fn llama_update_does_not_restart_rapid_mlx_backend() {

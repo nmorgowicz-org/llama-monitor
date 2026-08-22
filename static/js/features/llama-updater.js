@@ -165,20 +165,26 @@ async function loadReleaseList() {
     const data = await fetchReleaseList('/api/llama-binary/releases');
     if (data.error) throw new Error(data.error);
 
-    const releases = data.releases ?? [];
+    const releases = sortReleasesChronologically(data.releases ?? []);
     if (!releases.length) {
       listEl.innerHTML = '<div class="llama-version-loading">No releases found.</div>';
       return;
     }
 
     listEl.innerHTML = '';
-    releases.forEach((r, i) => {
-      const row = buildReleaseRow(r, i === 0);
+    // The API may append the latest versioned (stable) release flagged
+    // `stable: true` once it ages out of the newest-8 window; render it as a
+    // pinned row below the window, after the installed-build pin.
+    const pinnedStable = releases.find(r => r.stable === true);
+    const windowReleases = releases.filter(r => r.stable !== true);
+    const latestInstallableIndex = windowReleases.findIndex(r => r.installable !== false);
+    windowReleases.forEach((r, i) => {
+      const row = buildReleaseRow(r, i === latestInstallableIndex);
       listEl.appendChild(row);
     });
 
     // If the installed build is older than the 8-release window, pin it at the bottom
-    if (_currentBuild && !releases.some(r => r.build === _currentBuild)) {
+    if (_currentBuild && !windowReleases.some(r => r.build === _currentBuild)) {
       const sep = document.createElement('div');
       sep.className = 'llama-version-pinned-sep';
       sep.textContent = '— installed —';
@@ -189,8 +195,18 @@ async function loadReleaseList() {
       listEl.appendChild(pinnedRow);
     }
 
+    // Pin the latest versioned (stable) release so its release notes remain
+    // reachable after it leaves the newest-8 window.
+    if (pinnedStable) {
+      const sep = document.createElement('div');
+      sep.className = 'llama-version-pinned-sep';
+      sep.textContent = '— stable —';
+      listEl.appendChild(sep);
+      listEl.appendChild(buildReleaseRow(pinnedStable, false));
+    }
+
     // Auto-select the latest release to show notes on open
-    if (releases.length > 0) showReleaseNotes(releases[0]);
+    if (windowReleases.length > 0) showReleaseNotes(windowReleases[0]);
   } catch (err) {
     listEl.textContent = '';
     const errEl = document.createElement('div');
@@ -226,9 +242,9 @@ function showReleaseNotes(release) {
   if (release.body && release.body.trim()) {
     let html;
     if (typeof marked !== 'undefined') {
-      html = marked.parse(release.body);
+      html = marked.parse(normalizeReleaseNotes(release.body));
     } else {
-      html = release.body.replace(/\n/g, '<br>');
+      html = normalizeReleaseNotes(release.body).replace(/\n/g, '<br>');
     }
     html = linkPrRefs(html);
     // eslint-disable-next-line no-unsanitized/property
@@ -240,8 +256,23 @@ function showReleaseNotes(release) {
   }
 }
 
+/**
+ * GitHub's versioned llama.cpp releases publish changelog entries as bare
+ * commit lines, unlike nightly releases which use Markdown list items. Add
+ * list markers to those commit lines so the notes pane does not collapse the
+ * entire changelog into one paragraph. Existing Markdown lists are left
+ * untouched.
+ */
+function normalizeReleaseNotes(body) {
+  return body.replace(
+    /^(?!\s*[-*+]\s)([0-9a-f]{7,40}\s+.+)$/gim,
+    '- $1',
+  );
+}
+
 function buildReleaseRow(release, isLatest) {
   const isCurrent = _currentBuild !== null && release.build === _currentBuild;
+  const isInstallable = release.installable !== false;
   const age = release.published_at ? relativeAge(release.published_at) : '';
   const tag = release.tag ?? `b${release.build}`;
 
@@ -265,7 +296,7 @@ function buildReleaseRow(release, isLatest) {
   const badges = buildReleaseBadges({
     wrapperClass: 'llama-version-row-badges',
     badgeClass: 'llama-version-badge',
-    isLatest,
+    isLatest: isLatest && isInstallable,
     isCurrent,
   });
 
@@ -279,7 +310,7 @@ function buildReleaseRow(release, isLatest) {
   right.className = 'llama-version-row-right';
   right.appendChild(meta);
 
-  if (!isCurrent) {
+  if (!isCurrent && isInstallable) {
     const btn = document.createElement('button');
     btn.className = 'llama-version-install-btn';
     btn.textContent = 'Install';
@@ -287,6 +318,11 @@ function buildReleaseRow(release, isLatest) {
     btn.dataset.build = release.build ?? '';
     btn.addEventListener('click', () => installRelease(btn, release));
     right.appendChild(btn);
+  } else if (!isInstallable) {
+    const notesOnly = document.createElement('span');
+    notesOnly.className = 'llama-version-badge llama-version-badge--notes';
+    notesOnly.textContent = release.has_binaries ? 'No build for your platform' : 'Notes only';
+    right.appendChild(notesOnly);
   }
 
   row.append(info, right);
@@ -433,4 +469,13 @@ function relativeAge(iso) {
   if (days < 30)  return `${days}d ago`;
   const months = Math.floor(days / 30);
   return `${months}mo ago`;
+}
+
+function sortReleasesChronologically(releases) {
+  return [...releases].sort((left, right) => {
+    const leftTime = Date.parse(left.published_at || '') || 0;
+    const rightTime = Date.parse(right.published_at || '') || 0;
+    return rightTime - leftTime
+      || String(right.tag || '').localeCompare(String(left.tag || ''));
+  });
 }
