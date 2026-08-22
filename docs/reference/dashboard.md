@@ -122,7 +122,7 @@ A pill in the top navigation bar displays the currently installed build number i
 
 ### Version modal
 
-Clicking the pill opens a version modal that lists the last 8 `llama.cpp` releases. Each row shows the tag, a relative age, and badges for **latest** and **installed**. The currently installed build is pinned at the bottom of the list when it is older than the 8-release window.
+Clicking the pill opens a version modal that lists the last 8 `llama.cpp` releases. Each row shows the tag, a relative age, and badges for **latest** and **installed**. Releases without an installable build for this platform are marked **Notes only** (metadata-only versioned releases) or **No build for your platform** (the release ships binaries, but none for this OS/arch), and they offer no install button. The currently installed build is pinned at the bottom of the list when it is older than the 8-release window; once the latest versioned (stable) release ages out of the window, it is pinned below it so its release notes stay reachable.
 
 Clicking any row displays that release's notes in a side pane. The **Install** button is shown for every non-current release; clicking it downloads, validates, and promotes a new `llama-server` binary. During installation the pill displays `Installing…` with a live timer. On success the running llama-server is restarted automatically to pick up the new binary.
 

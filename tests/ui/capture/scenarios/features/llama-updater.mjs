@@ -46,6 +46,9 @@ export default async function(ctx, options) {
 
     // Versioned releases publish bare commit lines; keep a regression capture
     // proving those lines render as a readable list rather than one paragraph.
+    // The modal pins the latest versioned (stable) release even when it has
+    // aged out of the newest-8 window, so this check stays active as
+    // nightlies publish on top of it.
     const stableTag = await page.evaluate(() => {
         const stableRow = [...document.querySelectorAll('.llama-version-row')].find(row =>
             /^v\d+\.\d+\.\d+$/.test(row.dataset.tag || '')
@@ -53,29 +56,40 @@ export default async function(ctx, options) {
         if (stableRow) stableRow.click();
         return stableRow?.dataset.tag || '';
     });
-    if (stableTag) {
-        await sleep(800);
-        const stableNotes = await page.evaluate(() => ({
-            tag: document.getElementById('llama-version-notes-tag')?.textContent || '',
-            changelogItems: document.querySelectorAll('#llama-version-notes-body li').length,
-        }));
-        const stableRowState = await page.evaluate((tag) => {
-            const row = [...document.querySelectorAll('.llama-version-row')].find(item => item.dataset.tag === tag);
-            return {
-                hasInstallButton: Boolean(row?.querySelector('.llama-version-install-btn')),
-                hasNotesOnlyBadge: row?.textContent.includes('Notes only') || false,
-            };
-        }, stableTag);
-        if (
-            stableNotes.tag !== stableTag ||
-            stableNotes.changelogItems === 0 ||
-            stableRowState.hasInstallButton ||
-            !stableRowState.hasNotesOnlyBadge
-        ) {
-            throw new Error(`Versioned release notes were not rendered as a list: ${stableTag}`);
-        }
-        await captureShot(page, 'llama-updater-stable-release-notes.png', { fullPage: true });
+    if (!stableTag) {
+        throw new Error('Latest versioned (stable) release was not present in the version modal');
     }
+    await sleep(800);
+    const stableNotes = await page.evaluate(() => ({
+        tag: document.getElementById('llama-version-notes-tag')?.textContent || '',
+        changelogItems: document.querySelectorAll('#llama-version-notes-body li').length,
+    }));
+    const stableRowState = await page.evaluate(async (tag) => {
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const response = await fetch('/api/llama-binary/releases', { headers });
+        const data = await response.json();
+        const item = (data.releases ?? []).find(r => r.tag === tag);
+        const row = [...document.querySelectorAll('.llama-version-row')].find(item => item.dataset.tag === tag);
+        return {
+            installable: item?.installable ?? null,
+            hasInstallButton: Boolean(row?.querySelector('.llama-version-install-btn')),
+            hasUnavailableBadge:
+                row?.textContent.includes('Notes only') ||
+                row?.textContent.includes('No build for your platform') ||
+                false,
+        };
+    }, stableTag);
+    if (stableNotes.tag !== stableTag || stableNotes.changelogItems === 0) {
+        throw new Error(`Versioned release notes were not rendered as a list: ${stableTag}`);
+    }
+    if (stableRowState.installable) {
+        if (!stableRowState.hasInstallButton) {
+            throw new Error(`Installable stable release is missing its install button: ${stableTag}`);
+        }
+    } else if (stableRowState.hasInstallButton || !stableRowState.hasUnavailableBadge) {
+        throw new Error(`Stable release row affordances are inconsistent: ${stableTag}`);
+    }
+    await captureShot(page, 'llama-updater-stable-release-notes.png', { fullPage: true });
 
     // Keep the beta/nightly notes capture independent of release ordering.
     await page.evaluate(() => {

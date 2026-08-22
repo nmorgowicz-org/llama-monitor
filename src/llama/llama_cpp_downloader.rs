@@ -79,6 +79,22 @@ pub struct LlamaCppDownloadStatus {
     pub progress: f64,
 }
 
+/// True when a GitHub release asset is a downloadable binary archive rather
+/// than release metadata (`.json`/`.md`/`.txt` files such as `nightly-tag.txt`).
+pub fn is_binary_asset_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    !lower.ends_with(".json") && !lower.ends_with(".md") && !lower.ends_with(".txt")
+}
+
+/// True when the release publishes at least one binary archive, as opposed to
+/// metadata-only versioned releases (e.g. `v0.2.0` ships only `nightly-tag.txt`).
+pub fn release_has_binary_assets(release: &LlamaCppRelease) -> bool {
+    release
+        .assets
+        .iter()
+        .any(|asset| is_binary_asset_name(&asset.name))
+}
+
 /// Fetch a specific release from ggml-org/llama.cpp by tag (e.g. "b9479").
 pub async fn get_release_by_tag(client: &Client, tag: &str) -> Result<LlamaCppRelease> {
     let url = format!(
@@ -103,6 +119,32 @@ pub async fn get_release_by_tag(client: &Client, tag: &str) -> Result<LlamaCppRe
         .json()
         .await
         .context(format!("Failed to parse release JSON for tag {}", tag))?;
+    Ok(release)
+}
+
+/// Fetch the latest non-prerelease (versioned/stable) llama.cpp release.
+///
+/// Nightly builds are published as prereleases, so GitHub's `latest` endpoint
+/// skips them and returns the most recent versioned tag (e.g. `v0.2.0`).
+pub async fn get_latest_stable_release(client: &Client) -> Result<LlamaCppRelease> {
+    let url = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest";
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .context("Failed to fetch latest stable llama.cpp release")?;
+
+    if !resp.status().is_success() {
+        anyhow::bail!(
+            "GitHub API returned {} for latest stable release",
+            resp.status()
+        );
+    }
+
+    let release: LlamaCppRelease = resp
+        .json()
+        .await
+        .context("Failed to parse latest stable release JSON")?;
     Ok(release)
 }
 
@@ -156,7 +198,7 @@ pub fn select_assets<'a>(
         let name = asset.name.to_lowercase();
 
         // Skip non-binary assets.
-        if name.ends_with(".json") || name.ends_with(".md") || name.ends_with(".txt") {
+        if !is_binary_asset_name(&asset.name) {
             continue;
         }
 
@@ -443,6 +485,31 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["b10567", "v0.2.0", "b10549"]
         );
+    }
+
+    #[test]
+    fn test_release_has_binary_assets_distinguishes_metadata_only_releases() {
+        let stable = LlamaCppRelease {
+            tag_name: "v0.2.0".into(),
+            assets: vec![LlamaCppAsset {
+                name: "nightly-tag.txt".into(),
+                browser_download_url: "https://example.com/nightly-tag.txt".into(),
+            }],
+            published_at: String::new(),
+            body: String::new(),
+        };
+        assert!(!release_has_binary_assets(&stable));
+
+        let nightly = LlamaCppRelease {
+            tag_name: "b6000".into(),
+            assets: vec![LlamaCppAsset {
+                name: "llama-b6000-bin-ubuntu-x64.tar.gz".into(),
+                browser_download_url: "https://example.com/linux".into(),
+            }],
+            published_at: String::new(),
+            body: String::new(),
+        };
+        assert!(release_has_binary_assets(&nightly));
     }
 
     #[test]

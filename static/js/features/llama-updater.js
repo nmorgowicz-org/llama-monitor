@@ -172,14 +172,19 @@ async function loadReleaseList() {
     }
 
     listEl.innerHTML = '';
-    const latestInstallableIndex = releases.findIndex(r => r.installable !== false);
-    releases.forEach((r, i) => {
+    // The API may append the latest versioned (stable) release flagged
+    // `stable: true` once it ages out of the newest-8 window; render it as a
+    // pinned row below the window, after the installed-build pin.
+    const pinnedStable = releases.find(r => r.stable === true);
+    const windowReleases = releases.filter(r => r.stable !== true);
+    const latestInstallableIndex = windowReleases.findIndex(r => r.installable !== false);
+    windowReleases.forEach((r, i) => {
       const row = buildReleaseRow(r, i === latestInstallableIndex);
       listEl.appendChild(row);
     });
 
     // If the installed build is older than the 8-release window, pin it at the bottom
-    if (_currentBuild && !releases.some(r => r.build === _currentBuild)) {
+    if (_currentBuild && !windowReleases.some(r => r.build === _currentBuild)) {
       const sep = document.createElement('div');
       sep.className = 'llama-version-pinned-sep';
       sep.textContent = '— installed —';
@@ -190,8 +195,18 @@ async function loadReleaseList() {
       listEl.appendChild(pinnedRow);
     }
 
+    // Pin the latest versioned (stable) release so its release notes remain
+    // reachable after it leaves the newest-8 window.
+    if (pinnedStable) {
+      const sep = document.createElement('div');
+      sep.className = 'llama-version-pinned-sep';
+      sep.textContent = '— stable —';
+      listEl.appendChild(sep);
+      listEl.appendChild(buildReleaseRow(pinnedStable, false));
+    }
+
     // Auto-select the latest release to show notes on open
-    if (releases.length > 0) showReleaseNotes(releases[0]);
+    if (windowReleases.length > 0) showReleaseNotes(windowReleases[0]);
   } catch (err) {
     listEl.textContent = '';
     const errEl = document.createElement('div');
@@ -306,7 +321,7 @@ function buildReleaseRow(release, isLatest) {
   } else if (!isInstallable) {
     const notesOnly = document.createElement('span');
     notesOnly.className = 'llama-version-badge llama-version-badge--notes';
-    notesOnly.textContent = 'Notes only';
+    notesOnly.textContent = release.has_binaries ? 'No build for your platform' : 'Notes only';
     right.appendChild(notesOnly);
   }
 
