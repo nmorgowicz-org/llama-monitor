@@ -9,7 +9,13 @@ use tokio::io::AsyncWriteExt;
 
 fn backend_matches(name: &str, backend: &str) -> bool {
     match backend {
-        "cpu" => name.contains("cpu") || name.contains("base") || name.contains("avx2"),
+        "cpu" => {
+            name.contains("cpu")
+                || name.contains("base")
+                || name.contains("avx2")
+                || name.contains("ubuntu")
+                || name.contains("linux")
+        }
         "avx2" => name.contains("avx2") || name.contains("cpu") || name.contains("base"),
         "cuda" => name.contains("cuda"),
         "cuda12" => {
@@ -466,6 +472,22 @@ mod tests {
         };
 
         assert!(select_assets(&release, "metal", "arm64").is_empty());
+    }
+
+    #[test]
+    fn test_select_assets_cpu_linux_x64() {
+        let release = LlamaCppRelease {
+            tag_name: "b6000".into(),
+            assets: vec![LlamaCppAsset {
+                name: "llama-b6000-bin-ubuntu-x64.tar.gz".into(),
+                browser_download_url: "https://example.com/linux".into(),
+            }],
+            published_at: String::new(),
+            body: String::new(),
+        };
+
+        let selected = select_assets(&release, "cpu", "x64");
+        assert_eq!(selected.len(), 1);
     }
 
     #[test]
