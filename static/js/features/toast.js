@@ -418,11 +418,18 @@ export function initToast() {
     const notificationsMenu = document.getElementById('nav-notifications-menu');
     const clearArchived = document.getElementById('nav-notifications-clear');
     if (notifications && notificationsButton && notificationsMenu) {
+        const navBar = notificationsButton.closest('.top-nav-bar');
+        const setMenuOpen = (open) => {
+            notificationsMenu.hidden = !open;
+            notificationsButton.setAttribute('aria-expanded', String(open));
+            // Class fallback for the nav z-index elevation: :has() is not
+            // supported on older WebKit builds (e.g. macOS 13–14.1 via wry).
+            navBar?.classList.toggle('nav-notifications-open', open);
+        };
         notificationsButton.addEventListener('click', (event) => {
             event.stopPropagation();
             const open = notificationsMenu.hidden;
-            notificationsMenu.hidden = !open;
-            notificationsButton.setAttribute('aria-expanded', String(open));
+            setMenuOpen(open);
             if (open) renderNotificationCenter();
         });
         clearArchived?.addEventListener('click', clearArchivedNotifications);
@@ -434,14 +441,12 @@ export function initToast() {
         });
         document.addEventListener('click', (event) => {
             if (!notifications.contains(event.target)) {
-                notificationsMenu.hidden = true;
-                notificationsButton.setAttribute('aria-expanded', 'false');
+                setMenuOpen(false);
             }
         });
         document.addEventListener('keydown', (event) => {
             if (event.key === 'Escape' && !notificationsMenu.hidden) {
-                notificationsMenu.hidden = true;
-                notificationsButton.setAttribute('aria-expanded', 'false');
+                setMenuOpen(false);
                 notificationsButton.focus();
             }
         });

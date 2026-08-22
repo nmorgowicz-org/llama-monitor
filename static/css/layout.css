@@ -809,8 +809,10 @@
 
 /* A child z-index cannot escape the sticky nav's stacking context. Elevate
  * that context only while the notification menu is open so it stays above
- * setup content without competing with modal overlays. */
-.top-nav-bar:has(.nav-notifications-btn[aria-expanded="true"]) {
+ * setup content without competing with modal overlays. The class selector is
+ * a fallback for WebKit builds without :has() support (macOS 13–14.1). */
+.top-nav-bar:has(.nav-notifications-btn[aria-expanded="true"]),
+.top-nav-bar.nav-notifications-open {
   z-index: 600;
 }
 
