@@ -90,6 +90,8 @@ export default async function(ctx, options) {
         expandSelector: '#nav-notifications-menu',
     });
     await page.keyboard.press('Escape');
+    await page.evaluate(() => localStorage.removeItem('llama-monitor-notifications'));
+    await page.reload({ waitUntil: 'networkidle0' });
     await sleep(250);
 
     // Shot 3: verify the backend-specific Rapid-MLX attach fields in place.

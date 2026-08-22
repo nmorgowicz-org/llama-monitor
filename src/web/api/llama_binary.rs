@@ -16,18 +16,49 @@ use crate::web::safe_json_body;
 
 use super::{ApiCtx, ApiRoute, box_reply, check_api_token, unauthorized_api_token};
 
-fn release_is_installable(release: &LlamaCppRelease) -> bool {
-    let backend = match std::env::consts::OS {
+fn default_backend_for_os(os: &str) -> &'static str {
+    match os {
         "macos" => "metal",
         "linux" => "cpu",
         _ => "avx2",
-    };
-    let arch = match std::env::consts::ARCH {
+    }
+}
+
+fn normalized_arch(arch: &str) -> &str {
+    match arch {
         "aarch64" => "arm64",
         "x86_64" => "x64",
         other => other,
-    };
-    !select_assets(release, backend, arch).is_empty()
+    }
+}
+
+fn selectable_backends_for_os(os: &str) -> &'static [&'static str] {
+    match os {
+        "macos" => &["metal"],
+        "linux" => &["cpu", "cuda12", "cuda13", "vulkan", "rocm", "sycl"],
+        "windows" => &["avx2", "vulkan", "cuda12", "cuda13", "sycl", "rocm"],
+        _ => &["cpu"],
+    }
+}
+
+fn asset_matches_os(asset_name: &str, os: &str) -> bool {
+    let name = asset_name.to_ascii_lowercase();
+    match os {
+        "macos" => name.contains("macos") || name.contains("darwin"),
+        "linux" => name.contains("ubuntu") || name.contains("linux"),
+        "windows" => name.contains("win-") || name.contains("windows"),
+        _ => true,
+    }
+}
+
+fn release_is_installable(release: &LlamaCppRelease) -> bool {
+    let os = std::env::consts::OS;
+    let arch = normalized_arch(std::env::consts::ARCH);
+    selectable_backends_for_os(os).iter().any(|backend| {
+        select_assets(release, backend, arch)
+            .iter()
+            .any(|asset| asset_matches_os(&asset.name, os))
+    })
 }
 
 pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
@@ -170,7 +201,7 @@ fn api_llama_binary_latest(
                     }
                 };
 
-                let url = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest";
+                let url = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=20";
                 let resp = match client.get(url).send().await {
                     Ok(r) => r,
                     Err(e) => {
@@ -191,7 +222,7 @@ fn api_llama_binary_latest(
                     ));
                 }
 
-                let release: serde_json::Value = match resp.json().await {
+                let mut releases: Vec<LlamaCppRelease> = match resp.json().await {
                     Ok(v) => v,
                     Err(e) => {
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -202,25 +233,39 @@ fn api_llama_binary_latest(
                     }
                 };
 
-                let tag = release["tag_name"].as_str().unwrap_or("").to_string();
-                let published_at = release["published_at"].as_str().unwrap_or("").to_string();
-                let asset_names: Vec<String> = release["assets"]
-                    .as_array()
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|a| a["name"].as_str().map(str::to_string))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                sort_releases_by_published_at(&mut releases);
+                let release = releases.into_iter().find(|release| {
+                    release
+                        .tag_name
+                        .strip_prefix('b')
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .is_some()
+                        && release_is_installable(release)
+                });
 
-                // Parse build number from tag like "b4567"
-                let build_num: Option<u64> = tag.trim_start_matches('b').parse().ok();
+                let Some(release) = release else {
+                    let result = serde_json::json!({
+                        "error": "No installable nightly llama.cpp release found"
+                    });
+                    let mut guard = LATEST_CACHE.lock().await;
+                    *guard = Some((std::time::Instant::now(), result.clone()));
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&result),
+                    ));
+                };
+
+                let tag = release.tag_name;
+                let build_num: Option<u64> =
+                    tag.strip_prefix('b').and_then(|value| value.parse().ok());
+                let asset_names: Vec<String> =
+                    release.assets.into_iter().map(|asset| asset.name).collect();
 
                 let result = serde_json::json!({
                     "tag": tag,
                     "build": build_num,
                     "assets": asset_names,
-                    "published_at": published_at
+                    "published_at": release.published_at,
+                    "installable": true,
                 });
 
                 // Store in cache
@@ -605,11 +650,7 @@ fn api_llama_binary_update(
 
                 // Caller may override the backend (e.g. "cuda13" on Windows).
                 // Fall back to the platform default if not provided.
-                let default_backend = match os {
-                    "macos" => "metal",
-                    "linux" => "cpu",
-                    _ => "avx2",
-                };
+                let default_backend = default_backend_for_os(os);
                 let backend_owned: String = _body
                     .get("backend")
                     .and_then(|v| v.as_str())
@@ -685,7 +726,17 @@ fn api_llama_binary_update(
                         }
                     }
                 } else {
-                    releases.remove(0)
+                    match releases.into_iter().find(release_is_installable) {
+                        Some(release) => release,
+                        None => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "No installable llama.cpp release found"
+                                })),
+                            ));
+                        }
+                    }
                 };
                 let tag = release.tag_name.clone();
 

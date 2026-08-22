@@ -35,6 +35,14 @@ export default async function(ctx, options) {
     });
     // Wait for release list to populate (real GitHub API call)
     await sleep(2000);
+    const latestRelease = await page.evaluate(async () => {
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const response = await fetch('/api/llama-binary/latest', { headers });
+        return response.json();
+    });
+    if (!/^b\d+$/.test(latestRelease.tag || '') || !Number.isInteger(latestRelease.build)) {
+        throw new Error(`Latest installable release was not a nightly build: ${latestRelease.tag || 'unknown'}`);
+    }
 
     // Versioned releases publish bare commit lines; keep a regression capture
     // proving those lines render as a readable list rather than one paragraph.
